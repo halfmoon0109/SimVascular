@@ -890,8 +890,13 @@ std::vector<std::string> sv4guiMeshEdit::CreateCmdsT()
       cmds.push_back("boundaryLayer "+QString::number(ui->sbLayersT->value()).toStdString()
                        +" "+QString::number(ui->dsbPortionT->value()).toStdString()+" "+QString::number(ui->dsbRatioT->value()).toStdString()+" "+QString::number(useConstantThickness).toStdString());
 
-      int boundaryLayerDirection = ui->checkBoxBoundaryLayerDirection->isChecked();
-      cmds.push_back("option BoundaryLayerDirection "+QString::number(boundaryLayerDirection).toStdString());
+      int boundaryLayerBoth = ui->checkBoxBoundaryLayerBoth->isChecked();
+      cmds.push_back("option BoundaryLayerBoth "+QString::number(boundaryLayerBoth).toStdString());
+      if (!boundaryLayerBoth)
+      {
+        int boundaryLayerDirection = ui->checkBoxBoundaryLayerDirection->isChecked();
+        cmds.push_back("option BoundaryLayerDirection "+QString::number(boundaryLayerDirection).toStdString());
+      }
 
       if (ui->checkBoxConvertBLToNewRegion->isChecked())
       {
@@ -1656,6 +1661,10 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
         else if (flag == "NewRegionBoundaryLayer")
         {
           ui->checkBoxConvertBLToNewRegion->setChecked(true);
+        }
+        else if (flag == "BoundaryLayerBoth")
+        {
+          ui->checkBoxBoundaryLayerBoth->setChecked(true);
         }
         else if (flag == "BoundaryLayerDirection")
         {
