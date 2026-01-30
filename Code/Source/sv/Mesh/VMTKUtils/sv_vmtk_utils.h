@@ -94,6 +94,7 @@ SV_EXPORT_VMTK_UTILS int VMTKUtils_BoundaryLayerMesh(vtkUnstructuredGrid *blMesh
     int innerSurfaceCellEntityId,int negateWarpVectors,
     std::string cellEntityIdsArrayName,
     int useConstantThickness,
+    int includeSurfaceCells,
     std::string layertThicknessArrayName);
 
 SV_EXPORT_VMTK_UTILS int VMTKUtils_AppendData(vtkUnstructuredGrid *meshFromTetGen,

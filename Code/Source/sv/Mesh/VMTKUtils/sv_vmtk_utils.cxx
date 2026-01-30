@@ -1120,7 +1120,7 @@ int VMTKUtils_Capper(vtkPolyData *inpd,int captype,int trioutput,
  */
 int VMTKUtils_BoundaryLayerMesh(vtkUnstructuredGrid *blMesh, vtkUnstructuredGrid *innerSurface, double edgeSize, double blThicknessFactor,
     int numSublayers, double sublayerRatio, int sidewallCellEntityId, int innerSurfaceCellEntityId, int negateWarpVectors,
-    std::string cellEntityIdsArrayName, int useConstantThickness, std::string layerThicknessArrayName)
+    std::string cellEntityIdsArrayName, int useConstantThickness, int includeSurfaceCells, std::string layerThicknessArrayName)
 {
 // needs fixed!!! NMW 2014-08-04
 #ifndef WIN32
@@ -1180,7 +1180,7 @@ int VMTKUtils_BoundaryLayerMesh(vtkUnstructuredGrid *blMesh, vtkUnstructuredGrid
   //1
   layerer->SetInnerSurfaceCellEntityId(innerSurfaceCellEntityId);
   layerer->SetSurfaceCellIdsArrayName("ModelFaceID");
-  layerer->SetIncludeSurfaceCells(1);
+  layerer->SetIncludeSurfaceCells(includeSurfaceCells);
   layerer->SetIncludeSidewallCells(1);
   layerer->SetNumberOfSubsteps(100);
   layerer->Update();

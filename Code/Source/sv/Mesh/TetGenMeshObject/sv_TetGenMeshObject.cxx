@@ -1974,7 +1974,7 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
   auto originalSurface = vtkSmartPointer<vtkPolyData>::New();
   originalSurface->DeepCopy(polydatasolid_);
 
-  auto buildBoundaryLayer = [&](vtkPolyData* inputSurface, int negateWarpVectors,
+  auto buildBoundaryLayer = [&](vtkPolyData* inputSurface, int negateWarpVectors, int includeSurfaceCells,
       vtkSmartPointer<vtkUnstructuredGrid>& boundaryMesh,
       vtkSmartPointer<vtkUnstructuredGrid>& innerSurface,
       vtkSmartPointer<vtkPolyData>& surfaceForVolume,
@@ -2044,7 +2044,7 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
 
     if (VMTKUtils_BoundaryLayerMesh(boundaryMesh, innerSurface, meshoptions_.maxedgesize, meshoptions_.blthicknessfactor,
           meshoptions_.numsublayers, meshoptions_.sublayerratio, sidewallCellEntityId, innerSurfaceCellId, negateWarpVectors,
-          markerListName, useConstantThickness, layerThicknessArrayName) != SV_OK)
+          markerListName, useConstantThickness, includeSurfaceCells, layerThicknessArrayName) != SV_OK)
     {
       fprintf(stderr,"Problem with boundary layer meshing\n");
       return SV_ERROR;
@@ -2089,11 +2089,11 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
     vtkSmartPointer<vtkUnstructuredGrid> innerSurfaceOutside;
     vtkSmartPointer<vtkPolyData> surfaceForVolumeOutside;
 
-    if (buildBoundaryLayer(originalSurface, 1, boundaryMeshInside, innerSurfaceInside, surfaceForVolume, false) != SV_OK) {
+    if (buildBoundaryLayer(originalSurface, 1, 1, boundaryMeshInside, innerSurfaceInside, surfaceForVolume, false) != SV_OK) {
       return SV_ERROR;
     }
 
-    if (buildBoundaryLayer(originalSurface, 0, boundaryMeshOutside, innerSurfaceOutside, surfaceForVolumeOutside, false) != SV_OK) {
+    if (buildBoundaryLayer(originalSurface, 0, 0, boundaryMeshOutside, innerSurfaceOutside, surfaceForVolumeOutside, false) != SV_OK) {
       return SV_ERROR;
     }
 
@@ -2107,7 +2107,7 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
     innerblmesh_ = vtkUnstructuredGrid::New();
     innerblmesh_->DeepCopy(innerSurfaceInside);
   } else {
-    if (buildBoundaryLayer(originalSurface, meshoptions_.boundarylayerdirection, boundaryMeshInside, innerSurfaceInside,
+    if (buildBoundaryLayer(originalSurface, meshoptions_.boundarylayerdirection, 1, boundaryMeshInside, innerSurfaceInside,
           surfaceForVolume, true) != SV_OK) {
       return SV_ERROR;
     }
