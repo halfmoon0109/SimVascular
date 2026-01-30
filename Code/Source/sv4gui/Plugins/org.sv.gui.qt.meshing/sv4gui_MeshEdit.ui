@@ -559,6 +559,13 @@
                     </widget>
                    </item>
                    <item>
+                    <widget class="QCheckBox" name="checkBoxBoundaryLayerBoth">
+                     <property name="text">
+                      <string>Extrude Boundary Layer on Both Sides of Wall</string>
+                     </property>
+                    </widget>
+                   </item>
+                   <item>
                     <widget class="QCheckBox" name="checkBoxConstantThicknessBL">
                      <property name="toolTip">
                       <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If selected, the same boundary layer thickness will be used throughout the entire model. If left unselected, the boundary layer thickness will scale with the local mesh edge size.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
