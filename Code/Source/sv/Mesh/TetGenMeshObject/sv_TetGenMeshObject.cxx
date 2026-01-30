@@ -39,6 +39,7 @@
 #include "sv_tetgenmesh_utils.h"
 
 #include "sv_sys_geom.h"
+#include "vtkAppendFilter.h"
 #include "vtkGeometryFilter.h"
 #include "vtkCleanPolyData.h"
 #include "vtkSmartPointer.h"
@@ -1007,10 +1008,19 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
   else if (!strncmp(flags,"NewRegionBoundaryLayer",22)) {
     meshoptions_.newregionboundarylayer=1;
   }
+  else if (!strncmp(flags,"BoundaryLayerBoth",18)) {
+    if (numValues < 1)
+      return SV_ERROR;
+    if (values[0] != 0) {
+      meshoptions_.boundarylayerdirection=2;
+    }
+  }
   else if (!strncmp(flags,"BoundaryLayerDirection",22)) {
     if (numValues < 1)
       return SV_ERROR;
-    meshoptions_.boundarylayerdirection=values[0];
+    if (meshoptions_.boundarylayerdirection != 2) {
+      meshoptions_.boundarylayerdirection=values[0];
+    }
   }
   else if (!strncmp(flags,"AllowMultipleRegions",20)) {
       meshoptions_.allowMultipleRegions = (int(values[0]) == 1);
@@ -1514,7 +1524,7 @@ int cvTetGenMeshObject::GenerateMesh() {
   // the IDs from the original input model. This is not done for boundary layer
   // meshing extruded outward.
   //
-  if (meshoptions_.boundarylayermeshflag && (meshoptions_.boundarylayerdirection == 1)) { 
+  if (meshoptions_.boundarylayermeshflag && (meshoptions_.boundarylayerdirection != 0)) { 
     if (TGenUtils_ResetOriginalRegions(surfacemesh_ ,originalpolydata_, "ModelFaceID") != SV_OK) {
       std::cout << "Failed to reset original face IDs for boundary layer mesh." << std::endl;
     }
@@ -1961,107 +1971,155 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
   }
   std::cout << "[GenerateBoundaryLayerMesh] markerListName: " << markerListName << std::endl;
 
-  // Clean and convert the polydata to a vtu.
-  //
-  auto normaler = vtkSmartPointer<vtkPolyDataNormals>::New();
-  normaler->SetInputData(polydatasolid_);
-  normaler->SetConsistency(1);
-  normaler->SetAutoOrientNormals(1);
-  normaler->SetFlipNormals(0);
-  normaler->SetComputeCellNormals(0);
-  normaler->SplittingOff();
-  normaler->Update();
+  auto originalSurface = vtkSmartPointer<vtkPolyData>::New();
+  originalSurface->DeepCopy(polydatasolid_);
 
-  auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
-  cleaner->SetInputData(normaler->GetOutput());
-  cleaner->Update();
+  auto buildBoundaryLayer = [&](vtkPolyData* inputSurface, int negateWarpVectors,
+      vtkSmartPointer<vtkUnstructuredGrid>& boundaryMesh,
+      vtkSmartPointer<vtkUnstructuredGrid>& innerSurface,
+      vtkSmartPointer<vtkPolyData>& surfaceForVolume,
+      bool writeDebug) -> int {
+    // Clean and convert the polydata to a vtu.
+    //
+    auto normaler = vtkSmartPointer<vtkPolyDataNormals>::New();
+    normaler->SetInputData(inputSurface);
+    normaler->SetConsistency(1);
+    normaler->SetAutoOrientNormals(1);
+    normaler->SetFlipNormals(0);
+    normaler->SetComputeCellNormals(0);
+    normaler->SplittingOff();
+    normaler->Update();
 
-  auto originalsurfpd = vtkSmartPointer<vtkPolyData>::New();
-  originalsurfpd->DeepCopy(cleaner->GetOutput());
+    auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+    cleaner->SetInputData(normaler->GetOutput());
+    cleaner->Update();
 
-  // Create a sizing function vtk data array named 'MeshSizingFunction' for the 
-  // current mesh used to define the size of the mesh at each node. 
-  //
-  // This modifies 'originalsurfpd'.
-  //
-  if (VMTKUtils_ComputeSizingFunction(originalsurfpd, NULL, "MeshSizingFunction") != SV_OK) {
-    fprintf(stderr,"Problem when computing sizing function");
-    return SV_ERROR;
-  }
+    auto surfaceWithSizing = vtkSmartPointer<vtkPolyData>::New();
+    surfaceWithSizing->DeepCopy(cleaner->GetOutput());
 
-  // Set cap boundary normals.
-  SetCapBoundaryNormals(originalsurfpd);
+    // Create a sizing function vtk data array named 'MeshSizingFunction' for the
+    // current mesh used to define the size of the mesh at each node.
+    //
+    // This modifies 'surfaceWithSizing'.
+    //
+    if (VMTKUtils_ComputeSizingFunction(surfaceWithSizing, NULL, "MeshSizingFunction") != SV_OK) {
+      fprintf(stderr,"Problem when computing sizing function");
+      return SV_ERROR;
+    }
 
-  // Convert the surface to an vtkUnstructuredGrid.
-  auto converter = vtkSmartPointer<vtkvmtkPolyDataToUnstructuredGridFilter>::New();
-  converter->SetInputData(originalsurfpd);
-  converter->Update();
+    // Set cap boundary normals.
+    SetCapBoundaryNormals(surfaceWithSizing);
 
-  // Copy the vtkUnstructuredGrid.
-  innerblmesh_ = vtkUnstructuredGrid::New();
-  innerblmesh_->DeepCopy(converter->GetOutput());
-  boundarylayermesh_ = vtkUnstructuredGrid::New();
-  boundarylayermesh_->DeepCopy(converter->GetOutput());
+    // Convert the surface to an vtkUnstructuredGrid.
+    auto converter = vtkSmartPointer<vtkvmtkPolyDataToUnstructuredGridFilter>::New();
+    converter->SetInputData(surfaceWithSizing);
+    converter->Update();
 
+    // Copy the vtkUnstructuredGrid.
+    innerSurface = vtkSmartPointer<vtkUnstructuredGrid>::New();
+    innerSurface->DeepCopy(converter->GetOutput());
+    boundaryMesh = vtkSmartPointer<vtkUnstructuredGrid>::New();
+    boundaryMesh->DeepCopy(converter->GetOutput());
 
-  // Compute the boundary layer mesh using vmtk. 
-  //
-  // Modifies: 'boundarylayermesh_' and 'innerSurface'.
-  //
-  int negateWarpVectors = meshoptions_.boundarylayerdirection;
-  int innerSurfaceCellId = 1;
-  int sidewallCellEntityId = 9999;
-  int useConstantThickness = meshoptions_.useconstantblthickness;
-  std::string layerThicknessArrayName = "MeshSizingFunction";
-  auto innerSurface = vtkSmartPointer<vtkUnstructuredGrid>::New();
-  std::cout << "[GenerateBoundaryLayerMesh] negateWarpVectors: " << negateWarpVectors << std::endl;
-  std::cout << "[GenerateBoundaryLayerMesh] useConstantThickness: " << useConstantThickness << std::endl;
+    // Compute the boundary layer mesh using vmtk.
+    //
+    // Modifies: 'boundaryMesh' and 'innerSurface'.
+    //
+    int innerSurfaceCellId = 1;
+    int sidewallCellEntityId = 9999;
+    int useConstantThickness = meshoptions_.useconstantblthickness;
+    std::string layerThicknessArrayName = "MeshSizingFunction";
 
-  if (!boundarylayermesh_->GetPointData()->GetArray("Normals")) {
-    std::cout << "[GenerateBoundaryLayerMesh] **** boundarylayermesh_ does not have point normals." << std::endl;
+    std::cout << "[GenerateBoundaryLayerMesh] negateWarpVectors: " << negateWarpVectors << std::endl;
+    std::cout << "[GenerateBoundaryLayerMesh] useConstantThickness: " << useConstantThickness << std::endl;
+
+    if (writeDebug) {
+      if (!boundaryMesh->GetPointData()->GetArray("Normals")) {
+        std::cout << "[GenerateBoundaryLayerMesh] **** boundarylayermesh_ does not have point normals." << std::endl;
+      } else {
+        std::cout << "[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals." << std::endl;
+      }
+      TGenUtils_WriteVTU("boundarylayermesh_normals.vtu", boundaryMesh);
+    }
+
+    if (VMTKUtils_BoundaryLayerMesh(boundaryMesh, innerSurface, meshoptions_.maxedgesize, meshoptions_.blthicknessfactor,
+          meshoptions_.numsublayers, meshoptions_.sublayerratio, sidewallCellEntityId, innerSurfaceCellId, negateWarpVectors,
+          markerListName, useConstantThickness, layerThicknessArrayName) != SV_OK)
+    {
+      fprintf(stderr,"Problem with boundary layer meshing\n");
+      return SV_ERROR;
+    }
+
+    // We take the inside surface of the boundary layer mesh and set the
+    // member vtkPolyData polydatasolid_ to be equal to this. We will
+    // use this to create the volume mesh with TetGen.
+    //
+    auto surfacer = vtkSmartPointer<vtkGeometryFilter>::New();
+    surfacer->SetInputData(innerSurface);
+    surfacer->Update();
+
+    surfaceForVolume = vtkSmartPointer<vtkPolyData>::New();
+    if (negateWarpVectors)
+    {
+      surfaceForVolume->DeepCopy(surfacer->GetOutput());
+    }
+    else
+    {
+      // The remeshing excludes cell entity ids with value of 1. Need to
+      // set all to one so that only caps are remeshed.
+      //
+      surfaceForVolume->DeepCopy(surfaceWithSizing);
+      surfaceForVolume->GetCellData()->RemoveArray("CellEntityIds");
+      auto newEntityIds = vtkSmartPointer<vtkIntArray>::New();
+      newEntityIds->SetNumberOfTuples(surfaceForVolume->GetNumberOfCells());
+      newEntityIds->FillComponent(0, 1);
+      newEntityIds->SetName("CellEntityIds");
+      surfaceForVolume->GetCellData()->AddArray(newEntityIds);
+    }
+
+    return SV_OK;
+  };
+
+  vtkSmartPointer<vtkUnstructuredGrid> boundaryMeshInside;
+  vtkSmartPointer<vtkUnstructuredGrid> innerSurfaceInside;
+  vtkSmartPointer<vtkPolyData> surfaceForVolume;
+
+  if (meshoptions_.boundarylayerdirection == 2) {
+    vtkSmartPointer<vtkUnstructuredGrid> boundaryMeshOutside;
+    vtkSmartPointer<vtkUnstructuredGrid> innerSurfaceOutside;
+    vtkSmartPointer<vtkPolyData> surfaceForVolumeOutside;
+
+    if (buildBoundaryLayer(originalSurface, 1, boundaryMeshInside, innerSurfaceInside, surfaceForVolume, false) != SV_OK) {
+      return SV_ERROR;
+    }
+
+    if (buildBoundaryLayer(originalSurface, 0, boundaryMeshOutside, innerSurfaceOutside, surfaceForVolumeOutside, false) != SV_OK) {
+      return SV_ERROR;
+    }
+
+    auto appender = vtkSmartPointer<vtkAppendFilter>::New();
+    appender->AddInputData(boundaryMeshInside);
+    appender->AddInputData(boundaryMeshOutside);
+    appender->Update();
+
+    boundarylayermesh_ = vtkUnstructuredGrid::New();
+    boundarylayermesh_->DeepCopy(appender->GetOutput());
+    innerblmesh_ = vtkUnstructuredGrid::New();
+    innerblmesh_->DeepCopy(innerSurfaceInside);
   } else {
-    std::cout << "[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals." << std::endl;
-  }
-
-  TGenUtils_WriteVTU("boundarylayermesh_normals.vtu", boundarylayermesh_);
-
-  if (VMTKUtils_BoundaryLayerMesh(boundarylayermesh_, innerSurface, meshoptions_.maxedgesize, meshoptions_.blthicknessfactor,
-	meshoptions_.numsublayers, meshoptions_.sublayerratio, sidewallCellEntityId, innerSurfaceCellId, negateWarpVectors,
-	markerListName, useConstantThickness, layerThicknessArrayName) != SV_OK)
-  {
-    fprintf(stderr,"Problem with boundary layer meshing\n");
-    return SV_ERROR;
+    if (buildBoundaryLayer(originalSurface, meshoptions_.boundarylayerdirection, boundaryMeshInside, innerSurfaceInside,
+          surfaceForVolume, true) != SV_OK) {
+      return SV_ERROR;
+    }
+    boundarylayermesh_ = vtkUnstructuredGrid::New();
+    boundarylayermesh_->DeepCopy(boundaryMeshInside);
+    innerblmesh_ = vtkUnstructuredGrid::New();
+    innerblmesh_->DeepCopy(innerSurfaceInside);
   }
 
   TGenUtils_WriteVTU("boundarylayermesh.vtu", boundarylayermesh_);
 
-  TGenUtils_WriteVTU("innerSurface.vtu", innerSurface);
-
-  // We take the inside surface of the boundary layer mesh and set the
-  // member vtkPolyData polydatasolid_ to be equal to this. We will
-  // use this to create the volume mesh with TetGen.
-  //
-  auto surfacer = vtkSmartPointer<vtkGeometryFilter>::New();
-  surfacer->SetInputData(innerSurface);
-  surfacer->Update();
-
-  if (meshoptions_.boundarylayerdirection)
-  {
-    polydatasolid_->DeepCopy(surfacer->GetOutput());
-  }
-  else
-  {
-    // The remeshing excludes cell entity ids with value of 1. Need to
-    // set all to one so that only caps are remeshed.
-    //
-    polydatasolid_->DeepCopy(originalsurfpd);
-    polydatasolid_->GetCellData()->RemoveArray("CellEntityIds");
-    auto newEntityIds = vtkSmartPointer<vtkIntArray>::New();
-    newEntityIds->SetNumberOfTuples(polydatasolid_->GetNumberOfCells());
-    newEntityIds->FillComponent(0, 1);
-    newEntityIds->SetName("CellEntityIds");
-    polydatasolid_->GetCellData()->AddArray(newEntityIds);
-  }
+  polydatasolid_->DeepCopy(surfaceForVolume);
 
 #else
   fprintf(stderr,"Cannot generate a boundary layer mesh without VMTK\n");

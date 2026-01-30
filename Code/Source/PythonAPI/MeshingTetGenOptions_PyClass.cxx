@@ -82,6 +82,7 @@ PyObject * CreateTetGenOptionsType(PyObject* args, PyObject* kwargs);
 // The follows options are set in cvTetGenMeshObject::SetMeshOptions():
 //   allow_multiple_regions (bool): If True then allow for multiple unconnected regions.
 //   boundary_layer_inside: int
+//   boundary_layer_both: bool
 //   diagnose: set option to true without value
 //   global_edge_size:
 //   no_bisect: set option to true without value
@@ -126,6 +127,7 @@ typedef struct {
   // PyObject* add_subdomain;
   int allow_multiple_regions;
   PyObject* boundary_layer_inside;
+  PyObject* boundary_layer_both;
   //PyObject* check;
   //double coarsen_percent;
   //PyObject* diagnose;
@@ -169,6 +171,7 @@ namespace TetGenOption {
   // char* AddSubDomain = "add_subdomain";
   char* AllowMultipleRegions = "allow_multiple_regions";
   char* BoundaryLayerInside = "boundary_layer_inside";
+  char* BoundaryLayerBoth = "boundary_layer_both";
   //char* Check = "check";
   //char* CoarsenPercent = "coarsen_percent";
   //char* Diagnose = "diagnose";
@@ -248,6 +251,7 @@ namespace TetGenOption {
       //{std::string(AddHole), "AddHole"},
       //{std::string(AddSubDomain), "AddSubDomain"},
       {std::string(AllowMultipleRegions), "AllowMultipleRegions"},
+      {std::string(BoundaryLayerBoth), "BoundaryLayerBoth"},
       {std::string(BoundaryLayerInside), "BoundaryLayerDirection"},
       //{std::string(Check), "Check"},
       //{std::string(CoarsenPercent), "CoarsenPercent"},
@@ -1019,6 +1023,7 @@ PyTetGenOptions_get_values(PyMeshingTetGenOptions* self, PyObject* args)
   // PyDict_SetItemString(values, TetGenOption::AddSubDomain, self->add_subdomain);
   PyDict_SetItemString(values, TetGenOption::AllowMultipleRegions, PyBool_FromLong(self->allow_multiple_regions));
 
+  PyDict_SetItemString(values, TetGenOption::BoundaryLayerBoth, self->boundary_layer_both);
   PyDict_SetItemString(values, TetGenOption::BoundaryLayerInside, self->boundary_layer_inside);
 
   //PyDict_SetItemString(values, TetGenOption::Check, self->check);
@@ -1089,6 +1094,7 @@ PyTetGenOptions_set_defaults(PyMeshingTetGenOptions* self)
   // self->add_subdomain = Py_BuildValue("");
   self->allow_multiple_regions = 0;
   self->boundary_layer_inside = Py_BuildValue("O", Py_True);
+  self->boundary_layer_both = Py_BuildValue("O", Py_False);
   //self->check = Py_BuildValue("");
   //self->coarsen_percent = 0;
   //self->diagnose = Py_BuildValue("");
@@ -1217,6 +1223,15 @@ PyDoc_STRVAR(boundary_layer_inside_doc,
    \n\
    If True then place the boundary layer inside the solid model surface.   \n\
    This is used for creating a boundary layer for CFD.                     \n\
+   \n\
+");
+
+PyDoc_STRVAR(boundary_layer_both_doc,
+  "Type: bool                                                              \n\
+   Default: False                                                          \n\
+   \n\
+   If True then place the boundary layer on both sides of the surface.     \n\
+   This overrides boundary_layer_inside.                                   \n\
    \n\
 ");
 
@@ -1427,6 +1442,7 @@ PyDoc_STRVAR(volume_mesh_flag_doc,
 
 static PyMemberDef PyTetGenOptionsMembers[] = {
     {TetGenOption::AllowMultipleRegions, T_BOOL, offsetof(PyMeshingTetGenOptions, allow_multiple_regions), 0, allow_multiple_regions_doc},
+    {TetGenOption::BoundaryLayerBoth, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, boundary_layer_both), 0, boundary_layer_both_doc},
     {TetGenOption::BoundaryLayerInside, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, boundary_layer_inside), 0, boundary_layer_inside_doc},
     //{TetGenOption::Check, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, check), 0, "check"},
     //{TetGenOption::CoarsenPercent, T_DOUBLE, offsetof(PyMeshingTetGenOptions, coarsen_percent), 0, "coarsen_percent"},
@@ -1969,4 +1985,3 @@ CreateTetGenOptionsType(PyObject* args, PyObject* kwargs)
 }
 
 #endif
-
