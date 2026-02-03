@@ -34,8 +34,8 @@ message(STATUS "${msg} SV_EXTERNALS_VERSION_NUMBER: ${SV_EXTERNALS_VERSION_NUMBE
 
 #-----------------------------------------------------------------------------
 # URLs for external downloads and git repositories
-set(SV_EXTERNALS_VERSION_NUMBER "2022.10" CACHE STRING "SimVascular Externals version")
-set_property(CACHE SV_EXTERNALS_VERSION_NUMBER PROPERTY STRINGS "2018.01" "2018.05" "2019.02" "2019.06" "2022.10")
+set(SV_EXTERNALS_VERSION_NUMBER "2024.05" CACHE STRING "SimVascular Externals version")
+set_property(CACHE SV_EXTERNALS_VERSION_NUMBER PROPERTY STRINGS "2018.01" "2018.05" "2019.02" "2019.06" "2022.10" "2024.05")
 #-----------------------------------------------------------------------------
 
 if(SV_EXTERNALS_VERSION_NUMBER VERSION_EQUAL "2018.01")
