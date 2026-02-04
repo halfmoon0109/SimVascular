@@ -1523,9 +1523,11 @@ macro(sv_externals_add_new_external proj version use shared dirname install_dirn
 
   # Set up file download. 
   #
-  # [davep] disable downloads.
+  # [davep] disable downloads by default.
   #
-  set(SV_EXTERNALS_DOWNLOAD_${proj} FALSE)
+  if(NOT DEFINED SV_EXTERNALS_DOWNLOAD_${proj})
+    set(SV_EXTERNALS_DOWNLOAD_${proj} FALSE)
+  endif()
 
   if(NOT "${install_dirname}" STREQUAL "none")
 
@@ -1817,4 +1819,3 @@ extern \"C\" {
   execute_process(COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_filenameTmp}" "${_filename}" OUTPUT_QUIET ERROR_QUIET)
 
 endfunction()
-
