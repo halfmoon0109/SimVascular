@@ -53,6 +53,9 @@ file(MAKE_DIRECTORY "${SV_EXTERNALS_TAR_INSTALL_DIR}")
 #-----------------------------------------------------------------------------
 # URLs for external downloads and git repositories
 set(SV_EXTERNALS_URL "" CACHE STRING "SimVascular Externals base URL (set this to a mirror)")
+if(NOT SV_EXTERNALS_URL AND NOT SV_EXTERNALS_VERSION_NUMBER VERSION_EQUAL "2024.05")
+  set(SV_EXTERNALS_URL "http://simvascular.stanford.edu/downloads/public/simvascular/externals" CACHE STRING "SimVascular Externals base URL (default mirror)" FORCE)
+endif()
 set(SV_EXTERNALS_ORIGINALS_URL "" CACHE STRING "URL with source downloads for externals")
 if(SV_EXTERNALS_URL AND NOT SV_EXTERNALS_ORIGINALS_URL)
   set(SV_EXTERNALS_ORIGINALS_URL "${SV_EXTERNALS_URL}/${SV_EXTERNALS_VERSION_NUMBER}/src/originals" CACHE STRING "URL with source downloads for externals" FORCE)
@@ -61,6 +64,7 @@ if(NOT SV_EXTERNALS_URL AND NOT SV_EXTERNALS_ORIGINALS_URL)
   message(WARNING "SV_EXTERNALS_URL is unset. Set it to a valid mirror, set SV_EXTERNALS_ORIGINALS_URL directly, or provide per-external SV_EXTERNALS_<proj>_MANUAL_SOURCE_URL values.")
 endif()
 
+if(SV_EXTERNALS_VERSION_NUMBER VERSION_EQUAL "2024.05" AND NOT SV_EXTERNALS_URL AND NOT SV_EXTERNALS_ORIGINALS_URL)
 if(SV_EXTERNALS_VERSION_NUMBER VERSION_EQUAL "2024.05")
   if(NOT SV_EXTERNALS_QT_MANUAL_SOURCE_URL)
     set(SV_EXTERNALS_QT_MANUAL_SOURCE_URL "https://download.qt.io/official_releases/qt/6.6/6.6.2/single/qt-everywhere-src-6.6.2.tar.xz" CACHE STRING "Manual specification of QT source URL" FORCE)
