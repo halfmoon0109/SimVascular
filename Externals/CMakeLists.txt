@@ -101,18 +101,15 @@ message(STATUS "[SimVascular/Externals] Increment on SV_EXTERNALS_LIST ...")
 #
 # This used to download an exernal package from a url but is now not used.
 #
-#[[
 foreach(proj ${SV_EXTERNALS_LIST})
   message(STATUS "[SimVascular/Externals] proj: ${proj} ")
   if(SV_EXTERNALS_ENABLE_${proj})
     if(EXISTS "${SV_EXTERNALS_CMAKE_DIR}/${proj}.cmake")
-      #message(STATUS "[SimVascular/Externals] include ${proj}.cmake ")
-      #include("${SV_EXTERNALS_CMAKE_DIR}/${proj}.cmake")
+      include("${SV_EXTERNALS_CMAKE_DIR}/${proj}.cmake")
     endif()
   endif()
 endforeach()
 message(STATUS "[SimVascular/Externals] Done Increment on SV_EXTERNALS_LIST ...")
-#]]
 
 # Sets up to tar externals for install ? 
 #
@@ -127,4 +124,3 @@ endif()
 
 message(STATUS "[SimVascular/Externals] ----- Done SimVascular/Externals -----")
 message(STATUS "[SimVascular/Externals] ")
-
