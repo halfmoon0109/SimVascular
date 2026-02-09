@@ -28,7 +28,7 @@
 # PYTHON
 set(proj PYTHON)
 
-set(SV_PYTHON_DIR /Users/parkerda/software/ktbolt/svExternals/install/python)
+set(SV_PYTHON_DIR "" CACHE PATH "Optional path to a preinstalled Python")
     
 set(msg "[Externals/CMake/PYTHON.cmake] ")
 message(STATUS "${msg} ")

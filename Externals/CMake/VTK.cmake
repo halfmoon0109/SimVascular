@@ -28,7 +28,7 @@
 # VTK
 set(proj VTK)
 
-set(SV_VTK_DIR /Users/parkerda/software/ktbolt/svExternals/install/vtk)
+set(SV_VTK_DIR "" CACHE PATH "Optional path to a preinstalled VTK")
     
 set(msg "[Externals/CMake/VTK.cmake] ")
 message(STATUS "${msg} ")
