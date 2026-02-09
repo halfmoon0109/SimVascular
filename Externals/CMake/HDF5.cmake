@@ -26,7 +26,7 @@
 #
 set(proj HDF5)
 
-set(SV_HDF5_DIR /Users/parkerda/software/ktbolt/svExternals/install/hdf5)
+set(SV_HDF5_DIR "" CACHE PATH "Optional path to a preinstalled HDF5")
 
 set(msg "[Externals/CMake/HDF5.cmake] ")
 message(STATUS "${msg} ")

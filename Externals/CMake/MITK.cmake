@@ -28,7 +28,7 @@
 # MITK
 set(proj MITK)
 
-set(SV_MITK_DIR /Users/parkerda/software/ktbolt/svExternals/install/mitk)
+set(SV_MITK_DIR "" CACHE PATH "Optional path to a preinstalled MITK")
 
 set(SV_EXTERNALS_MITK_PFX_DIR ${SV_MITK_DIR})
 set(SV_EXTERNALS_MITK_BIN_DIR ${SV_MITK_DIR})

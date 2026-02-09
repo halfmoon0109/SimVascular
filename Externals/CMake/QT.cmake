@@ -28,8 +28,8 @@
 # QT
 set(proj QT)
 
-set(Qt6_DIR /Users/parkerda/software/ktbolt/svExternals/install/qt6)
-set(SV_QT_DIR /Users/parkerda/software/ktbolt/svExternals/install/qt6)
+set(Qt6_DIR "" CACHE PATH "Optional path to a preinstalled Qt6")
+set(SV_QT_DIR "" CACHE PATH "Optional path to a preinstalled Qt")
 
 set(msg "[Externals/CMake/QT.cmake] ")
 message(STATUS "${msg} ")
@@ -38,7 +38,6 @@ message(STATUS "${msg} +++++                               QT.cmake             
 message(STATUS "${msg} -------------------------------------------------------------------------------------")
 message(STATUS "${msg} proj: ${proj}")
 message(STATUS "${msg} SV_QT_DIR: ${SV_QT_DIR}")
-message(FATAL_ERROR "${msg} We should not be executing this")
 
 # Dependencies
 set(${proj}_DEPENDENCIES "")
@@ -278,5 +277,3 @@ message(STATUS "[QT.cmake] ----- Done QT.cmake -----")
 message(STATUS "[QT.cmake] ")
 
 #-----------------------------------------------------------------------------
-
-

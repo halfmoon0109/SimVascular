@@ -28,7 +28,7 @@
 # OpenCASCADE
 set(proj OpenCASCADE)
 
-set(SV_OPEN_CASCADE_DIR /Users/parkerda/software/ktbolt/svExternals/install/opencascade)
+set(SV_OPEN_CASCADE_DIR "" CACHE PATH "Optional path to a preinstalled OpenCASCADE")
       
 set(msg "[Externals/CMake/OpenCASCADE.cmake] ")
 message(STATUS "${msg} ")
