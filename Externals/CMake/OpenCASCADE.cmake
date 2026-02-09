@@ -96,26 +96,25 @@ endif()
 
 
 if(SV_OPEN_CASCADE_DIR)
-#if(SV_EXTERNALS_DOWNLOAD_${proj})
 
   message(STATUS "${msg} +++++ Use installed OpenCASCADE")
   find_package(OpenCASCADE REQUIRED PATHS ${SV_OPEN_CASCADE_DIR} NO_DEFAULT_PATH)
 
-  #ExternalProject_Add(${proj}
-    #URL ${SV_EXTERNALS_${proj}_BINARIES_URL}
-    #PREFIX ${SV_EXTERNALS_${proj}_PFX_DIR}
-    #SOURCE_DIR ${SV_EXTERNALS_${proj}_BIN_DIR}
-    #BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR}
-    #DEPENDS ${${proj}_DEPENDENCIES}
-    #CONFIGURE_COMMAND ""
-    #BUILD_COMMAND ""
-    #INSTALL_COMMAND ""
-    #UPDATE_COMMAND ""
-    #)
-
   message(STATUS "${msg} OpenCASCADE_INCLUDE_DIR: ${OpenCASCADE_INCLUDE_DIR}") 
   message(STATUS "${msg} OpenCASCADE_LIBRARY_DIR: ${OpenCASCADE_LIBRARY_DIR}") 
 
+elseif(SV_EXTERNALS_DOWNLOAD_${proj})
+  ExternalProject_Add(${proj}
+    URL ${SV_EXTERNALS_${proj}_BINARIES_URL}
+    PREFIX ${SV_EXTERNALS_${proj}_PFX_DIR}
+    SOURCE_DIR ${SV_EXTERNALS_${proj}_BIN_DIR}
+    BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR}
+    DEPENDS ${${proj}_DEPENDENCIES}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    UPDATE_COMMAND ""
+    )
 else()
   ExternalProject_Add(${proj}
     URL ${SV_EXTERNALS_${proj}_SOURCE_URL}

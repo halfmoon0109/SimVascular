@@ -10,6 +10,12 @@ Notes:
 1. It may be possible to build externals on some platforms
    using CMake, but the "make" scripts are the preferred method.
    The CMake build hasn't been tested since 2018.05 externals.
+   If you need to use CMake, the basic flow is:
+
+   % cd Externals
+   % mkdir -p build && cd build
+   % cmake .. -DSV_EXTERNALS_URL=<mirror> -DSV_EXTERNALS_DOWNLOAD_QT=ON
+   % cmake --build . -j
 
 2. Windows can only be built using Cygwin and make
 
@@ -81,5 +87,18 @@ source scl_source enable rh-ruby23
 
    export MESA_GL_VERSION_OVERRIDE=3.2
 
-9. Building Qt from source doesn't work!  You must use
-   the binary download.
+9. To force source builds (when prebuilt binaries are unavailable),
+   disable prebuilt downloads and/or supply manual source URLs:
+
+   % cd Externals
+   % mkdir -p build && cd build
+   % cmake .. \
+       -DSV_EXTERNALS_URL=<mirror> \
+       -DSV_EXTERNALS_DOWNLOAD_QT=OFF \
+       -DSV_EXTERNALS_QT_MANUAL_SOURCE_URL=/path/to/qt-everywhere-src-6.6.2.tar.xz \
+       -DSV_EXTERNALS_VTK_MANUAL_SOURCE_URL=/path/to/VTK-9.3.0.tar.gz \
+       -DSV_EXTERNALS_ITK_MANUAL_SOURCE_URL=/path/to/InsightToolkit-5.4.0.tar.gz
+   % cmake --build . -j
+
+   You can also use installed libraries by setting SV_QT_DIR,
+   SV_VTK_DIR, SV_ITK_DIR, etc., when available.
