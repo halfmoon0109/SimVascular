@@ -28,8 +28,8 @@
 # QT
 set(proj QT)
 
-set(Qt6_DIR /Users/parkerda/software/ktbolt/svExternals/install/qt6)
-set(SV_QT_DIR /Users/parkerda/software/ktbolt/svExternals/install/qt6)
+set(Qt6_DIR "" CACHE PATH "Optional path to a preinstalled Qt6")
+set(SV_QT_DIR "" CACHE PATH "Optional path to a preinstalled Qt")
 
 set(msg "[Externals/CMake/QT.cmake] ")
 message(STATUS "${msg} ")
@@ -38,7 +38,6 @@ message(STATUS "${msg} +++++                               QT.cmake             
 message(STATUS "${msg} -------------------------------------------------------------------------------------")
 message(STATUS "${msg} proj: ${proj}")
 message(STATUS "${msg} SV_QT_DIR: ${SV_QT_DIR}")
-message(FATAL_ERROR "${msg} We should not be executing this")
 
 # Dependencies
 set(${proj}_DEPENDENCIES "")
@@ -178,7 +177,7 @@ message(STATUS "${msg} Add external project  ...")
 
 # Add external project
 #
-if(SV_QT_DIR)
+if(SV_QT_DIR OR Qt6_DIR)
 #if(SV_EXTERNALS_USE_PREBUILT_${proj})
   message(STATUS "${msg} +++++ Use prebuilt Qt ")
 
@@ -187,6 +186,9 @@ if(SV_QT_DIR)
   if(SV_QT_DIR STREQUAL "system")
     message(STATUS "${msg} Use system Qt6")
     find_package(Qt6 COMPONENTS Core CoreTools Gui Widgets REQUIRED)
+  elseif(Qt6_DIR)
+    message(STATUS "${msg} Use Qt6_DIR config path")
+    find_package(Qt6 COMPONENTS Core CoreTools Gui Widgets REQUIRED PATHS ${Qt6_DIR} NO_DEFAULT_PATH)
   else()
     message(STATUS "${msg} Use custom install Qt6")
     find_package(Qt6 COMPONENTS Core CoreTools Gui Widgets REQUIRED PATHS ${SV_QT_DIR} NO_DEFAULT_PATH)
@@ -244,7 +246,7 @@ elseif(SV_EXTERNALS_DOWNLOAD_${proj})
 
 else()
 
-  message(FATAL_ERROR "${msg} Unknown Qt6 source")
+  message(FATAL_ERROR "${msg} Qt6 source is not set. Provide -DSV_QT_DIR (or -DQt6_DIR) when downloads are disabled, or enable downloads with -DSV_EXTERNALS_DOWNLOAD_QT=ON.")
 
   #BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR} We have to do an in source build so that qt cmake files populate the private headers
 
@@ -278,5 +280,3 @@ message(STATUS "[QT.cmake] ----- Done QT.cmake -----")
 message(STATUS "[QT.cmake] ")
 
 #-----------------------------------------------------------------------------
-
-
