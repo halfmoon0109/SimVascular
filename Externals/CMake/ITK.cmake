@@ -28,7 +28,7 @@
 # ITK
 set(proj ITK)
 
-set(SV_ITK_DIR /Users/parkerda/software/ktbolt/svExternals/install/itk)
+set(SV_ITK_DIR "" CACHE PATH "Optional path to a preinstalled ITK")
     
 set(msg "[Externals/CMake/ITK.cmake] ")
 message(STATUS "${msg} ")

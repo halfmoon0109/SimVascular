@@ -27,7 +27,7 @@
 #-----------------------------------------------------------------------------
 set(proj FREETYPE)
 
-set(SV_FREETYPE_DIR /Users/parkerda/software/ktbolt/svExternals/install/freetype)
+set(SV_FREETYPE_DIR "" CACHE PATH "Optional path to a preinstalled Freetype")
 
 set(msg "[Externals/CMake/FREETYPE.cmake] ")
 message(STATUS "${msg} ")
