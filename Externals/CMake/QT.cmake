@@ -230,37 +230,35 @@ elseif(SV_EXTERNALS_DOWNLOAD_${proj})
   message(STATUS "[QT.cmake] BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR}") 
   message(STATUS "[QT.cmake] DEPENDS ${${proj}_DEPENDENCIES}") 
 
-  #ExternalProject_Add(${proj}
-    #URL ${SV_EXTERNALS_${proj}_BINARIES_URL}
-    #PREFIX ${SV_EXTERNALS_${proj}_PFX_DIR}
-    #SOURCE_DIR ${SV_EXTERNALS_${proj}_BIN_DIR}
-    #BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR}
-    #DEPENDS ${${proj}_DEPENDENCIES}
-    #CONFIGURE_COMMAND ""
-    #BUILD_COMMAND ""
-    #INSTALL_COMMAND ""
-    #UPDATE_COMMAND ""
-    #)
+  ExternalProject_Add(${proj}
+    URL ${SV_EXTERNALS_${proj}_BINARIES_URL}
+    PREFIX ${SV_EXTERNALS_${proj}_PFX_DIR}
+    SOURCE_DIR ${SV_EXTERNALS_${proj}_BIN_DIR}
+    BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR}
+    DEPENDS ${${proj}_DEPENDENCIES}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    UPDATE_COMMAND ""
+    )
 
   message(STATUS "[QT.cmake] ----- Done ExternalProject_Add ${proj}")
 
 else()
 
-  message(FATAL_ERROR "${msg} Qt6 source is not set. Provide -DSV_QT_DIR (or -DQt6_DIR) when downloads are disabled, or enable downloads with -DSV_EXTERNALS_DOWNLOAD_QT=ON.")
-
   #BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR} We have to do an in source build so that qt cmake files populate the private headers
 
-  #ExternalProject_Add(${proj}
-    #URL ${SV_EXTERNALS_${proj}_SOURCE_URL}
-    #PREFIX ${SV_EXTERNALS_${proj}_PFX_DIR}
-    #SOURCE_DIR ${SV_EXTERNALS_${proj}_SRC_DIR}
-    #BINARY_DIR ${SV_EXTERNALS_${proj}_SRC_DIR}
-    #DEPENDS ${${proj}_DEPENDENCIES}
-    #PATCH_COMMAND ${SV_EXTERNALS_${proj}_CUSTOM_PATCH}
-    #CONFIGURE_COMMAND ${SV_EXTERNALS_${proj}_SRC_DIR}/configure ${SV_EXTERNALS_${proj}_CONFIGURE_OPTIONS}
-    #INSTALL_COMMAND ${SV_EXTERNALS_${proj}_CUSTOM_INSTALL}
-    #UPDATE_COMMAND ""
-    #)
+  ExternalProject_Add(${proj}
+    URL ${SV_EXTERNALS_${proj}_SOURCE_URL}
+    PREFIX ${SV_EXTERNALS_${proj}_PFX_DIR}
+    SOURCE_DIR ${SV_EXTERNALS_${proj}_SRC_DIR}
+    BINARY_DIR ${SV_EXTERNALS_${proj}_SRC_DIR}
+    DEPENDS ${${proj}_DEPENDENCIES}
+    PATCH_COMMAND ${SV_EXTERNALS_${proj}_CUSTOM_PATCH}
+    CONFIGURE_COMMAND ${SV_EXTERNALS_${proj}_SRC_DIR}/configure ${SV_EXTERNALS_${proj}_CONFIGURE_OPTIONS}
+    INSTALL_COMMAND ${SV_EXTERNALS_${proj}_CUSTOM_INSTALL}
+    UPDATE_COMMAND ""
+    )
 
 endif()
 

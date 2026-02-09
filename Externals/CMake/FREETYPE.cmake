@@ -62,20 +62,18 @@ if(SV_FREETYPE_DIR)
     message(FATAL_ERROR "${msg} FREETYPE not found")
   endif()
 
-#if(SV_EXTERNALS_DOWNLOAD_${proj})
-  ## Empty project
-  #ExternalProject_Add(${proj}
-    #URL ${SV_EXTERNALS_${proj}_BINARIES_URL}
-    #PREFIX ${SV_EXTERNALS_${proj}_PFX_DIR}
-    #SOURCE_DIR ${SV_EXTERNALS_${proj}_BIN_DIR}
-    #BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR}
-    #DEPENDS ${${proj}_DEPENDENCIES}
-    #CONFIGURE_COMMAND ""
-    #BUILD_COMMAND ""
-    #INSTALL_COMMAND ""
-    #UPDATE_COMMAND ""
-    #)
-
+elseif(SV_EXTERNALS_DOWNLOAD_${proj})
+  ExternalProject_Add(${proj}
+    URL ${SV_EXTERNALS_${proj}_BINARIES_URL}
+    PREFIX ${SV_EXTERNALS_${proj}_PFX_DIR}
+    SOURCE_DIR ${SV_EXTERNALS_${proj}_BIN_DIR}
+    BINARY_DIR ${SV_EXTERNALS_${proj}_BLD_DIR}
+    DEPENDS ${${proj}_DEPENDENCIES}
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND ""
+    INSTALL_COMMAND ""
+    UPDATE_COMMAND ""
+    )
 else()
   ExternalProject_Add(${proj}
     URL ${SV_EXTERNALS_${proj}_SOURCE_URL}
