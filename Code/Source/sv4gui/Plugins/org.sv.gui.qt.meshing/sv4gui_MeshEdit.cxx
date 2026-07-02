@@ -63,6 +63,9 @@
 
 #include <vtkProperty.h>
 #include <vtkXMLUnstructuredGridReader.h>
+#include <vtkMeshQuality.h>
+#include <vtkDoubleArray.h>
+#include <vtkCellData.h>
 
 #include <QMessageBox>
 #include <QInputDialog>
@@ -2284,6 +2287,75 @@ void sv4guiMeshEdit::DisplayMeshInfo()
             + "\n" + "Number of Elems: " + QString::number(num_elems)
             + "\n" + "Number of Edges: " + QString::number(nMeshEdges)
             + "\n" + "Number of Faces: " + QString::number(nMeshFaces);
+
+    // Compute the mesh quality using the element aspect ratio (1.0 is an
+    // equilateral tetrahedron). Elements with an aspect ratio above 3 are
+    // distorted and elements above 10 are considered poor.
+    //
+    if(volumeMesh && volumeMesh->GetNumberOfCells()>0)
+    {
+        auto qualityFilter=vtkSmartPointer<vtkMeshQuality>::New();
+        qualityFilter->SetInputData(volumeMesh);
+        qualityFilter->SetTetQualityMeasureToAspectRatio();
+        qualityFilter->Update();
+
+        auto qualityArray=vtkDoubleArray::SafeDownCast(
+            qualityFilter->GetOutput()->GetCellData()->GetArray("Quality"));
+
+        if(qualityArray)
+        {
+            int numTets=0;
+            int numDistorted=0;
+            int numPoor=0;
+            double minRatio=0.0;
+            double maxRatio=0.0;
+            double sumRatio=0.0;
+
+            for(vtkIdType cellId=0;cellId<volumeMesh->GetNumberOfCells();cellId++)
+            {
+                if(volumeMesh->GetCellType(cellId)!=VTK_TETRA)
+                    continue;
+
+                double ratio=qualityArray->GetValue(cellId);
+                if(numTets==0 || ratio<minRatio)
+                    minRatio=ratio;
+                if(numTets==0 || ratio>maxRatio)
+                    maxRatio=ratio;
+                sumRatio+=ratio;
+                numTets++;
+
+                if(ratio>10.0)
+                    numPoor++;
+                else if(ratio>3.0)
+                    numDistorted++;
+            }
+
+            if(numTets>0)
+            {
+                double avgRatio=sumRatio/numTets;
+                double pctDistorted=100.0*numDistorted/numTets;
+                double pctPoor=100.0*numPoor/numTets;
+
+                QString assessment;
+                if(numPoor==0 && pctDistorted<5.0)
+                    assessment="GOOD";
+                else if(pctPoor<1.0)
+                    assessment="ACCEPTABLE (some distorted elements)";
+                else
+                    assessment="POOR (consider adjusting the mesh size options)";
+
+                stat+="\n\nMesh Quality (Aspect Ratio):";
+                stat+="\nMin / Avg / Max: "+QString::number(minRatio,'f',3)
+                    +" / "+QString::number(avgRatio,'f',3)
+                    +" / "+QString::number(maxRatio,'f',3);
+                stat+="\nAspect Ratio > 3 (distorted): "+QString::number(numDistorted)
+                    +" ("+QString::number(pctDistorted,'f',2)+"%)";
+                stat+="\nAspect Ratio > 10 (poor): "+QString::number(numPoor)
+                    +" ("+QString::number(pctPoor,'f',2)+"%)";
+                stat+="\nAssessment: "+assessment;
+            }
+        }
+    }
 
     std::cout << stat << std::endl << std::flush;
 

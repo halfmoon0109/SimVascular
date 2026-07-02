@@ -58,6 +58,7 @@
 #include "vtkGenericCell.h"
 #include "vtkConnectivityFilter.h"
 #include "vtkDataSetSurfaceFilter.h"
+#include "vtkMeshQuality.h"
 
 #include "simvascular_tetgen.h"
 
@@ -1673,6 +1674,124 @@ int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionId,double size)
   pd->GetPointData()->RemoveArray("MeshSizingFunction");
   meshSizeArray->SetName("MeshSizingFunction");
   pd->GetPointData()->AddArray(meshSizeArray);
+
+  return SV_OK;
+}
+
+// -----------------------------
+// TGenUtils_ReportMeshQuality
+// -----------------------------
+/**
+ * @brief Computes the quality of a volume mesh and prints a summary.
+ * @note The aspect ratio (the ratio of the longest edge length to the
+ * shortest tetrahedron height, normalized so that 1.0 is an equilateral
+ * tetrahedron) is computed for each tetrahedral element and stored in
+ * a cell data array named 'AspectRatio' so it can be visualized.
+ * @note The commonly used rule of thumb thresholds are used to assess
+ * the mesh: elements with an aspect ratio above 3 are distorted and
+ * elements above 10 are considered poor.
+ * @param mesh The volume mesh to check.
+ * @return SV_OK if the quality is computed.
+ */
+
+int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh)
+{
+  if (mesh == nullptr || mesh->GetNumberOfCells() == 0)
+  {
+    fprintf(stderr,"Cannot compute the quality of an empty mesh\n");
+    return SV_ERROR;
+  }
+
+  auto qualityFilter = vtkSmartPointer<vtkMeshQuality>::New();
+  qualityFilter->SetInputData(mesh);
+  qualityFilter->SetTetQualityMeasureToAspectRatio();
+  qualityFilter->Update();
+
+  auto qualityArray = vtkDoubleArray::SafeDownCast(
+    qualityFilter->GetOutput()->GetCellData()->GetArray("Quality"));
+  if (qualityArray == nullptr)
+  {
+    fprintf(stderr,"Could not compute the mesh quality\n");
+    return SV_ERROR;
+  }
+
+  // Compute the aspect ratio statistics over the tetrahedral elements
+  // and store the aspect ratio in an 'AspectRatio' cell data array.
+  //
+  int numTets = 0;
+  int numDistorted = 0;
+  int numPoor = 0;
+  double minRatio = 0.0;
+  double maxRatio = 0.0;
+  double sumRatio = 0.0;
+
+  auto aspectRatio = vtkSmartPointer<vtkDoubleArray>::New();
+  aspectRatio->SetNumberOfComponents(1);
+  aspectRatio->SetNumberOfTuples(mesh->GetNumberOfCells());
+  aspectRatio->FillComponent(0, 0.0);
+  aspectRatio->SetName("AspectRatio");
+
+  for (vtkIdType cellId = 0; cellId < mesh->GetNumberOfCells(); cellId++)
+  {
+    if (mesh->GetCellType(cellId) != VTK_TETRA)
+    {
+      continue;
+    }
+    double ratio = qualityArray->GetValue(cellId);
+    aspectRatio->SetValue(cellId, ratio);
+
+    if (numTets == 0 || ratio < minRatio)
+    {
+      minRatio = ratio;
+    }
+    if (numTets == 0 || ratio > maxRatio)
+    {
+      maxRatio = ratio;
+    }
+    sumRatio += ratio;
+    numTets++;
+
+    if (ratio > 10.0)
+    {
+      numPoor++;
+    }
+    else if (ratio > 3.0)
+    {
+      numDistorted++;
+    }
+  }
+
+  mesh->GetCellData()->RemoveArray("AspectRatio");
+  mesh->GetCellData()->AddArray(aspectRatio);
+
+  if (numTets == 0)
+  {
+    fprintf(stderr,"No tetrahedral elements found to compute the mesh quality\n");
+    return SV_ERROR;
+  }
+
+  double avgRatio = sumRatio / numTets;
+  double pctDistorted = 100.0 * numDistorted / numTets;
+  double pctPoor = 100.0 * numPoor / numTets;
+
+  fprintf(stdout,"Mesh quality (aspect ratio, 1.0 is an equilateral tetrahedron):\n");
+  fprintf(stdout,"  Number of elements: %d\n", numTets);
+  fprintf(stdout,"  Min / Avg / Max: %.3f / %.3f / %.3f\n", minRatio, avgRatio, maxRatio);
+  fprintf(stdout,"  Elements with aspect ratio > 3 (distorted): %d (%.2f%%)\n", numDistorted, pctDistorted);
+  fprintf(stdout,"  Elements with aspect ratio > 10 (poor): %d (%.2f%%)\n", numPoor, pctPoor);
+
+  if (numPoor == 0 && pctDistorted < 5.0)
+  {
+    fprintf(stdout,"  Mesh quality assessment: GOOD\n");
+  }
+  else if (pctPoor < 1.0)
+  {
+    fprintf(stdout,"  Mesh quality assessment: ACCEPTABLE (some distorted elements)\n");
+  }
+  else
+  {
+    fprintf(stdout,"  Mesh quality assessment: POOR (consider adjusting the mesh size options or remeshing)\n");
+  }
 
   return SV_OK;
 }

@@ -1215,12 +1215,16 @@ int VMTKUtils_BoundaryLayerMesh(vtkUnstructuredGrid *blMesh, vtkUnstructuredGrid
 //     interior and boundary elements.
 //   newRegionBoundaryLayer - If true then separate region IDs are assiged to the
 //     interior and boundary layer mesh.
+//   wallMesh - Optional solid vessel wall mesh created by extruding the model
+//     surface outward. If given then the boundary layer mesh remains part of
+//     the fluid region and the wall mesh is appended as a separate region.
 //
 // Returns SV_OK if the meshes are appended into one final mesh correctly.
 //
 int VMTKUtils_AppendData(vtkUnstructuredGrid *meshFromTetGen, vtkUnstructuredGrid *boundaryMesh,
-                         vtkUnstructuredGrid *surfaceWithSize, vtkUnstructuredGrid *newMeshVolume, 
-                         vtkPolyData *newMeshSurface, int newRegionBoundaryLayer)
+                         vtkUnstructuredGrid *surfaceWithSize, vtkUnstructuredGrid *newMeshVolume,
+                         vtkPolyData *newMeshSurface, int newRegionBoundaryLayer,
+                         vtkUnstructuredGrid *wallMesh)
 {
   #define n_debug_VMTKUtils_AppendData
   #ifdef debug_VMTKUtils_AppendData 
@@ -1273,8 +1277,10 @@ int VMTKUtils_AppendData(vtkUnstructuredGrid *meshFromTetGen, vtkUnstructuredGri
 
   // Add a 'ModelRegionID' array to the 'boundaryMesh' boundary layer mesh.
   //
-  // Create a separate region ID for the boundary layer mesh.
-  if (newRegionBoundaryLayer) {
+  // Create a separate region ID for the boundary layer mesh. When a wall
+  // mesh is given the boundary layer stays part of the fluid region and
+  // the new region ID is used for the wall mesh instead.
+  if (newRegionBoundaryLayer && (wallMesh == nullptr)) {
     modelId++;
   }
   auto boundaryMeshRegionIds = vtkSmartPointer<vtkIntArray>::New();
@@ -1291,11 +1297,75 @@ int VMTKUtils_AppendData(vtkUnstructuredGrid *meshFromTetGen, vtkUnstructuredGri
   auto boundaryMeshVolume = vtkSmartPointer<vtkUnstructuredGrid>::New();
   VMTKUtils_CreateBoundaryLayerSurfaceAndCaps(boundaryMesh, modelId, surfaceWithSize, boundaryMeshSurface, surfaceMeshCaps, boundaryMeshVolume);
 
-  // Define the inner and outer boundary layer as two separate regions. 
-  // This is used for FSI to define the outer boundary layer as a solid. 
+  // Combine the interior, fluid boundary layer and solid vessel wall meshes.
   //
-  if (newRegionBoundaryLayer) {
-    VMTKUtils_CreateNewBoundaryLayerRegion(meshFromTetGen, surfaceWithSize, newMeshVolume, newMeshSurface, boundaryMeshVolume, 
+  // The interior and boundary layer meshes are merged into a single fluid
+  // region; the wall mesh is appended as a separate region. This is used
+  // for FSI where the fluid mesh has a boundary layer and the vessel wall
+  // is a solid of a given thickness.
+  //
+  if (wallMesh != nullptr) {
+
+    // Merge the interior and fluid boundary layer meshes.
+    auto fluidAppender = vtkSmartPointer<vtkvmtkAppendFilter>::New();
+    fluidAppender->AddInputData(boundaryMeshVolume);
+    fluidAppender->AddInputData(meshFromTetGen);
+    fluidAppender->Update();
+    auto fluidVolume = vtkSmartPointer<vtkUnstructuredGrid>::New();
+    fluidVolume->DeepCopy(fluidAppender->GetOutput());
+
+    // Surface used to set the 'ModelFaceID' IDs on the fluid mesh surface:
+    // the boundary layer shell (cap ring cells already corrected in
+    // VMTKUtils_CreateBoundaryLayerSurfaceAndCaps) plus the interior mesh caps.
+    auto fluidSurfaceAppender = vtkSmartPointer<vtkAppendFilter>::New();
+    fluidSurfaceAppender->AddInputData(boundaryMeshSurface);
+    fluidSurfaceAppender->AddInputData(surfaceMeshCaps);
+    fluidSurfaceAppender->Update();
+    auto fluidSurfacer = vtkSmartPointer<vtkDataSetSurfaceFilter>::New();
+    fluidSurfacer->SetInputData(fluidSurfaceAppender->GetOutput());
+    fluidSurfacer->Update();
+    auto fluidSurfaceSource = vtkSmartPointer<vtkPolyData>::New();
+    fluidSurfaceSource->DeepCopy(fluidSurfacer->GetOutput());
+
+    // Mesh the wall mesh with tetrahedra and fix any inverted elements.
+    auto wallTetrahedralizer = vtkSmartPointer<vtkvmtkUnstructuredGridTetraFilter>::New();
+    wallTetrahedralizer->SetInputData(wallMesh);
+    wallTetrahedralizer->Update();
+    wallMesh->DeepCopy(wallTetrahedralizer->GetOutput());
+    VMTKUtils_ReorderTetElements(wallMesh);
+
+    // Add a 'ModelRegionID' array to the wall mesh with a new region ID.
+    int wallRegionId = modelId + 1;
+    auto wallRegionIds = vtkSmartPointer<vtkIntArray>::New();
+    wallRegionIds->SetNumberOfComponents(1);
+    wallRegionIds->SetNumberOfTuples(wallMesh->GetNumberOfCells());
+    wallRegionIds->FillComponent(0, wallRegionId);
+    wallRegionIds->SetName("ModelRegionID");
+    wallMesh->GetCellData()->AddArray(wallRegionIds);
+
+    // Create the wall volume, surface and cap meshes.
+    auto wallMeshSurface = vtkSmartPointer<vtkPolyData>::New();
+    auto wallMeshCaps = vtkSmartPointer<vtkPolyData>::New();
+    auto wallMeshVolume = vtkSmartPointer<vtkUnstructuredGrid>::New();
+    if (VMTKUtils_CreateBoundaryLayerSurfaceAndCaps(wallMesh, wallRegionId, surfaceWithSize, wallMeshSurface,
+      wallMeshCaps, wallMeshVolume) != SV_OK) {
+      fprintf(stderr,"Failure creating the wall mesh surface\n");
+      return SV_ERROR;
+    }
+
+    // Combine the fluid and wall meshes into two separate regions with
+    // consistent global node IDs on the fluid/wall interface.
+    if (VMTKUtils_CreateNewBoundaryLayerRegion(fluidVolume, surfaceWithSize, newMeshVolume, newMeshSurface,
+      wallMeshVolume, wallMeshSurface, fluidSurfaceSource) != SV_OK) {
+      fprintf(stderr,"Failure combining the fluid and wall meshes\n");
+      return SV_ERROR;
+    }
+
+  // Define the inner and outer boundary layer as two separate regions.
+  // This is used for FSI to define the outer boundary layer as a solid.
+  //
+  } else if (newRegionBoundaryLayer) {
+    VMTKUtils_CreateNewBoundaryLayerRegion(meshFromTetGen, surfaceWithSize, newMeshVolume, newMeshSurface, boundaryMeshVolume,
       boundaryMeshSurface);
 
   } else {
@@ -1393,8 +1463,8 @@ int VMTKUtils_AppendData(vtkUnstructuredGrid *meshFromTetGen, vtkUnstructuredGri
 // [TODO:DaveP] Remove print statements when we think the code is working.
 //
 int VMTKUtils_CreateNewBoundaryLayerRegion(vtkUnstructuredGrid* meshFromTetGen, vtkUnstructuredGrid* surfaceWithSize,
-  vtkUnstructuredGrid* newMeshVolume, vtkPolyData* newMeshSurface, vtkSmartPointer<vtkUnstructuredGrid>& boundaryMeshVolume, 
-  vtkSmartPointer<vtkPolyData>& boundaryMeshSurface)
+  vtkUnstructuredGrid* newMeshVolume, vtkPolyData* newMeshSurface, vtkSmartPointer<vtkUnstructuredGrid>& boundaryMeshVolume,
+  vtkSmartPointer<vtkPolyData>& boundaryMeshSurface, vtkPolyData* interiorSurfaceSource)
 {
   // Create points hash table.
   //
@@ -1500,14 +1570,25 @@ int VMTKUtils_CreateNewBoundaryLayerRegion(vtkUnstructuredGrid* meshFromTetGen, 
   }
 
   // Extract surface of interior mesh.
+  //
+  // The 'ModelFaceID' IDs on the interior mesh surface are set from
+  // 'interiorSurfaceSource' if it is given (used when the interior mesh
+  // contains a boundary layer whose surface is not part of 'surfaceWithSize')
+  // and from the 'surfaceWithSize' surface otherwise.
+  //
   surfacer->SetInputData(meshFromTetGen);
   surfacer->Update();
   vtkSmartPointer<vtkPolyData> surface1 = vtkSmartPointer<vtkPolyData>::New();
   surface1->DeepCopy(surfacer->GetOutput());
-  surfacer->SetInputData(surfaceWithSize);
-  surfacer->Update();
 
-  if (VMTKUtils_ResetOriginalRegions(surface1, surfacer->GetOutput(), "ModelFaceID") != SV_OK) {
+  vtkPolyData* surface1Source = interiorSurfaceSource;
+  if (surface1Source == nullptr) {
+    surfacer->SetInputData(surfaceWithSize);
+    surfacer->Update();
+    surface1Source = surfacer->GetOutput();
+  }
+
+  if (VMTKUtils_ResetOriginalRegions(surface1, surface1Source, "ModelFaceID") != SV_OK) {
     fprintf(stderr,"Failure in resetting model face id on final mesh surface\n");
     return SV_ERROR;
   }

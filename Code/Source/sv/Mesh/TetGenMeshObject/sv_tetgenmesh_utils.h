@@ -117,4 +117,6 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_CheckSurfaceMesh(vtkPolyData *pd, int meshIn
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionId,double size);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh);
+
 #endif //__CV_TETGENMESH_UTILS_H
