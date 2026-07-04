@@ -1394,3 +1394,10 @@ Tcl/SimVascular_2.0/simvascular_logo.jpg -text
 Tcl/SimVascular_2.0/simvascular_startup.tcl -text
 Tcl/SimVascular_2.0/simvascular_vtk_init.tcl -text
 Tcl/SimVascular_2.0/splash.gif -text
+
+# Force LF for the Docker build scripts regardless of core.autocrlf, so
+# Windows checkouts don't reintroduce CRLF and break bash / cause spurious
+# "local changes would be overwritten" conflicts on git pull.
+Docker/scripts/*.sh text eol=lf
+Docker/scripts/*.env text eol=lf
+Docker/Dockerfile text eol=lf
