@@ -6,6 +6,10 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 banner "OpenCASCADE $OCC_VERSION"
 
+if [ -d "$INSTALL_DIR/opencascade/lib/cmake/opencascade" ]; then
+  echo "already installed, skipping"; exit 0
+fi
+
 OCC_TAG="V${OCC_VERSION//./_}"
 fetch "https://github.com/Open-Cascade-SAS/OCCT/archive/refs/tags/$OCC_TAG.tar.gz" "occt-$OCC_VERSION.tar.gz"
 untar "occt-$OCC_VERSION.tar.gz" "$BLD_DIR/occt"

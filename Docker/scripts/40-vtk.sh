@@ -17,6 +17,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 banner "VTK $VTK_VERSION"
 
 VTK_MM=${VTK_VERSION%.*}
+if [ -d "$INSTALL_DIR/vtk/lib/cmake/vtk-$VTK_MM" ]; then
+  echo "already installed, skipping"; exit 0
+fi
 fetch "https://www.vtk.org/files/release/$VTK_MM/VTK-$VTK_VERSION.tar.gz"
 untar "VTK-$VTK_VERSION.tar.gz" "$BLD_DIR/vtk"
 

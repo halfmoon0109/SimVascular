@@ -4,6 +4,10 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 banner "Python $PYTHON_VERSION"
 
+if [ -x "$INSTALL_DIR/python/bin/python3" ]; then
+  echo "already installed, skipping"; exit 0
+fi
+
 fetch "https://www.python.org/ftp/python/$PYTHON_VERSION/Python-$PYTHON_VERSION.tgz"
 untar "Python-$PYTHON_VERSION.tgz" "$BLD_DIR/python"
 

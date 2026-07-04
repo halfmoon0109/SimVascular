@@ -4,6 +4,10 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 banner "ITK $ITK_VERSION"
 
+if [ -d "$INSTALL_DIR/itk/lib/cmake/ITK-${ITK_VERSION%.*}" ]; then
+  echo "already installed, skipping"; exit 0
+fi
+
 fetch "https://github.com/InsightSoftwareConsortium/ITK/releases/download/v$ITK_VERSION/InsightToolkit-$ITK_VERSION.tar.gz"
 untar "InsightToolkit-$ITK_VERSION.tar.gz" "$BLD_DIR/itk"
 
