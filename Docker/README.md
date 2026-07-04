@@ -70,7 +70,9 @@ Docker Desktop → Settings → Resources: CPU 8+, Memory 16GB+, Disk 150GB+.
 cd D:\sv
 git clone https://github.com/halfmoon0109/SimVascular.git
 cd SimVascular
-git checkout claude/mesh-creation-code-review-2f7qol   # 또는 대상 브랜치
+# 이 브랜치는 메시 기능 브랜치(claude/mesh-creation-code-review-2f7qol)
+# 위에 Docker/ 빌드 환경을 얹은 것 -- 메시 신기능 커밋을 포함합니다.
+git checkout claude/simvascular-docker-gui-build-jy05kq
 docker build -f Docker/Dockerfile -t simvascular-build:22.04 Docker
 ```
 
