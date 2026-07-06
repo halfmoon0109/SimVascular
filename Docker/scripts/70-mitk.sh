@@ -40,6 +40,8 @@ cmake -S "$BLD_DIR/mitk/src" -B "$BLD_DIR/mitk/build" \
   -DBUILD_SHARED_LIBS=ON \
   -DBUILD_TESTING=OFF \
   -DMITK_BUILD_EXAMPLES=OFF \
+  -DMITK_USE_Qt6=ON \
+  -DMITK_USE_Qt5=OFF \
   -DQt6_DIR="$INSTALL_DIR/qt6/lib/cmake/Qt6" \
   -DCMAKE_PREFIX_PATH="$INSTALL_DIR/qt6" \
   -DEXTERNAL_VTK_DIR="$INSTALL_DIR/vtk/lib/cmake/vtk-$VTK_MM" \
