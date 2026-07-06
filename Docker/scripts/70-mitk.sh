@@ -20,7 +20,9 @@ if [ -d "$INSTALL_DIR/mitk/lib" ]; then
   echo "already installed, skipping"; exit 0
 fi
 
-if [ ! -d "$BLD_DIR/mitk/src/.git" ]; then
+# Check for CMakeLists.txt, not just .git -- a clone that fails partway
+# (e.g. bad tag name) still leaves an initialized .git dir behind.
+if [ ! -f "$BLD_DIR/mitk/src/CMakeLists.txt" ]; then
   rm -rf "$BLD_DIR/mitk/src"
   git clone --branch "$MITK_GIT_TAG" --depth 1 https://github.com/MITK/MITK.git "$BLD_DIR/mitk/src"
 fi
