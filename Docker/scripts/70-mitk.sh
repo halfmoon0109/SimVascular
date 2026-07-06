@@ -27,8 +27,12 @@ fi
 
 VTK_MM=${VTK_VERSION%.*}
 GDCM_MM=${GDCM_VERSION%.*}
+PY_MM=${PYTHON_VERSION%.*}
 PY="$INSTALL_DIR/python/bin/python3"
 
+# Same VTK-transitively-re-finds-Python3 issue as in 50-itk.sh (EXTERNAL_VTK_DIR
+# makes MITK plain find_package(VTK) it too): pin Python3 explicitly so it
+# doesn't resolve to the system 3.10 interpreter.
 cmake -S "$BLD_DIR/mitk/src" -B "$BLD_DIR/mitk/build" \
   -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=ON \
@@ -44,6 +48,10 @@ cmake -S "$BLD_DIR/mitk/src" -B "$BLD_DIR/mitk/build" \
   -DHDF5_DIR="$INSTALL_DIR/hdf5/cmake" \
   -DMITK_USE_Python3=ON \
   -DPython3_EXECUTABLE="$PY" \
+  -DPython3_ROOT_DIR="$INSTALL_DIR/python" \
+  -DPython3_FIND_STRATEGY=LOCATION \
+  -DPython3_INCLUDE_DIR="$INSTALL_DIR/python/include/python$PY_MM" \
+  -DPython3_LIBRARY="$INSTALL_DIR/python/lib/libpython$PY_MM.so" \
   -DMITK_USE_SimpleITK=OFF \
   -DMITK_USE_BLUEBERRY=ON
 cmake --build "$BLD_DIR/mitk/build" -j"$NPROC"
