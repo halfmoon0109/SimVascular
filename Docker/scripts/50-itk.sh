@@ -26,6 +26,8 @@ cmake -S "$BLD_DIR/itk" -B "$BLD_DIR/itk/build" -G Ninja \
   -DITK_USE_SYSTEM_HDF5=ON \
   -DHDF5_DIR="$INSTALL_DIR/hdf5/cmake" \
   -DVTK_DIR="$INSTALL_DIR/vtk/lib/cmake/vtk-$VTK_MM" \
+  -DQt6_DIR="$INSTALL_DIR/qt6/lib/cmake/Qt6" \
+  -DCMAKE_PREFIX_PATH="$INSTALL_DIR/qt6" \
   -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR/itk"
 cmake --build "$BLD_DIR/itk/build" -j"$NPROC"
 cmake --install "$BLD_DIR/itk/build"
