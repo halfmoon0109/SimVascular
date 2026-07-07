@@ -32,6 +32,10 @@ cmake -S "$BLD_DIR/itk" -B "$BLD_DIR/itk/build" -G Ninja \
   -DBUILD_EXAMPLES=OFF \
   -DModule_ITKReview=ON \
   -DModule_ITKVtkGlue=ON \
+  -DModule_ITKOpenJPEG=ON \
+  -DModule_GrowCut=ON \
+  -DModule_IsotropicWavelets=ON \
+  -DITK_SKIP_PATH_LENGTH_CHECKS=ON \
   -DITK_USE_SYSTEM_GDCM=ON \
   -DGDCM_DIR="$INSTALL_DIR/gdcm/lib/gdcm-$GDCM_MM" \
   -DITK_USE_SYSTEM_HDF5=ON \
