@@ -16,8 +16,15 @@ mkdir -p "$SRC_DIR" "$BLD_DIR" "$INSTALL_DIR"
 # because our interpreter is built --enable-shared.
 if [ -d "$INSTALL_DIR/python/bin" ]; then
   export PATH="$INSTALL_DIR/python/bin:$PATH"
-  export LD_LIBRARY_PATH="$INSTALL_DIR/python/lib:${LD_LIBRARY_PATH:-}"
 fi
+
+# Expose every external's lib dir on LD_LIBRARY_PATH. Needed both at runtime
+# and during MITK's install-time fixup_bundle step, which resolves shared-lib
+# prerequisites ldd-style and otherwise cannot locate our out-of-tree externals
+# (e.g. libITKIOIPL-5.4.so.1 from our ITK install).
+for _d in python vtk itk gdcm hdf5 opencascade tinyxml2 freetype mmg qt6; do
+  [ -d "$INSTALL_DIR/$_d/lib" ] && export LD_LIBRARY_PATH="$INSTALL_DIR/$_d/lib:${LD_LIBRARY_PATH:-}"
+done
 
 # fetch <url> [output-name] : download into $SRC_DIR unless already present.
 fetch() {
