@@ -16,7 +16,9 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 banner "MITK $MITK_GIT_TAG"
 
-if [ -d "$INSTALL_DIR/mitk/lib" ]; then
+# Marker of a completed SimVascular-layout assembly (created near the end of
+# this script). The plain MITK build tree never creates include/mitk/Core.
+if [ -d "$INSTALL_DIR/mitk/include/mitk/Core" ]; then
   echo "already installed, skipping"; exit 0
 fi
 
@@ -32,6 +34,9 @@ GDCM_MM=${GDCM_VERSION%.*}
 PY_MM=${PYTHON_VERSION%.*}
 PY="$INSTALL_DIR/python/bin/python3"
 
+# Compile the MITK superbuild only if it hasn't already produced its core lib
+# (so a re-run after fixing only the install/assembly step is fast).
+if [ ! -f "$BLD_DIR/mitk/build/MITK-build/lib/libMitkCore.so" ]; then
 # Same VTK-transitively-re-finds-Python3 issue as in 50-itk.sh (EXTERNAL_VTK_DIR
 # makes MITK plain find_package(VTK) it too): pin Python3 explicitly so it
 # doesn't resolve to the system 3.10 interpreter.
@@ -59,9 +64,89 @@ cmake -S "$BLD_DIR/mitk/src" -B "$BLD_DIR/mitk/build" \
   -DMITK_USE_SimpleITK=OFF \
   -DMITK_USE_BLUEBERRY=ON
 cmake --build "$BLD_DIR/mitk/build" -j"$NPROC"
+fi   # end compile guard
 
-# Install the inner MITK-build (superbuild wrapper has no install target) into
-# the layout FindMITK.cmake expects: a toplevel dir with bin/lib/include.
-cmake --install "$BLD_DIR/mitk/build/MITK-build" --prefix "$INSTALL_DIR/mitk"
+# ---------------------------------------------------------------------------
+# Assemble the MITK install tree in the SimVascular-specific layout that
+# Code/CMake/FindMITK.cmake expects. This is NOT a plain `cmake --install`:
+# SimVascular searches ${MITK_DIR}/lib for MITK + its ep deps (DCMTK, Poco,
+# CTK) and ${MITK_DIR}/include/mitk/<Module>/... assembled from the MITK
+# SOURCE tree plus build-tree generated headers. Ported from the repo's own
+# Externals/Make/2022.10/BuildHelpers/CompileScripts/post-install-mitk-linux.sh
+# ---------------------------------------------------------------------------
+banner "Assembling MITK install tree ($INSTALL_DIR/mitk)"
+SRC="$BLD_DIR/mitk/src"
+BLD="$BLD_DIR/mitk/build"
+DST="$INSTALL_DIR/mitk"
+rm -rf "$DST"
+mkdir -p "$DST"/{bin,lib,lib/plugins,include,share} \
+         "$DST"/include/mitk/{configs,exports,ui_files,Modules} \
+         "$DST"/include/ctk
 
-echo "OK: MITK installed to $INSTALL_DIR/mitk"
+# ---- libraries + binaries: MITK-build + ep (DCMTK/Poco/CppMicroServices) ----
+cp -Rf "$BLD/MITK-build/bin/."  "$DST/bin/"           2>/dev/null || true
+cp -Rf "$BLD/MITK-build/lib/."  "$DST/lib/"           2>/dev/null || true
+cp -Rf "$BLD/ep/bin/."          "$DST/bin/"           2>/dev/null || true
+cp -Rf "$BLD/ep/lib/."          "$DST/lib/"           2>/dev/null || true
+cp -Rf "$BLD/ep/include/."      "$DST/include/"       2>/dev/null || true
+cp -Rf "$BLD/ep/share/."        "$DST/share/"         2>/dev/null || true
+cp -Rf "$BLD/ep/plugins/."      "$DST/lib/plugins/"   2>/dev/null || true
+
+# ---- CTK / qRestAPI / PythonQt shared libs (live under CTK-build) ----
+CTKBIN="$BLD/ep/src/CTK-build/CTK-build/bin"
+cp -f "$CTKBIN"/*CTK*.so*   "$DST/lib/"         2>/dev/null || true
+cp -f "$CTKBIN"/liborg*.so* "$DST/lib/plugins/" 2>/dev/null || true
+cp -f "$BLD"/ep/src/CTK-build/qRestAPI-build/*qRestAPI*.so* "$DST/lib/" 2>/dev/null || true
+cp -f "$BLD"/ep/src/CTK-build/PythonQt-build/*PythonQt*.so* "$DST/lib/" 2>/dev/null || true
+
+# ---- ctk headers ----
+for d in Core Scripting/Python/Core Scripting/Python/Widgets \
+         Visualization/VTK/Core Widgets; do
+  cp -f "$BLD"/ep/src/CTK/Libs/$d/*.h "$DST/include/ctk/" 2>/dev/null || true
+done
+find "$BLD/ep/src/CTK-build" -name "*Export.h" -exec cp -f {} "$DST/include/ctk/" \; 2>/dev/null || true
+[ -d "$BLD/ep/src/CTK/Libs/PluginFramework" ] && \
+  cp -Rf "$BLD/ep/src/CTK/Libs/PluginFramework" "$DST/include/ctk/" 2>/dev/null || true
+
+# ---- top-level MITK-build generated headers ----
+cp -f "$BLD"/MITK-build/*.h "$DST/include/mitk/" 2>/dev/null || true
+
+# ---- plugin headers (from source tree) ----
+for i in "$SRC"/Plugins/org.mitk.*/src "$SRC"/Plugins/org.blueberry.*/src; do
+  [ -d "$i" ] || continue
+  p="$(basename "$(dirname "$i")")"
+  mkdir -p "$DST/include/mitk/plugins/$p"
+  cp -R "$i"/*.h "$DST/include/mitk/plugins/$p/" 2>/dev/null || true
+done
+for i in "$SRC"/Plugins/org.mitk.*/src/*/ "$SRC"/Plugins/org.blueberry.*/src/*/; do
+  [ -d "$i" ] || continue
+  p="$(basename "$(dirname "$(dirname "$i")")")"
+  mkdir -p "$DST/include/mitk/plugins/$p/$(basename "$i")"
+  cp -R "$i"*.h "$DST/include/mitk/plugins/$p/$(basename "$i")/" 2>/dev/null || true
+done
+find "$BLD/MITK-build/Plugins" -name "*Export.h" -exec cp -f {} "$DST/include/mitk/exports/" \; 2>/dev/null || true
+
+# ---- module headers (source include + nested) ----
+for i in "$SRC"/Modules/*/include; do
+  [ -d "$i" ] || continue
+  m="$(basename "$(dirname "$i")")"
+  mkdir -p "$DST/include/mitk/$m"
+  cp -R "$i"/. "$DST/include/mitk/$m/" 2>/dev/null || true
+done
+for i in "$SRC"/Modules/*/*/include; do
+  [ -d "$i" ] || continue
+  m="$(basename "$(dirname "$(dirname "$i")")")"
+  s="$(basename "$(dirname "$i")")"
+  mkdir -p "$DST/include/mitk/$m/$s"
+  cp -R "$i"/. "$DST/include/mitk/$m/$s/" 2>/dev/null || true
+done
+
+# ---- build-tree generated headers: exports / configs / ui ----
+find "$BLD"                       -name "*Exports.h" -exec cp -f {} "$DST/include/mitk/exports/"  \; 2>/dev/null || true
+find "$BLD/MITK-build/Modules"    -name "*Export.h"  -exec cp -f {} "$DST/include/mitk/exports/"  \; 2>/dev/null || true
+find "$BLD/MITK-build/Modules"    -name "ui_*.h"     -exec cp -f {} "$DST/include/mitk/ui_files/" \; 2>/dev/null || true
+find "$BLD/MITK-build"            -name "*Config.h"  -exec cp -f {} "$DST/include/mitk/configs/"   \; 2>/dev/null || true
+
+echo "OK: MITK assembled at $DST"
+echo "    libs:    $(find "$DST/lib" -maxdepth 1 -name '*.so*' | wc -l) shared objects"
+echo "    plugins: $(find "$DST/lib/plugins" -maxdepth 1 -name '*.so*' | wc -l) plugin libs"
