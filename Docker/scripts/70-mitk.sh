@@ -16,9 +16,9 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 banner "MITK $MITK_GIT_TAG"
 
-# Marker of a completed SimVascular-layout assembly (created near the end of
-# this script). The plain MITK build tree never creates include/mitk/Core.
-if [ -d "$INSTALL_DIR/mitk/include/mitk/Core" ]; then
+# Marker of a completed SimVascular-layout assembly (created by the source
+# header mirror near the end of this script).
+if [ -d "$INSTALL_DIR/mitk/include/mitk/Modules/Core" ]; then
   echo "already installed, skipping"; exit 0
 fi
 
@@ -111,35 +111,17 @@ find "$BLD/ep/src/CTK-build" -name "*Export.h" -exec cp -f {} "$DST/include/ctk/
 # ---- top-level MITK-build generated headers ----
 cp -f "$BLD"/MITK-build/*.h "$DST/include/mitk/" 2>/dev/null || true
 
-# ---- plugin headers (from source tree) ----
-for i in "$SRC"/Plugins/org.mitk.*/src "$SRC"/Plugins/org.blueberry.*/src; do
-  [ -d "$i" ] || continue
-  p="$(basename "$(dirname "$i")")"
-  mkdir -p "$DST/include/mitk/plugins/$p"
-  cp -R "$i"/*.h "$DST/include/mitk/plugins/$p/" 2>/dev/null || true
-done
-for i in "$SRC"/Plugins/org.mitk.*/src/*/ "$SRC"/Plugins/org.blueberry.*/src/*/; do
-  [ -d "$i" ] || continue
-  p="$(basename "$(dirname "$(dirname "$i")")")"
-  mkdir -p "$DST/include/mitk/plugins/$p/$(basename "$i")"
-  cp -R "$i"*.h "$DST/include/mitk/plugins/$p/$(basename "$i")/" 2>/dev/null || true
-done
+# ---- all source headers from Modules + Plugins, structure preserved ----
+# FindMITK.cmake globs ${MITK_DIR}/include up to 6 levels deep, so exact
+# placement is irrelevant as long as each header exists somewhere under
+# include/mitk within that depth. Mirroring the source tree (headers only)
+# is the robust way to satisfy its fixed header list without hand-mapping
+# each module's internal subdirectory layout (which changed across MITK
+# versions, e.g. Modules/ContourModel/DataManagement).
+( cd "$SRC" && find Modules Plugins \
+    \( -name '*.h' -o -name '*.hpp' -o -name '*.hxx' -o -name '*.tpp' \) \
+    -exec cp -f --parents {} "$DST/include/mitk/" \; ) 2>/dev/null || true
 find "$BLD/MITK-build/Plugins" -name "*Export.h" -exec cp -f {} "$DST/include/mitk/exports/" \; 2>/dev/null || true
-
-# ---- module headers (source include + nested) ----
-for i in "$SRC"/Modules/*/include; do
-  [ -d "$i" ] || continue
-  m="$(basename "$(dirname "$i")")"
-  mkdir -p "$DST/include/mitk/$m"
-  cp -R "$i"/. "$DST/include/mitk/$m/" 2>/dev/null || true
-done
-for i in "$SRC"/Modules/*/*/include; do
-  [ -d "$i" ] || continue
-  m="$(basename "$(dirname "$(dirname "$i")")")"
-  s="$(basename "$(dirname "$i")")"
-  mkdir -p "$DST/include/mitk/$m/$s"
-  cp -R "$i"/. "$DST/include/mitk/$m/$s/" 2>/dev/null || true
-done
 
 # ---- build-tree generated headers: exports / configs / ui ----
 find "$BLD"                       -name "*Exports.h" -exec cp -f {} "$DST/include/mitk/exports/"  \; 2>/dev/null || true
