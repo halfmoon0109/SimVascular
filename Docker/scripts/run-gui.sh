@@ -16,6 +16,15 @@ $E/qt6/lib:$E/vtk/lib:$E/itk/lib:$E/gdcm/lib:$E/hdf5/lib:$E/opencascade/lib:\
 $E/tinyxml2/lib:$E/freetype/lib:$E/mmg/lib:$E/python/lib:$E/mitk/lib:\
 $E/mitk/lib/plugins:${LD_LIBRARY_PATH:-}"
 
+# CTK/BlueBerry plugin search paths (sv4gui_MitkApp reads SV_PLUGIN_PATH and
+# feeds each entry to ctkPluginFrameworkLauncher::addSearchPath). Must include
+# BOTH SimVascular's own plugins (build tree) and MITK/BlueBerry/CTK plugins
+# (our assembled MITK install), else org.mitk.gui.common fails to resolve.
+export SV_PLUGIN_PATH="\
+$WORK/build/SimVascular-build/lib/plugins:\
+$E/mitk/lib/plugins:\
+$E/mitk/bin/plugins"
+
 export QT_PLUGIN_PATH="$E/qt6/plugins"
 export QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-xcb}"
 export QT_QPA_PLATFORM_PLUGIN_PATH="$E/qt6/plugins/platforms"
