@@ -119,7 +119,8 @@ cp -f "$BLD"/MITK-build/*.h "$DST/include/mitk/" 2>/dev/null || true
 # each module's internal subdirectory layout (which changed across MITK
 # versions, e.g. Modules/ContourModel/DataManagement).
 ( cd "$SRC" && find Modules Plugins \
-    \( -name '*.h' -o -name '*.hpp' -o -name '*.hxx' -o -name '*.tpp' \) \
+    \( -name '*.h' -o -name '*.hpp' -o -name '*.hxx' \
+       -o -name '*.txx' -o -name '*.tpp' \) \
     -exec cp -f --parents {} "$DST/include/mitk/" \; ) 2>/dev/null || true
 find "$BLD/MITK-build/Plugins" -name "*Export.h" -exec cp -f {} "$DST/include/mitk/exports/" \; 2>/dev/null || true
 
