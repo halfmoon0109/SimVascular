@@ -897,6 +897,13 @@ std::vector<std::string> sv4guiMeshEdit::CreateCmdsT()
         int convertBLToNewRegion = ui->checkBoxConvertBLToNewRegion->isChecked();
         cmds.push_back("option NewRegionBoundaryLayer");
       }
+
+      if (ui->checkBoxGenerateWallMesh->isChecked())
+      {
+        cmds.push_back("option GenerateWallMesh");
+        cmds.push_back("option WallThickness "+QString::number(ui->dsbWallThicknessT->value()).toStdString());
+        cmds.push_back("option NumberOfWallLayers "+QString::number(ui->sbWallLayersT->value()).toStdString());
+      }
     }
 
 
@@ -1367,6 +1374,10 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
     ui->checkBoxConstantThicknessBL->setChecked(false);
     ui->checkBoxConvertBLToNewRegion->setChecked(false);
 
+    ui->checkBoxGenerateWallMesh->setChecked(false);
+    ui->dsbWallThicknessT->setValue(0.5);
+    ui->sbWallLayersT->setValue(2);
+
     ui->checkBoxRadiusBasedT->setChecked(false);
 
     ui->checkBoxSurfaceT->setChecked(true);
@@ -1659,6 +1670,18 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
         else if (flag == "BoundaryLayerDirection")
         {
           ui->checkBoxBoundaryLayerDirection->setChecked(true);
+        }
+        else if (flag == "GenerateWallMesh")
+        {
+          ui->checkBoxGenerateWallMesh->setChecked(true);
+        }
+        else if (flag == "WallThickness")
+        {
+          ui->dsbWallThicknessT->setValue(values[0]);
+        }
+        else if (flag == "NumberOfWallLayers")
+        {
+          ui->sbWallLayersT->setValue(values[0]);
         }
         else
         {
