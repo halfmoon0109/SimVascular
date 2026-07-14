@@ -51,6 +51,7 @@
 #include "svTetGenMeshExports.h" // For exports
 
 #include <math.h>
+#include <map>
 #include <set>
 
 #include "sv_MeshObject.h"
@@ -81,6 +82,9 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
     int useconstantblthickness;
     int newregionboundarylayer;
     int boundarylayerdirection;
+    int wallmeshflag;
+    double wallthickness;
+    int numwallsublayers;
     int refinement;
     double refinedsize;
     double sphereradius;
@@ -181,6 +185,7 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
   //TETGENMESHOBJECT ONLY: These are helper functions for some of the more complicated mesh options
   int GenerateSurfaceRemesh();
   int GenerateBoundaryLayerMesh();
+  int GenerateWallMesh(vtkPolyData* wallSurface, std::string markerListName);
   int GenerateAndMeshCaps();
   int GenerateMeshSizingFunction();
   int AppendBoundaryLayerMesh();
@@ -208,8 +213,14 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
   vtkUnstructuredGrid *volumemesh_;
   vtkUnstructuredGrid *boundarylayermesh_;
   vtkUnstructuredGrid *innerblmesh_;
+  vtkUnstructuredGrid *wallmesh_;
 
   std::set<int> wallFaceIDs_;
+
+  // Per-face vessel wall thickness (face ID -> thickness) used when
+  // generating a solid wall mesh; faces not listed use the global
+  // wall thickness from meshoptions_.
+  std::map<int,double> localWallThickness_;
 
   TGoptions meshoptions_;
 

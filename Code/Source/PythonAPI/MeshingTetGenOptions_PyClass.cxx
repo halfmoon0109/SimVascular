@@ -110,6 +110,15 @@ PyObject * CreateTetGenOptionsType(PyObject* args, PyObject* kwargs);
 //   local_edge_size: list({'face_id':int, 'edge_size':float})
 //   local_edge_size_on: Boolean.
 //
+// These options generate a solid vessel wall mesh as a separate region
+// by extruding the model surface outward by the wall thickness.
+//
+//   generate_wall_mesh: Boolean
+//   wall_thickness: float
+//   number_of_wall_layers: int
+//   local_wall_thickness: list({'face_id':int, 'thickness':float})
+//   local_wall_thickness_on: Boolean.
+//
 //   radius_meshing_centerlines: vtkPolyData object
 //   radius_meshing_on:  Boolean
 //   radius_meshing_scale: float
@@ -146,6 +155,14 @@ typedef struct {
   //PyObject* verbose;
   int volume_mesh_flag;
 
+  // Generate a solid vessel wall mesh as a separate region.
+  //
+  int generate_wall_mesh;
+  double wall_thickness;
+  int number_of_wall_layers;
+  PyObject* local_wall_thickness;
+  int local_wall_thickness_on;
+
   // Generate meshing size function data.
   //
   PyObject* local_edge_size;
@@ -173,10 +190,15 @@ namespace TetGenOption {
   //char* CoarsenPercent = "coarsen_percent";
   //char* Diagnose = "diagnose";
   //char* Epsilon = "epsilon";
+  char* GenerateWallMesh = "generate_wall_mesh";
   char* GlobalEdgeSize = "global_edge_size";
   //char* Hausd = "hausd";
   char* LocalEdgeSize = "local_edge_size";
   char* LocalEdgeSizeOn = "local_edge_size_on";
+  char* LocalWallThickness = "local_wall_thickness";
+  char* LocalWallThicknessOn = "local_wall_thickness_on";
+  char* NumberOfWallLayers = "number_of_wall_layers";
+  char* WallThickness = "wall_thickness";
   //char* MeshWallFirst = "mesh_wall_first";
   //char* NewRegionBoundaryLayer = "new_region_boundary_layer";
   char* MinimumDihedralAngle = "minimum_dihedral_angle";
@@ -216,6 +238,16 @@ namespace TetGenOption {
   char* LocalEdgeSize_EdgeSizeParam = "edge_size";
   std::string LocalEdgeSize_ErrorMsg = "The local_edge_size parameter must be a list of " + TetGenOption::LocalEdgeSize_Desc + " objects.";
 
+  // Parameter names for the 'local_wall_thickness' option.
+  //
+  std::string LocalWallThickness_Type = "dictionary ";
+  std::string LocalWallThickness_Format = "{ 'face_id':int, 'thickness':float}";
+  std::string LocalWallThickness_Desc = LocalWallThickness_Type + LocalWallThickness_Format;
+  // Use char* for these because they are used in the Python C API functions.
+  char* LocalWallThickness_FaceIDParam = "face_id";
+  char* LocalWallThickness_ThicknessParam = "thickness";
+  std::string LocalWallThickness_ErrorMsg = "The local_wall_thickness parameter must be a list of " + TetGenOption::LocalWallThickness_Desc + " objects.";
+
   // SphereRefinement parameter names.
   //
   std::string SphereRefinement_Type = "dictionary ";
@@ -253,8 +285,12 @@ namespace TetGenOption {
       //{std::string(CoarsenPercent), "CoarsenPercent"},
       //{std::string(Diagnose), "Diagnose"},
       //{std::string(Epsilon), "Epsilon"},
+      {std::string(GenerateWallMesh), "GenerateWallMesh"},
       {std::string(GlobalEdgeSize), "GlobalEdgeSize"},
       //{std::string(Hausd), "Hausd"},
+      {std::string(LocalWallThickness), "LocalWallThickness"},
+      {std::string(NumberOfWallLayers), "NumberOfWallLayers"},
+      {std::string(WallThickness), "WallThickness"},
       //{std::string(MeshWallFirst), "MeshWallFirst"},
       //{std::string(NewRegionBoundaryLayer), "NewRegionBoundaryLayer"},
       {std::string(MinimumDihedralAngle), "MinDihedral"},
@@ -277,7 +313,7 @@ namespace TetGenOption {
   // All list options are used for local mesh refinement
   // and are processed in MeshingTetGen::GenerateMeshSizingArrays().
   //
-  std::set<std::string> ListOptions { };
+  std::set<std::string> ListOptions { std::string(LocalWallThickness) };
 
   // Create a map between .msh file option names.
   //
@@ -295,6 +331,7 @@ namespace TetGenOption {
   std::string CommandLocalSize("localSize");
   std::string CommandUseCenterlineRadius("useCenterlineRadius");
   std::string CommandSphereRefinement("sphereRefinement");
+  std::string CommandLocalWallThickness("localWallThickness");
 
 
 //////////////////////////////////////////////////////
@@ -306,6 +343,13 @@ LocalEdgeSizeIsOn(PyObject* optionsObj)
 {
   auto options = (PyMeshingTetGenOptions*)optionsObj;
   return (options->local_edge_size_on == 1);
+}
+
+bool
+LocalWallThicknessIsOn(PyObject* optionsObj)
+{
+  auto options = (PyMeshingTetGenOptions*)optionsObj;
+  return (options->local_wall_thickness_on == 1);
 }
 
 bool
@@ -413,6 +457,79 @@ GetLocalEdgeSizeValues(PyObject* obj, int& faceID, double& edgeSize)
   }
   if (edgeSize <= 0) {
       PyErr_SetString(PyExc_ValueError, "The 'edge_size' parameter must be > 0");
+      return false;
+  }
+
+  return true;
+}
+
+//-------------------------------
+// CreateLocalWallThicknessValue
+//-------------------------------
+// Create a PyObject dict for the LocalWallThickness option.
+//
+PyObject *
+CreateLocalWallThicknessValue(PyUtilApiFunction& api, int faceID, double thickness)
+{
+  if (thickness <= 0) {
+      api.error("The '" + std::string(TetGenOption::LocalWallThickness_ThicknessParam) + "' must be > 0.");
+      return nullptr;
+  }
+
+  if (faceID <= 0) {
+      api.error("The '" + std::string(TetGenOption::LocalWallThickness_FaceIDParam) + "' must be > 0.");
+      return nullptr;
+  }
+
+  // Create a local wall thickness dict.
+  auto value = Py_BuildValue("{s:i, s:d}", TetGenOption::LocalWallThickness_FaceIDParam, faceID,
+      TetGenOption::LocalWallThickness_ThicknessParam, thickness);
+  Py_INCREF(value);
+
+  return value;
+}
+
+//-----------------------------
+// GetLocalWallThicknessValues
+//-----------------------------
+// Get the parameter values for the LocalWallThickness option.
+//
+bool
+GetLocalWallThicknessValues(PyObject* obj, int& faceID, double& thickness)
+{
+  faceID = 0;
+  thickness = 0.0;
+
+  // Check the LocalWallThickness_FaceIDParam key.
+  //
+  PyObject* faceIDItem = PyDict_GetItemString(obj, TetGenOption::LocalWallThickness_FaceIDParam);
+  if (faceIDItem == nullptr) {
+      PyErr_SetString(PyExc_ValueError, "No 'face_id' key");
+      return false;
+  }
+  faceID = PyLong_AsLong(faceIDItem);
+  if (PyErr_Occurred()) {
+      return false;
+  }
+  if (faceID <= 0) {
+      PyErr_SetString(PyExc_ValueError, "The 'face_id' paramter must be > 0");
+      return false;
+  }
+
+  // Check the LocalWallThickness_ThicknessParam key.
+  //
+  PyObject* thicknessItem = PyDict_GetItemString(obj, TetGenOption::LocalWallThickness_ThicknessParam);
+  if (thicknessItem == nullptr) {
+      PyErr_SetString(PyExc_ValueError, "No 'thickness' key");
+      return false;
+  }
+
+  thickness = PyFloat_AsDouble(thicknessItem);
+  if (PyErr_Occurred()) {
+      return false;
+  }
+  if (thickness <= 0) {
+      PyErr_SetString(PyExc_ValueError, "The 'thickness' parameter must be > 0");
       return false;
   }
 
@@ -652,6 +769,25 @@ PyTetGenOptionsGetListValues(PyObject* meshingOptions, std::string name)
           }
           std::vector<double> values = { static_cast<double>(faceID), edgeSize };
           listValues.push_back(values);
+
+      } else if ((name == TetGenOption::LocalWallThickness) && TetGenOption::LocalWallThicknessIsOn(meshingOptions)) {
+          int faceID;
+          double thickness;
+          if (!GetLocalWallThicknessValues(item, faceID, thickness)) {
+              PyObject *ptype, *pvalue, *ptraceback;
+              PyErr_Fetch(&ptype, &pvalue, &ptraceback);
+              auto pystr = PyObject_Str(pvalue);
+              auto valMsg = std::string(PyUnicode_AsUTF8(pystr));
+              auto itemRep = PyObject_Repr(item);
+              auto itemStr = std::string(PyUnicode_AsUTF8(itemRep));
+              std::string msg = itemStr + ": " + valMsg;
+              if (msg != TetGenOption::LocalWallThickness_ErrorMsg) {
+                  msg += ". " + TetGenOption::LocalWallThickness_ErrorMsg;
+              }
+              throw std::runtime_error(msg);
+          }
+          std::vector<double> values = { static_cast<double>(faceID), thickness };
+          listValues.push_back(values);
       }
   }
 
@@ -689,6 +825,35 @@ PyTetGenOptionsAddLocalEdgeSize(PyMeshingTetGenOptions* options, std::vector<std
       options->local_edge_size = edgeList;
   } else {
       PyList_Append(options->local_edge_size, value);
+  }
+}
+
+//--------------------------------------
+// PyTetGenOptionsAddLocalWallThickness
+//--------------------------------------
+// Add a local (face) wall thickness option read from a .msh file.
+//
+// The face ID is a string but must be mapped to an int.
+//
+//   <command content="localWallThickness wall_aorta 0.05" />
+//
+void
+PyTetGenOptionsAddLocalWallThickness(PyMeshingTetGenOptions* options, std::vector<std::string>& vals, std::map<std::string,int>& faceMap)
+{
+  auto api = PyUtilApiFunction("", PyRunTimeErr, __func__);
+
+  // Map the string face name to an int ID.
+  int faceID = faceMap[vals[0]];
+  auto thickness = std::stod(vals[1]);
+  auto value = CreateLocalWallThicknessValue(api, faceID, thickness);
+
+  // Create a new list or add the wall thickness to an existing list.
+  if (options->local_wall_thickness == Py_None) {
+      auto thicknessList = PyList_New(1);
+      PyList_SetItem(thicknessList, 0, value);
+      options->local_wall_thickness = thicknessList;
+  } else {
+      PyList_Append(options->local_wall_thickness, value);
   }
 }
 
@@ -769,6 +934,14 @@ PyTetGenOptionsAddMeshSizeOptions(PyMeshingTetGenOptions* options, std::map<std:
       } else if (name == CommandSphereRefinement) {
           PyTetGenOptionsAddSphereRefinement(options, values);
           options->sphere_refinement_on = 1;
+
+      // Process local wall thickness.
+      //
+      //   <command content="localWallThickness wall_aorta 0.05" />
+      //
+      } else if (name == CommandLocalWallThickness) {
+          PyTetGenOptionsAddLocalWallThickness(options, values, faceMap);
+          options->local_wall_thickness_on = 1;
       }
   }
 }
@@ -832,7 +1005,10 @@ PyTetGenOptionsCreateFromList(cvMeshObject* mesher, std::vector<std::string>& op
   using SetValueMapType  = std::map<std::string, std::function<void(OptType, ArgType, MapType)>>;
   SetValueMapType SetValueMap = {
     {pyToSvNameMap[AllowMultipleRegions], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->allow_multiple_regions = std::stoi(vals[0]); }},
+    {pyToSvNameMap[GenerateWallMesh], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->generate_wall_mesh = 1; }},
     {pyToSvNameMap[GlobalEdgeSize], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->global_edge_size = std::stof(vals[0]); }},
+    {pyToSvNameMap[NumberOfWallLayers], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->number_of_wall_layers = std::stoi(vals[0]); }},
+    {pyToSvNameMap[WallThickness], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->wall_thickness = std::stod(vals[0]); }},
     //{pyToSvNameMap[LocalEdgeSize], [](OptType opt, ArgType vals, MapType fmap) -> void { PyTetGenOptionsAddLocalEdgeSize(opt,vals,fmap); }},
     {pyToSvNameMap[MinimumDihedralAngle], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->minimum_dihedral_angle = std::stod(vals[0]); }},
     {pyToSvNameMap[NoBisect], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->no_bisect = Py_BuildValue("i", 1); }},
@@ -998,6 +1174,40 @@ PyTetGenOptions_create_local_edge_size(PyMeshingTetGenOptions* self, PyObject* a
   return value;
 }
 
+//------------------------------------------
+// PyTetGenOptions_create_local_wall_thickness
+//------------------------------------------
+//
+PyDoc_STRVAR(PyTetGenOptions_create_local_wall_thickness_doc,
+  "create_local_wall_thickness(face_id, thickness)  \n\
+  \n\
+  Create a value for the local_wall_thickness option. \n\
+  \n\
+  Args:  \n\
+    face_id (int): The ID of the face to set the wall thickness for.  \n\
+    thickness (float): The vessel wall thickness for the face.  \n\
+");
+
+static PyObject *
+PyTetGenOptions_create_local_wall_thickness(PyMeshingTetGenOptions* self, PyObject* args, PyObject* kwargs)
+{
+  auto api = PyUtilApiFunction("id", PyRunTimeErr, __func__);
+  static char *keywords[] = { TetGenOption::LocalWallThickness_FaceIDParam, TetGenOption::LocalWallThickness_ThicknessParam, nullptr };
+  int faceID = 0;
+  double thickness = 0.0;
+
+  if (!PyArg_ParseTupleAndKeywords(args, kwargs, api.format, keywords, &faceID, &thickness)) {
+      return api.argsError();
+  }
+
+  auto value = CreateLocalWallThicknessValue(api, faceID, thickness);
+  if (value == nullptr) {
+      return nullptr;
+  }
+
+  return value;
+}
+
 //----------------------------
 // PyTetGenOptions_get_values
 //----------------------------
@@ -1028,7 +1238,14 @@ PyTetGenOptions_get_values(PyMeshingTetGenOptions* self, PyObject* args)
 
   //PyDict_SetItemString(values, TetGenOption::Epsilon, Py_BuildValue("d", self->epsilon));
 
+  PyDict_SetItemString(values, TetGenOption::GenerateWallMesh, PyBool_FromLong(self->generate_wall_mesh));
+
   PyDict_SetItemString(values, TetGenOption::GlobalEdgeSize, Py_BuildValue("d", self->global_edge_size));
+
+  PyDict_SetItemString(values, TetGenOption::LocalWallThickness, self->local_wall_thickness);
+  PyDict_SetItemString(values, TetGenOption::LocalWallThicknessOn, PyBool_FromLong(self->local_wall_thickness_on));
+  PyDict_SetItemString(values, TetGenOption::NumberOfWallLayers, Py_BuildValue("i", self->number_of_wall_layers));
+  PyDict_SetItemString(values, TetGenOption::WallThickness, Py_BuildValue("d", self->wall_thickness));
 
   //PyDict_SetItemString(values, TetGenOption::Hausd, Py_BuildValue("d", self->hausd));
 
@@ -1113,6 +1330,13 @@ PyTetGenOptions_set_defaults(PyMeshingTetGenOptions* self)
   Py_INCREF(self->local_edge_size);
   self->local_edge_size_on = 0;
 
+  self->generate_wall_mesh = 0;
+  self->wall_thickness = 0.0;
+  self->number_of_wall_layers = 2;
+  self->local_wall_thickness = PyList_New(0);
+  Py_INCREF(self->local_wall_thickness);
+  self->local_wall_thickness_on = 0;
+
   self->radius_meshing_centerlines = Py_BuildValue("");
   self->radius_meshing_compute_centerlines = 0;
   self->radius_meshing_on = 0;
@@ -1189,6 +1413,8 @@ static PyMethodDef PyTetGenOptionsMethods[] = {
 
   {"create_local_edge_size", (PyCFunction)PyTetGenOptions_create_local_edge_size, METH_VARARGS|METH_KEYWORDS, PyTetGenOptions_create_local_edge_size_doc},
 
+  {"create_local_wall_thickness", (PyCFunction)PyTetGenOptions_create_local_wall_thickness, METH_VARARGS|METH_KEYWORDS, PyTetGenOptions_create_local_wall_thickness_doc},
+
   {"create_sphere_refinement", (PyCFunction)PyTetGenOptions_create_sphere_refinement, METH_VARARGS|METH_KEYWORDS, PyTetGenOptions_create_sphere_refinement_doc},
   {nullptr, nullptr}
 };
@@ -1217,6 +1443,22 @@ PyDoc_STRVAR(boundary_layer_inside_doc,
    \n\
    If True then place the boundary layer inside the solid model surface.   \n\
    This is used for creating a boundary layer for CFD.                     \n\
+   \n\
+");
+
+PyDoc_STRVAR(generate_wall_mesh_doc,
+  "Type: bool                                                              \n\
+   Default: False                                                          \n\
+   \n\
+   If True then generate a solid vessel wall mesh as a separate region by  \n\
+   extruding the solid model surface outward by the wall thickness. The    \n\
+   fluid mesh keeps its boundary layer so the final mesh contains a fluid  \n\
+   region (ModelRegionID 1) with a boundary layer and a solid wall region  \n\
+   (ModelRegionID 2). This is used for FSI simulations.                    \n\
+   \n\
+   Wall meshing requires boundary layer meshing placed inside the solid    \n\
+   model surface (boundary_layer_inside True) and a wall thickness set     \n\
+   with the 'wall_thickness' option.                                       \n\
    \n\
 ");
 
@@ -1265,6 +1507,39 @@ PyDoc_STRVAR(local_edge_size_on_doc,
    \n\
 ");
 
+PyDoc_STRVAR(local_wall_thickness_doc,
+  "Type: list({'face_id':int, 'thickness':float})                         \n\
+   Default: []                                                            \n\
+   \n\
+   Specify a list of local vessel wall thicknesses for solid model faces. \n\
+   This is used to create a solid wall mesh with a different thickness    \n\
+   for different faces of the solid model; faces without a local wall     \n\
+   thickness use the global 'wall_thickness' option value.                \n\
+   \n\
+   The 'face_id' parameter is an integer ID identifying a solid model     \n\
+   face. The solid model face IDs are obtained using the TetGen mesher    \n\
+   get_model_face_ids() method.                                           \n\
+   \n\
+   The 'thickness' parameter is the vessel wall thickness for the face.   \n\
+   \n\
+   Using local wall thicknesses is enabled by setting the                 \n\
+   'local_wall_thickness_on' meshing option to True.                      \n\
+   \n\
+   Example: Setting values for the local wall thickness option            \n\
+   \n\
+      options.local_wall_thickness = [ {'face_id':1, 'thickness':0.05} ]  \n\
+      options.local_wall_thickness_on = True                              \n\
+   \n\
+");
+
+PyDoc_STRVAR(local_wall_thickness_on_doc,
+  "Type: bool                                                             \n\
+   Default: False                                                         \n\
+   \n\
+   If True then enable using local wall thicknesses for wall meshing.     \n\
+   \n\
+");
+
 PyDoc_STRVAR(minimum_dihedral_angle_doc,
   "Type: float                                                             \n\
    Default: 0.0                                                            \n\
@@ -1295,6 +1570,15 @@ PyDoc_STRVAR(optimization_doc,
    \n\
    The number of times to optimize the mesh. Optimization moves nodes to   \n\
    obtain a better quality mesh.                                           \n\
+   \n\
+");
+
+PyDoc_STRVAR(number_of_wall_layers_doc,
+  "Type: int                                                               \n\
+   Default: 2                                                              \n\
+   \n\
+   The number of element layers through the thickness of the solid vessel  \n\
+   wall mesh. The element layers have a uniform thickness.                 \n\
    \n\
 ");
 
@@ -1417,6 +1701,19 @@ PyDoc_STRVAR(use_mmg_doc,
    \n\
 ");
 
+PyDoc_STRVAR(wall_thickness_doc,
+  "Type: float                                                             \n\
+   Default: 0.0                                                            \n\
+   \n\
+   The thickness of the solid vessel wall mesh. The solid model surface is \n\
+   extruded outward by this distance to create the wall mesh. A wall       \n\
+   thickness greater than zero must be set to generate a wall mesh.        \n\
+   \n\
+   The wall thickness can be overridden for individual faces using the     \n\
+   'local_wall_thickness' option.                                          \n\
+   \n\
+");
+
 PyDoc_STRVAR(volume_mesh_flag_doc,
   "Type: bool                                                              \n\
    Default: True                                                           \n\
@@ -1432,11 +1729,17 @@ static PyMemberDef PyTetGenOptionsMembers[] = {
     //{TetGenOption::CoarsenPercent, T_DOUBLE, offsetof(PyMeshingTetGenOptions, coarsen_percent), 0, "coarsen_percent"},
     //{TetGenOption::Diagnose, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, diagnose), 0, "Diagnose"},
     //{TetGenOption::Epsilon, T_DOUBLE, offsetof(PyMeshingTetGenOptions, epsilon), 0, "Epsilon"},
+    {TetGenOption::GenerateWallMesh, T_BOOL, offsetof(PyMeshingTetGenOptions, generate_wall_mesh), 0, generate_wall_mesh_doc},
     {TetGenOption::GlobalEdgeSize, T_DOUBLE, offsetof(PyMeshingTetGenOptions, global_edge_size), 0, global_edge_size_doc},
     //{TetGenOption::Hausd, T_DOUBLE, offsetof(PyMeshingTetGenOptions, hausd), 0, "Hausd"},
 
     {TetGenOption::LocalEdgeSize, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, local_edge_size), 0, local_edge_size_doc},
     {TetGenOption::LocalEdgeSizeOn, T_BOOL, offsetof(PyMeshingTetGenOptions, local_edge_size_on), 0, local_edge_size_on_doc},
+
+    {TetGenOption::LocalWallThickness, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, local_wall_thickness), 0, local_wall_thickness_doc},
+    {TetGenOption::LocalWallThicknessOn, T_BOOL, offsetof(PyMeshingTetGenOptions, local_wall_thickness_on), 0, local_wall_thickness_on_doc},
+
+    {TetGenOption::NumberOfWallLayers, T_INT, offsetof(PyMeshingTetGenOptions, number_of_wall_layers), 0, number_of_wall_layers_doc},
 
     //{TetGenOption::MeshWallFirst, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, mesh_wall_first), 0, mesh_wall_first_doc},
 
@@ -1461,6 +1764,7 @@ static PyMemberDef PyTetGenOptionsMembers[] = {
     {TetGenOption::SurfaceMeshFlag, T_BOOL, offsetof(PyMeshingTetGenOptions, surface_mesh_flag), 0, surface_mesh_flag_doc},
 
     {TetGenOption::UseMMG, T_BOOL, offsetof(PyMeshingTetGenOptions, use_mmg), 0, use_mmg_doc},
+    {TetGenOption::WallThickness, T_DOUBLE, offsetof(PyMeshingTetGenOptions, wall_thickness), 0, wall_thickness_doc},
     //{TetGenOption::Verbose, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, verbose), 0, "Verbose"},
     {TetGenOption::VolumeMeshFlag, T_BOOL, offsetof(PyMeshingTetGenOptions, volume_mesh_flag), 0, volume_mesh_flag_doc},
     {nullptr}

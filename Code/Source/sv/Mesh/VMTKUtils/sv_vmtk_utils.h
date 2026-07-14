@@ -101,7 +101,8 @@ SV_EXPORT_VMTK_UTILS int VMTKUtils_AppendData(vtkUnstructuredGrid *meshFromTetGe
     vtkUnstructuredGrid *surfaceWithSize,
     vtkUnstructuredGrid *newMeshVolume,
     vtkPolyData *newMeshSurface,
-    int newRegionBoundaryLayer);
+    int newRegionBoundaryLayer,
+    vtkUnstructuredGrid *wallMesh = nullptr);
 
 SV_EXPORT_VMTK_UTILS int VMTKUtils_ResetOriginalRegions(vtkPolyData *newgeom,
     vtkPolyData *originalgeom,
@@ -126,6 +127,6 @@ SV_EXPORT_VMTK_UTILS int VMTKUtils_CreateBoundaryLayerSurfaceAndCaps(vtkUnstruct
 
 SV_EXPORT_VMTK_UTILS int VMTKUtils_CreateNewBoundaryLayerRegion(vtkUnstructuredGrid* meshFromTetGen, vtkUnstructuredGrid *surfaceWithSize,
   vtkUnstructuredGrid *newMeshVolume, vtkPolyData* newMeshSurface, vtkSmartPointer<vtkUnstructuredGrid>& boundaryMeshVolume,
-  vtkSmartPointer<vtkPolyData>& boundaryMeshSurface);
+  vtkSmartPointer<vtkPolyData>& boundaryMeshSurface, vtkPolyData* interiorSurfaceSource = nullptr);
 
 #endif //__CV_VMTK_UTILS_H

@@ -138,7 +138,7 @@ bool sv4guiMeshTetGen::Execute(std::string flag, double values[20], std::string 
 
     if(option)
     {
-        if(flag=="LocalEdgeSize")
+        if(flag=="LocalEdgeSize" || flag=="LocalWallThickness")
         {
             if(m_ModelElement==nullptr)
             {
@@ -385,6 +385,31 @@ bool sv4guiMeshTetGen::ParseCommand(std::string cmd, std::string& flag, double v
         {
           flag="BoundaryLayerDirection";
           values[0]=std::stod(params[1]);
+          option=true;
+        }
+        else if(params[0]=="generatewallmesh")
+        {
+          flag="GenerateWallMesh";
+          values[0]=1;
+          option=true;
+        }
+        else if(paramSize==2 && params[0]=="wallthickness")
+        {
+          flag="WallThickness";
+          values[0]=std::stod(params[1]);
+          option=true;
+        }
+        else if(paramSize==2 && params[0]=="numberofwalllayers")
+        {
+          flag="NumberOfWallLayers";
+          values[0]=std::stod(params[1]);
+          option=true;
+        }
+        else if(paramSize==3 && params[0]=="localwallthickness")
+        {
+          flag="LocalWallThickness";
+          values[0]=std::stod(params[2]);
+          strValues[0]=params[1];
           option=true;
         }
         else if(paramSize==3 && (params[0]=="localedgesize" || params[0]=="localsize"))

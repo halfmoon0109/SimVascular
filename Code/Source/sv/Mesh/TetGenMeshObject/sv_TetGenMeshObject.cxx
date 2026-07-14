@@ -89,6 +89,7 @@ cvTetGenMeshObject::cvTetGenMeshObject() : cvMeshObject()
   volumemesh_ = nullptr;
   boundarylayermesh_ = nullptr;
   innerblmesh_ = nullptr;
+  wallmesh_ = nullptr;
   holelist_ = nullptr;
   regionlist_ = nullptr;
   regionsizelist_ = nullptr;
@@ -123,6 +124,9 @@ cvTetGenMeshObject::cvTetGenMeshObject() : cvMeshObject()
   meshoptions_.useconstantblthickness=0;
   meshoptions_.newregionboundarylayer=0;
   meshoptions_.boundarylayerdirection=1;
+  meshoptions_.wallmeshflag=0;
+  meshoptions_.wallthickness=0.0;
+  meshoptions_.numwallsublayers=2;
   meshoptions_.refinement=0;
   meshoptions_.refinedsize=0;
   meshoptions_.sphereradius=0;
@@ -196,6 +200,9 @@ cvTetGenMeshObject::~cvTetGenMeshObject()
 
   if (innerblmesh_ != nullptr)
     innerblmesh_->Delete();
+
+  if (wallmesh_ != nullptr)
+    wallmesh_->Delete();
 
   if (holelist_ != nullptr)
     holelist_->Delete();
@@ -1012,6 +1019,52 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
       return SV_ERROR;
     meshoptions_.boundarylayerdirection=values[0];
   }
+  else if (!strncmp(flags,"GenerateWallMesh",16)) {
+    // With no value the option acts as a flag enabling wall meshing.
+    if (numValues < 1)
+    {
+      meshoptions_.wallmeshflag=1;
+    }
+    else
+    {
+      meshoptions_.wallmeshflag=(values[0] != 0.0);
+    }
+  }
+  else if (!strncmp(flags,"LocalWallThickness",18)) {
+    if (numValues < 2)
+    {
+      fprintf(stderr,"Must give face id and local wall thickness\n");
+      return SV_ERROR;
+    }
+    if (values[1] <= 0.0)
+    {
+      fprintf(stderr,"Local wall thickness must be greater than zero\n");
+      return SV_ERROR;
+    }
+    localWallThickness_[(int)values[0]]=values[1];
+  }
+  else if (!strncmp(flags,"WallThickness",13)) {
+    if (numValues < 1)
+      return SV_ERROR;
+    // A value of zero means the wall thickness is not set; whether a
+    // positive wall thickness has been set is checked in GenerateMesh().
+    if (values[0] < 0.0)
+    {
+      fprintf(stderr,"Wall thickness must be greater than zero\n");
+      return SV_ERROR;
+    }
+    meshoptions_.wallthickness=values[0];
+  }
+  else if (!strncmp(flags,"NumberOfWallLayers",18)) {
+    if (numValues < 1)
+      return SV_ERROR;
+    if ((int)values[0] < 1)
+    {
+      fprintf(stderr,"Number of wall layers must be at least one\n");
+      return SV_ERROR;
+    }
+    meshoptions_.numwallsublayers=(int)values[0];
+  }
   else if (!strncmp(flags,"AllowMultipleRegions",20)) {
       meshoptions_.allowMultipleRegions = (int(values[0]) == 1);
   }
@@ -1258,6 +1311,29 @@ int cvTetGenMeshObject::SetSizeFunctionBasedMesh(double size,char *sizefunctionn
  */
 
 int cvTetGenMeshObject::GenerateMesh() {
+
+  // Check the options controlling the generation of a solid vessel wall mesh.
+  //
+  if (meshoptions_.wallmeshflag)
+  {
+    if (!meshoptions_.boundarylayermeshflag)
+    {
+      fprintf(stderr,"Boundary layer meshing must be enabled to generate a vessel wall mesh\n");
+      return SV_ERROR;
+    }
+    if (meshoptions_.boundarylayerdirection != 1)
+    {
+      fprintf(stderr,"The boundary layer must extrude inward (BoundaryLayerDirection 1)\
+ when generating a vessel wall mesh\n");
+      return SV_ERROR;
+    }
+    if (meshoptions_.wallthickness <= 0.0)
+    {
+      fprintf(stderr,"A wall thickness greater than zero (option WallThickness) must be set\
+ to generate a vessel wall mesh\n");
+      return SV_ERROR;
+    }
+  }
 
   if (surfacemesh_ != nullptr)
   {
@@ -1514,10 +1590,22 @@ int cvTetGenMeshObject::GenerateMesh() {
   // the IDs from the original input model. This is not done for boundary layer
   // meshing extruded outward.
   //
-  if (meshoptions_.boundarylayermeshflag && (meshoptions_.boundarylayerdirection == 1)) { 
+  // This is also not done when a wall mesh is generated: the wall surface lies
+  // outside of the original model so its face IDs (e.g. the IDs on the wall
+  // end caps) cannot be set from the original model surface.
+  //
+  if (meshoptions_.boundarylayermeshflag && (meshoptions_.boundarylayerdirection == 1)
+    && !meshoptions_.wallmeshflag) {
     if (TGenUtils_ResetOriginalRegions(surfacemesh_ ,originalpolydata_, "ModelFaceID") != SV_OK) {
       std::cout << "Failed to reset original face IDs for boundary layer mesh." << std::endl;
     }
+  }
+
+  // Report the quality of the volume mesh. The element aspect ratios are
+  // also stored in an 'AspectRatio' cell data array on the volume mesh.
+  //
+  if (meshoptions_.volumemeshflag && (volumemesh_ != nullptr)) {
+    TGenUtils_ReportMeshQuality(volumemesh_);
   }
 
   return SV_OK;
@@ -2063,12 +2151,138 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
     polydatasolid_->GetCellData()->AddArray(newEntityIds);
   }
 
+  // Generate a solid vessel wall mesh by extruding the original model
+  // surface outward by the wall thickness. The wall mesh is appended
+  // to the fluid mesh as a separate region (see AppendBoundaryLayerMesh).
+  //
+  if (meshoptions_.wallmeshflag)
+  {
+    if (GenerateWallMesh(originalsurfpd, markerListName) != SV_OK)
+    {
+      fprintf(stderr,"Problem with vessel wall meshing\n");
+      return SV_ERROR;
+    }
+  }
+
 #else
   fprintf(stderr,"Cannot generate a boundary layer mesh without VMTK\n");
   return SV_ERROR;
 #endif
 
   return SV_OK;
+}
+
+//------------------
+// GenerateWallMesh
+//------------------
+// Generate a solid vessel wall mesh by extruding the given surface (the
+// original model wall surface, no caps) outward using the vmtk boundary
+// layer generator.
+//
+// The wall thickness at each surface node is taken from the global
+// 'WallThickness' option; faces with a 'LocalWallThickness' option override
+// the global value in the same way local edge sizes override the global
+// edge size.
+//
+// The generated mesh is stored in the member data 'wallmesh_'.
+//
+// Arguments:
+//   wallSurface - The model wall surface with outward oriented point normals.
+//   markerListName - The name of the cell array used to mark the extruded
+//     mesh cells (see GenerateBoundaryLayerMesh).
+//
+int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string markerListName)
+{
+#ifdef SV_USE_VMTK
+  if (wallmesh_ != nullptr)
+  {
+    wallmesh_->Delete();
+    wallmesh_ = nullptr;
+  }
+
+  if (meshoptions_.wallthickness <= 0.0)
+  {
+    fprintf(stderr,"A wall thickness greater than zero must be set to generate a wall mesh\n");
+    return SV_ERROR;
+  }
+
+  // Create a point data array giving the wall thickness at each node
+  // of the surface.
+  //
+  auto surface = vtkSmartPointer<vtkPolyData>::New();
+  surface->DeepCopy(wallSurface);
+
+  int numPts = surface->GetNumberOfPoints();
+  auto thicknessArray = vtkSmartPointer<vtkDoubleArray>::New();
+  thicknessArray->SetNumberOfComponents(1);
+  thicknessArray->SetNumberOfTuples(numPts);
+  thicknessArray->FillComponent(0, meshoptions_.wallthickness);
+  thicknessArray->SetName("WallThickness");
+
+  // Override the global wall thickness for faces with a local wall thickness.
+  if (!localWallThickness_.empty())
+  {
+    auto faceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
+    if (faceIds == nullptr)
+    {
+      fprintf(stderr,"No 'ModelFaceID' array on the surface; cannot set local wall thickness\n");
+      return SV_ERROR;
+    }
+    surface->BuildLinks();
+    for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+    {
+      auto localThickness = localWallThickness_.find(faceIds->GetValue(cellId));
+      if (localThickness == localWallThickness_.end())
+      {
+        continue;
+      }
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellId,npts,pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        thicknessArray->SetValue(pts[j], localThickness->second);
+      }
+    }
+  }
+
+  surface->GetPointData()->RemoveArray("WallThickness");
+  surface->GetPointData()->AddArray(thicknessArray);
+
+  // Convert the surface to a vtkUnstructuredGrid as required by the vmtk
+  // boundary layer generator.
+  auto converter = vtkSmartPointer<vtkvmtkPolyDataToUnstructuredGridFilter>::New();
+  converter->SetInputData(surface);
+  converter->Update();
+
+  wallmesh_ = vtkUnstructuredGrid::New();
+  wallmesh_->DeepCopy(converter->GetOutput());
+
+  // Extrude the wall mesh outward (negateWarpVectors = 0) with the thickness
+  // given by the 'WallThickness' point data array. A sublayer ratio of 1.0
+  // gives element layers of uniform thickness through the wall.
+  //
+  int negateWarpVectors = 0;
+  int innerSurfaceCellId = 1;
+  int sidewallCellEntityId = 9999;
+  int useConstantThickness = 0;
+  double thicknessFactor = 1.0;
+  double wallSublayerRatio = 1.0;
+  auto outerSurface = vtkSmartPointer<vtkUnstructuredGrid>::New();
+
+  if (VMTKUtils_BoundaryLayerMesh(wallmesh_, outerSurface, meshoptions_.wallthickness, thicknessFactor,
+	meshoptions_.numwallsublayers, wallSublayerRatio, sidewallCellEntityId, innerSurfaceCellId,
+	negateWarpVectors, markerListName, useConstantThickness, "WallThickness") != SV_OK)
+  {
+    fprintf(stderr,"Problem with wall mesh extrusion\n");
+    return SV_ERROR;
+  }
+
+  return SV_OK;
+#else
+  fprintf(stderr,"Cannot generate a wall mesh without VMTK\n");
+  return SV_ERROR;
+#endif
 }
 
 /**
@@ -2278,9 +2492,28 @@ int cvTetGenMeshObject::AppendBoundaryLayerMesh()
   auto newVolumeMesh = vtkSmartPointer<vtkUnstructuredGrid>::New();
   auto newSurfaceMesh = vtkSmartPointer<vtkPolyData>::New();
   int giveblnewregion = meshoptions_.newregionboundarylayer;
+
+  // When a wall mesh is generated it becomes the new region and the
+  // boundary layer remains part of the fluid region.
+  vtkUnstructuredGrid* wallmesh = nullptr;
+  if (meshoptions_.wallmeshflag)
+  {
+    if (wallmesh_ == nullptr)
+    {
+      fprintf(stderr,"Cannot append mesh without a wall mesh\n");
+      return SV_ERROR;
+    }
+    wallmesh = wallmesh_;
+    if (giveblnewregion)
+    {
+      fprintf(stdout,"Note: the NewRegionBoundaryLayer option is ignored when generating a wall mesh\n");
+      giveblnewregion = 0;
+    }
+  }
+
   fprintf(stdout,"Appending Boundary Layer and Volume Mesh\n");
   if (VMTKUtils_AppendData(volumemesh_,boundarylayermesh_,
-    surfacetomesh->GetOutput(), newVolumeMesh, newSurfaceMesh, giveblnewregion) != SV_OK)
+    surfacetomesh->GetOutput(), newVolumeMesh, newSurfaceMesh, giveblnewregion, wallmesh) != SV_OK)
   {
     return SV_ERROR;
   }
