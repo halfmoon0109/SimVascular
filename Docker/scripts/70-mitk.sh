@@ -56,6 +56,7 @@ cmake -S "$BLD_DIR/mitk/src" -B "$BLD_DIR/mitk/build" \
   -DMITK_USE_HDF5=ON \
   -DHDF5_DIR="$INSTALL_DIR/hdf5/cmake" \
   -DMITK_USE_Python3=ON \
+  -DMITK_BUILD_org.mitk.gui.qt.python=ON \
   -DPython3_EXECUTABLE="$PY" \
   -DPython3_ROOT_DIR="$INSTALL_DIR/python" \
   -DPython3_FIND_STRATEGY=LOCATION \
