@@ -91,6 +91,8 @@ sv4guiMeshEdit::sv4guiMeshEdit() :
     m_TableModelLocal=nullptr;
     m_TableMenuLocal=nullptr;
 
+    m_TableModelWallThickness=nullptr;
+
     m_TableModelRegion=nullptr;
     m_TableMenuRegion=nullptr;
 
@@ -119,6 +121,9 @@ sv4guiMeshEdit::~sv4guiMeshEdit()
 
     if(m_TableMenuLocal)
         delete m_TableMenuLocal;
+
+    if(m_TableModelWallThickness)
+        delete m_TableModelWallThickness;
 
     if(m_TableModelRegion)
         delete m_TableModelRegion;
@@ -199,6 +204,10 @@ void sv4guiMeshEdit::SetupGUI(QWidget *parent )
     QAction* clearLocalTAction=m_TableMenuLocal->addAction("Clear Local Size");
     connect( setLocalTAction, SIGNAL( triggered(bool) ) , this, SLOT( SetLocal(bool) ) );
     connect( clearLocalTAction, SIGNAL( triggered(bool) ) , this, SLOT( ClearLocal(bool) ) );
+
+    //for per-face wall thickness table
+    m_TableModelWallThickness = new QStandardItemModel(this);
+    ui->tableViewWallThickness->setModel(m_TableModelWallThickness);
 
     //for regional table
     connect(ui->checkBoxSphere, SIGNAL(toggled(bool)), this, SLOT(ShowSphereInteractor(bool)));
@@ -898,11 +907,27 @@ std::vector<std::string> sv4guiMeshEdit::CreateCmdsT()
         cmds.push_back("option NewRegionBoundaryLayer");
       }
 
-      if (ui->checkBoxGenerateWallMesh->isChecked())
+    }
+
+    // Solid vessel wall mesh options (separate "Wall Mesh" page). Emitted
+    // independently of the boundary layer options; the core mesher validates
+    // that boundary layer meshing is enabled and reports an error otherwise.
+    if (ui->checkBoxGenerateWallMesh->isChecked())
+    {
+      cmds.push_back("option GenerateWallMesh");
+      cmds.push_back("option WallThickness "+QString::number(ui->dsbWallThicknessT->value()).toStdString());
+      cmds.push_back("option NumberOfWallLayers "+QString::number(ui->sbWallLayersT->value()).toStdString());
+
+      for(int i=0;i<m_TableModelWallThickness->rowCount();i++)
       {
-        cmds.push_back("option GenerateWallMesh");
-        cmds.push_back("option WallThickness "+QString::number(ui->dsbWallThicknessT->value()).toStdString());
-        cmds.push_back("option NumberOfWallLayers "+QString::number(ui->sbWallLayersT->value()).toStdString());
+        QStandardItem* itemName= m_TableModelWallThickness->item(i,1);
+        QString name=itemName->text();
+
+        QStandardItem* itemThickness= m_TableModelWallThickness->item(i,3);
+        QString thickness=itemThickness->text().trimmed();
+
+        if(!thickness.isEmpty())
+          cmds.push_back("localWallThickness " + name.toStdString() + " " + thickness.toStdString());
       }
     }
 
@@ -1441,6 +1466,50 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
 
     UpdateFaceListSelection();
 
+    //per-face wall thickness table
+    m_TableModelWallThickness->clear();
+
+    QStringList wallThicknessHeaders;
+    wallThicknessHeaders << "ID" << "Name" << "Type" << "Wall Thickness";
+    m_TableModelWallThickness->setHorizontalHeaderLabels(wallThicknessHeaders);
+    m_TableModelWallThickness->setColumnCount(wallThicknessHeaders.size());
+
+    int wtRowIndex=-1;
+    for(int i=0;i<faces.size();i++)
+    {
+        if(faces[i]==nullptr)
+            continue;
+
+        wtRowIndex++;
+        m_TableModelWallThickness->insertRow(wtRowIndex);
+
+        QStandardItem* wtItem;
+
+        wtItem= new QStandardItem(QString::number(faces[i]->id));
+        wtItem->setEditable(false);
+        m_TableModelWallThickness->setItem(wtRowIndex, 0, wtItem);
+
+        wtItem= new QStandardItem(QString::fromStdString(faces[i]->name));
+        wtItem->setEditable(false);
+        m_TableModelWallThickness->setItem(wtRowIndex, 1, wtItem);
+
+        wtItem= new QStandardItem(QString::fromStdString(faces[i]->type));
+        wtItem->setEditable(false);
+        m_TableModelWallThickness->setItem(wtRowIndex, 2, wtItem);
+
+        wtItem= new QStandardItem("");
+        m_TableModelWallThickness->setItem(wtRowIndex, 3, wtItem);
+    }
+
+    ui->tableViewWallThickness->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Fixed);
+    ui->tableViewWallThickness->horizontalHeader()->resizeSection(0,20);
+    ui->tableViewWallThickness->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Interactive);
+    ui->tableViewWallThickness->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Fixed);
+    ui->tableViewWallThickness->horizontalHeader()->resizeSection(2,60);
+    ui->tableViewWallThickness->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Fixed);
+    ui->tableViewWallThickness->horizontalHeader()->resizeSection(3,100);
+    ui->tableViewWallThickness->setColumnHidden(0,true);
+
     //regional refinement
     m_TableModelRegion->clear();
 
@@ -1605,6 +1674,23 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
                 if(faceID==id)
                 {
                     QStandardItem* item= m_TableModelLocal->item(j,3);
+                    item->setText(QString::number(values[0]));
+                    break;
+                }
+            }
+        }
+        else if(flag=="LocalWallThickness")
+        {
+            int faceID=modelElement->GetFaceID(strValues[0]);
+
+            for(int j=0;j<m_TableModelWallThickness->rowCount(); j++)
+            {
+                QStandardItem* itemID= m_TableModelWallThickness->item(j,0);
+                int id=itemID->text().toInt();
+
+                if(faceID==id)
+                {
+                    QStandardItem* item= m_TableModelWallThickness->item(j,3);
                     item->setText(QString::number(values[0]));
                     break;
                 }
