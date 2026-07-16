@@ -180,6 +180,11 @@ void sv4guiMeshEdit::SetupGUI(QWidget *parent )
     //global - tetgen
     connect(ui->btnEstimateT, SIGNAL(clicked()), this, SLOT(SetEstimatedEdgeSize()) );
 
+    int wallMeshPageIndex = ui->toolBox->indexOf(ui->MeshingWallMeshWidgetPage);
+    if (wallMeshPageIndex < 0)
+        wallMeshPageIndex = ui->toolBox->addItem(ui->MeshingWallMeshWidgetPage, tr("Wall Mesh"));
+    ui->toolBox->setItemText(wallMeshPageIndex, tr("Wall Mesh"));
+
     ui->toolBox->setCurrentIndex(0);
 
     //for local table
