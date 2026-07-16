@@ -198,6 +198,8 @@ protected:
     QMenu* m_TableMenuLocal;
     QStandardItemModel* m_TableModelLocal;
 
+    QStandardItemModel* m_TableModelWallThickness;
+
     QMenu* m_TableMenuRegion;
     QStandardItemModel* m_TableModelRegion;
 
