@@ -66,6 +66,9 @@
 #include "sv_misc_utils.h"
 #include "sv_vtk_utils.h"
 
+#include <algorithm>
+#include <vector>
+
 #define MAXPATHLEN 1024
 
 #ifdef SV_USE_ZLIB
@@ -1791,6 +1794,106 @@ int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh)
   else
   {
     fprintf(stdout,"  Mesh quality assessment: POOR (consider adjusting the mesh size options or remeshing)\n");
+  }
+
+  return SV_OK;
+}
+
+// -----------------------------
+// TGenUtils_SmoothPointArray
+// -----------------------------
+/**
+ * @brief Smooths a point data array over a surface by iterative Laplacian
+ * averaging.
+ * @note Each iteration replaces every point value with the average of its
+ * own value and the values of its one-ring neighbors (the points sharing a
+ * cell with it). All new values are computed from the previous iteration's
+ * values (Jacobi iteration) so the result does not depend on the order in
+ * which the points are visited. The surface geometry is not modified; only
+ * the array values change.
+ * @param surface The surface whose cells define the point neighbors.
+ * @param array The point data array to smooth; must have one tuple per
+ * surface point.
+ * @param iterations The number of averaging iterations; a value less than
+ * one leaves the array unchanged.
+ * @return SV_OK if the array is smoothed.
+ */
+
+int TGenUtils_SmoothPointArray(vtkPolyData *surface, vtkDoubleArray *array, int iterations)
+{
+  if (iterations <= 0)
+  {
+    return SV_OK;
+  }
+
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot smooth a point array without a surface and an array\n");
+    return SV_ERROR;
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The point array size does not match the number of surface points\n");
+    return SV_ERROR;
+  }
+
+  // Build the one-ring point neighbors of each point once. The points
+  // sharing a cell with a point are its neighbors.
+  //
+  surface->BuildLinks();
+  std::vector<std::vector<vtkIdType>> neighbors(numPts);
+  auto cellIds = vtkSmartPointer<vtkIdList>::New();
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    surface->GetPointCells(ptId, cellIds);
+    for (vtkIdType i = 0; i < cellIds->GetNumberOfIds(); i++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellIds->GetId(i), npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] == ptId)
+        {
+          continue;
+        }
+        auto& ptNeighbors = neighbors[ptId];
+        if (std::find(ptNeighbors.begin(), ptNeighbors.end(), pts[j]) == ptNeighbors.end())
+        {
+          ptNeighbors.push_back(pts[j]);
+        }
+      }
+    }
+  }
+
+  std::vector<double> values(numPts);
+  std::vector<double> smoothed(numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    values[ptId] = array->GetValue(ptId);
+  }
+
+  for (int iter = 0; iter < iterations; iter++)
+  {
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      double sum = values[ptId];
+      int count = 1;
+      for (auto neighborId : neighbors[ptId])
+      {
+        sum += values[neighborId];
+        count++;
+      }
+      smoothed[ptId] = sum / count;
+    }
+    values.swap(smoothed);
+  }
+
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    array->SetValue(ptId, values[ptId]);
   }
 
   return SV_OK;

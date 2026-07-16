@@ -116,6 +116,7 @@ PyObject * CreateTetGenOptionsType(PyObject* args, PyObject* kwargs);
 //   generate_wall_mesh: Boolean
 //   wall_thickness: float
 //   number_of_wall_layers: int
+//   wall_thickness_smoothing_iterations: int
 //   local_wall_thickness: list({'face_id':int, 'thickness':float})
 //   local_wall_thickness_on: Boolean.
 //
@@ -160,6 +161,7 @@ typedef struct {
   int generate_wall_mesh;
   double wall_thickness;
   int number_of_wall_layers;
+  int wall_thickness_smoothing_iterations;
   PyObject* local_wall_thickness;
   int local_wall_thickness_on;
 
@@ -199,6 +201,7 @@ namespace TetGenOption {
   char* LocalWallThicknessOn = "local_wall_thickness_on";
   char* NumberOfWallLayers = "number_of_wall_layers";
   char* WallThickness = "wall_thickness";
+  char* WallThicknessSmoothingIterations = "wall_thickness_smoothing_iterations";
   //char* MeshWallFirst = "mesh_wall_first";
   //char* NewRegionBoundaryLayer = "new_region_boundary_layer";
   char* MinimumDihedralAngle = "minimum_dihedral_angle";
@@ -291,6 +294,7 @@ namespace TetGenOption {
       {std::string(LocalWallThickness), "LocalWallThickness"},
       {std::string(NumberOfWallLayers), "NumberOfWallLayers"},
       {std::string(WallThickness), "WallThickness"},
+      {std::string(WallThicknessSmoothingIterations), "WallThicknessSmoothingIterations"},
       //{std::string(MeshWallFirst), "MeshWallFirst"},
       //{std::string(NewRegionBoundaryLayer), "NewRegionBoundaryLayer"},
       {std::string(MinimumDihedralAngle), "MinDihedral"},
@@ -1009,6 +1013,7 @@ PyTetGenOptionsCreateFromList(cvMeshObject* mesher, std::vector<std::string>& op
     {pyToSvNameMap[GlobalEdgeSize], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->global_edge_size = std::stof(vals[0]); }},
     {pyToSvNameMap[NumberOfWallLayers], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->number_of_wall_layers = std::stoi(vals[0]); }},
     {pyToSvNameMap[WallThickness], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->wall_thickness = std::stod(vals[0]); }},
+    {pyToSvNameMap[WallThicknessSmoothingIterations], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->wall_thickness_smoothing_iterations = std::stoi(vals[0]); }},
     //{pyToSvNameMap[LocalEdgeSize], [](OptType opt, ArgType vals, MapType fmap) -> void { PyTetGenOptionsAddLocalEdgeSize(opt,vals,fmap); }},
     {pyToSvNameMap[MinimumDihedralAngle], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->minimum_dihedral_angle = std::stod(vals[0]); }},
     {pyToSvNameMap[NoBisect], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->no_bisect = Py_BuildValue("i", 1); }},
@@ -1246,6 +1251,7 @@ PyTetGenOptions_get_values(PyMeshingTetGenOptions* self, PyObject* args)
   PyDict_SetItemString(values, TetGenOption::LocalWallThicknessOn, PyBool_FromLong(self->local_wall_thickness_on));
   PyDict_SetItemString(values, TetGenOption::NumberOfWallLayers, Py_BuildValue("i", self->number_of_wall_layers));
   PyDict_SetItemString(values, TetGenOption::WallThickness, Py_BuildValue("d", self->wall_thickness));
+  PyDict_SetItemString(values, TetGenOption::WallThicknessSmoothingIterations, Py_BuildValue("i", self->wall_thickness_smoothing_iterations));
 
   //PyDict_SetItemString(values, TetGenOption::Hausd, Py_BuildValue("d", self->hausd));
 
@@ -1333,6 +1339,7 @@ PyTetGenOptions_set_defaults(PyMeshingTetGenOptions* self)
   self->generate_wall_mesh = 0;
   self->wall_thickness = 0.0;
   self->number_of_wall_layers = 2;
+  self->wall_thickness_smoothing_iterations = 5;
   self->local_wall_thickness = PyList_New(0);
   Py_INCREF(self->local_wall_thickness);
   self->local_wall_thickness_on = 0;
@@ -1714,6 +1721,18 @@ PyDoc_STRVAR(wall_thickness_doc,
    \n\
 ");
 
+PyDoc_STRVAR(wall_thickness_smoothing_iterations_doc,
+  "Type: int                                                               \n\
+   Default: 5                                                              \n\
+   \n\
+   The number of smoothing iterations applied to the wall thickness values \n\
+   before the wall mesh is extruded. Smoothing makes the wall thickness    \n\
+   transition gradually where faces with different local wall thicknesses  \n\
+   meet instead of stepping abruptly at the face boundary. Set to 0 to     \n\
+   disable smoothing.                                                      \n\
+   \n\
+");
+
 PyDoc_STRVAR(volume_mesh_flag_doc,
   "Type: bool                                                              \n\
    Default: True                                                           \n\
@@ -1765,6 +1784,7 @@ static PyMemberDef PyTetGenOptionsMembers[] = {
 
     {TetGenOption::UseMMG, T_BOOL, offsetof(PyMeshingTetGenOptions, use_mmg), 0, use_mmg_doc},
     {TetGenOption::WallThickness, T_DOUBLE, offsetof(PyMeshingTetGenOptions, wall_thickness), 0, wall_thickness_doc},
+    {TetGenOption::WallThicknessSmoothingIterations, T_INT, offsetof(PyMeshingTetGenOptions, wall_thickness_smoothing_iterations), 0, wall_thickness_smoothing_iterations_doc},
     //{TetGenOption::Verbose, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, verbose), 0, "Verbose"},
     {TetGenOption::VolumeMeshFlag, T_BOOL, offsetof(PyMeshingTetGenOptions, volume_mesh_flag), 0, volume_mesh_flag_doc},
     {nullptr}

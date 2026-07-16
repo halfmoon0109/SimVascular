@@ -68,6 +68,7 @@
 
 #include <array>
 #include <set>
+#include <vector>
 #include <math.h>
 
 // -----------
@@ -127,6 +128,7 @@ cvTetGenMeshObject::cvTetGenMeshObject() : cvMeshObject()
   meshoptions_.wallmeshflag=0;
   meshoptions_.wallthickness=0.0;
   meshoptions_.numwallsublayers=2;
+  meshoptions_.wallthicknesssmoothingiterations=5;
   meshoptions_.refinement=0;
   meshoptions_.refinedsize=0;
   meshoptions_.sphereradius=0;
@@ -1042,6 +1044,17 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
       return SV_ERROR;
     }
     localWallThickness_[(int)values[0]]=values[1];
+  }
+  // Must be checked before the shorter 'WallThickness' prefix.
+  else if (!strncmp(flags,"WallThicknessSmoothingIterations",32)) {
+    if (numValues < 1)
+      return SV_ERROR;
+    if (values[0] < 0.0)
+    {
+      fprintf(stderr,"The number of wall thickness smoothing iterations must not be negative\n");
+      return SV_ERROR;
+    }
+    meshoptions_.wallthicknesssmoothingiterations=(int)values[0];
   }
   else if (!strncmp(flags,"WallThickness",13)) {
     if (numValues < 1)
@@ -2220,6 +2233,9 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   thicknessArray->SetName("WallThickness");
 
   // Override the global wall thickness for faces with a local wall thickness.
+  // A point shared by faces with different thicknesses gets the average of
+  // the thicknesses of the cells it belongs to, so the value at a face
+  // boundary does not depend on the order the cells are visited.
   if (!localWallThickness_.empty())
   {
     auto faceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
@@ -2228,21 +2244,44 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
       fprintf(stderr,"No 'ModelFaceID' array on the surface; cannot set local wall thickness\n");
       return SV_ERROR;
     }
-    surface->BuildLinks();
+    std::vector<double> thicknessSum(numPts, 0.0);
+    std::vector<int> thicknessCount(numPts, 0);
     for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
     {
       auto localThickness = localWallThickness_.find(faceIds->GetValue(cellId));
-      if (localThickness == localWallThickness_.end())
-      {
-        continue;
-      }
+      double cellThickness = (localThickness == localWallThickness_.end()) ?
+        meshoptions_.wallthickness : localThickness->second;
       vtkIdType npts;
       const vtkIdType *pts;
       surface->GetCellPoints(cellId,npts,pts);
       for (vtkIdType j = 0; j < npts; j++)
       {
-        thicknessArray->SetValue(pts[j], localThickness->second);
+        thicknessSum[pts[j]] += cellThickness;
+        thicknessCount[pts[j]] += 1;
       }
+    }
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      if (thicknessCount[ptId] > 0)
+      {
+        thicknessArray->SetValue(ptId, thicknessSum[ptId] / thicknessCount[ptId]);
+      }
+    }
+  }
+
+  // Smooth the thickness values so the wall thickness transitions gradually
+  // across face boundaries where neighboring faces have different local
+  // thicknesses; an abrupt step in the thickness would otherwise show up
+  // as a step in the extruded outer wall surface. Only the thickness values
+  // are smoothed; the surface points (the fluid/wall interface) never move.
+  // Without local overrides the thickness is uniform and smoothing is a no-op.
+  if (!localWallThickness_.empty())
+  {
+    if (TGenUtils_SmoothPointArray(surface, thicknessArray,
+          meshoptions_.wallthicknesssmoothingiterations) != SV_OK)
+    {
+      fprintf(stderr,"Problem smoothing the wall thickness array\n");
+      return SV_ERROR;
     }
   }
 

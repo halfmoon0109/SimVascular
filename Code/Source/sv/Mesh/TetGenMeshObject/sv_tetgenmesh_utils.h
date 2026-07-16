@@ -51,6 +51,7 @@
 
 #include "vtkPolyData.h"
 #include "vtkUnstructuredGrid.h"
+#include "vtkDoubleArray.h"
 
 #include "simvascular_tetgen.h"
 
@@ -118,5 +119,9 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_CheckSurfaceMesh(vtkPolyData *pd, int meshIn
 SV_EXPORT_TETGEN_MESH int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionId,double size);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh);
+
+SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothPointArray(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    int iterations);
 
 #endif //__CV_TETGENMESH_UTILS_H

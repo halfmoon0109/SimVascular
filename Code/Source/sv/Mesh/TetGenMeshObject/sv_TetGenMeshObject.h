@@ -85,6 +85,7 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
     int wallmeshflag;
     double wallthickness;
     int numwallsublayers;
+    int wallthicknesssmoothingiterations;
     int refinement;
     double refinedsize;
     double sphereradius;

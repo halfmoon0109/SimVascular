@@ -405,6 +405,12 @@ bool sv4guiMeshTetGen::ParseCommand(std::string cmd, std::string& flag, double v
           values[0]=std::stod(params[1]);
           option=true;
         }
+        else if(paramSize==2 && params[0]=="wallthicknesssmoothingiterations")
+        {
+          flag="WallThicknessSmoothingIterations";
+          values[0]=std::stod(params[1]);
+          option=true;
+        }
         else if(paramSize==3 && params[0]=="localwallthickness")
         {
           flag="LocalWallThickness";
