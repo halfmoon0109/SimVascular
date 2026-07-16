@@ -122,3 +122,4 @@ Code/Source/.cproject
 !Code/ThirdParty/msmpi/Installers/.project
 !BuildWithMake/Release/windows_installer_packages/.project
 !scripts/build.sh
+!scripts/build.ps1
