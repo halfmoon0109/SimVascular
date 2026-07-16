@@ -1728,8 +1728,8 @@ PyDoc_STRVAR(wall_thickness_smoothing_iterations_doc,
    The number of smoothing iterations applied to the wall thickness values \n\
    before the wall mesh is extruded. Smoothing makes the wall thickness    \n\
    transition gradually where faces with different local wall thicknesses  \n\
-   meet instead of stepping abruptly at the face boundary. Set to 0 to     \n\
-   disable smoothing.                                                      \n\
+   meet instead of stepping abruptly at the face boundary. The valid range \n\
+   is an integer between 0 and 50; set to 0 to disable smoothing.          \n\
    \n\
 ");
 

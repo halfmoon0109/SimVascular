@@ -67,6 +67,7 @@
 #endif
 
 #include <array>
+#include <cmath>
 #include <set>
 #include <vector>
 #include <math.h>
@@ -1049,9 +1050,13 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
   else if (!strncmp(flags,"WallThicknessSmoothingIterations",32)) {
     if (numValues < 1)
       return SV_ERROR;
-    if (values[0] < 0.0)
+    // The GUI, Python API and .msh file paths all set options through here,
+    // so the valid range (integer 0-50, matching the GUI spin box) is
+    // enforced once in this core path.
+    if (!std::isfinite(values[0]) || values[0] < 0.0 || values[0] > 50.0 ||
+        values[0] != std::floor(values[0]))
     {
-      fprintf(stderr,"The number of wall thickness smoothing iterations must not be negative\n");
+      fprintf(stderr,"The number of wall thickness smoothing iterations must be an integer between 0 and 50\n");
       return SV_ERROR;
     }
     meshoptions_.wallthicknesssmoothingiterations=(int)values[0];
@@ -2233,9 +2238,10 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   thicknessArray->SetName("WallThickness");
 
   // Override the global wall thickness for faces with a local wall thickness.
-  // A point shared by faces with different thicknesses gets the average of
-  // the thicknesses of the cells it belongs to, so the value at a face
-  // boundary does not depend on the order the cells are visited.
+  // A point shared by faces with different thicknesses gets the arithmetic
+  // mean of the unique face thicknesses, so the value at a face boundary
+  // does not depend on how many triangles each face is divided into or on
+  // the order the cells are visited.
   if (!localWallThickness_.empty())
   {
     auto faceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
@@ -2244,28 +2250,33 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
       fprintf(stderr,"No 'ModelFaceID' array on the surface; cannot set local wall thickness\n");
       return SV_ERROR;
     }
-    std::vector<double> thicknessSum(numPts, 0.0);
-    std::vector<int> thicknessCount(numPts, 0);
+    std::vector<std::set<int>> pointFaceIds(numPts);
     for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
     {
-      auto localThickness = localWallThickness_.find(faceIds->GetValue(cellId));
-      double cellThickness = (localThickness == localWallThickness_.end()) ?
-        meshoptions_.wallthickness : localThickness->second;
+      int faceId = faceIds->GetValue(cellId);
       vtkIdType npts;
       const vtkIdType *pts;
       surface->GetCellPoints(cellId,npts,pts);
       for (vtkIdType j = 0; j < npts; j++)
       {
-        thicknessSum[pts[j]] += cellThickness;
-        thicknessCount[pts[j]] += 1;
+        pointFaceIds[pts[j]].insert(faceId);
       }
     }
+    // Points not connected to any cell keep the global thickness.
     for (vtkIdType ptId = 0; ptId < numPts; ptId++)
     {
-      if (thicknessCount[ptId] > 0)
+      if (pointFaceIds[ptId].empty())
       {
-        thicknessArray->SetValue(ptId, thicknessSum[ptId] / thicknessCount[ptId]);
+        continue;
       }
+      double thicknessSum = 0.0;
+      for (auto faceId : pointFaceIds[ptId])
+      {
+        auto localThickness = localWallThickness_.find(faceId);
+        thicknessSum += (localThickness == localWallThickness_.end()) ?
+          meshoptions_.wallthickness : localThickness->second;
+      }
+      thicknessArray->SetValue(ptId, thicknessSum / pointFaceIds[ptId].size());
     }
   }
 

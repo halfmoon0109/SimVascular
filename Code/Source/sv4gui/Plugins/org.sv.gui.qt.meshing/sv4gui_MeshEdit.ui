@@ -2114,7 +2114,7 @@ Click the button to add it to the left table.</string>
                 <item>
                  <widget class="QSpinBox" name="sbWallSmoothingT">
                   <property name="toolTip">
-                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Number of smoothing iterations applied to the wall thickness values so the thickness transitions gradually where faces with different thicknesses meet. Set to 0 to disable smoothing.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Number of smoothing iterations applied to the wall thickness values so the thickness transitions gradually where faces with different thicknesses meet. Valid range is 0 to 50; set to 0 to disable smoothing.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                   </property>
                   <property name="minimum">
                    <number>0</number>

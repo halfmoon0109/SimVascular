@@ -1812,8 +1812,8 @@ int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh)
  * which the points are visited. The surface geometry is not modified; only
  * the array values change.
  * @param surface The surface whose cells define the point neighbors.
- * @param array The point data array to smooth; must have one tuple per
- * surface point.
+ * @param array The point data array to smooth; must have exactly one
+ * component and one tuple per surface point.
  * @param iterations The number of averaging iterations; a value less than
  * one leaves the array unchanged.
  * @return SV_OK if the array is smoothed.
@@ -1829,6 +1829,12 @@ int TGenUtils_SmoothPointArray(vtkPolyData *surface, vtkDoubleArray *array, int 
   if (surface == nullptr || array == nullptr)
   {
     fprintf(stderr,"Cannot smooth a point array without a surface and an array\n");
+    return SV_ERROR;
+  }
+
+  if (array->GetNumberOfComponents() != 1)
+  {
+    fprintf(stderr,"The point array to smooth must have exactly one component\n");
     return SV_ERROR;
   }
 
