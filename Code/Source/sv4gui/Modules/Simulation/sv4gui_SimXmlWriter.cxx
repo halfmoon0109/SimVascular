@@ -603,6 +603,13 @@ void Sv4GuiSimXmlWriter::add_general(sv4guiSimJob* job)
 //
 void Sv4GuiSimXmlWriter::add_mesh(sv4guiSimJob* job)
 {
+  #define debug_add_mesh
+  #ifdef debug_add_mesh
+  std::string msg("[Sv4GuiSimXmlWriter::add_mesh] ");
+  std::cout << msg << std::endl;
+  std::cout << msg << "========== add_mesh ==========" << std::endl;
+  #endif
+
   auto mesh = add_sub_child(root_, "Add_mesh");
   mesh->SetAttribute("name", parameters.Add_mesh_name);
   add_child(mesh, "Mesh_file_path", parameters.Mesh_file_path);
@@ -614,6 +621,25 @@ void Sv4GuiSimXmlWriter::add_mesh(sv4guiSimJob* job)
     auto face_file = parameters.Face_file_path + "/" + face_name+".vtp";
     add_child(face, "Face_file_path", face_file);
   }
+
+  // Set file names for initial pressure and velocity.
+  //
+  auto basicProps = job->basic_props.GetAll();
+
+  for (auto it = basicProps.begin(); it != basicProps.end(); ++it) {
+    auto file_name = it->second;
+    if (file_name == "") {
+      continue;
+    }
+
+    if (it->first == "Pressure IC File") {
+      add_child(mesh, "Initial_pressures_file_path", file_name);
+
+    } else if (it->first == "Velocity IC File") {
+      add_child(mesh, "Initial_velocities_file_path", file_name);
+    }
+  }
+
 }
 
 //--------------------
