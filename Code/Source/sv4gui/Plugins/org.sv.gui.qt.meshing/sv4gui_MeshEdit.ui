@@ -575,101 +575,6 @@
                      </property>
                     </widget>
                    </item>
-                   <item>
-                    <widget class="QCheckBox" name="checkBoxGenerateWallMesh">
-                     <property name="toolTip">
-                      <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If selected, a solid vessel wall mesh is generated as a separate region by extruding the wall surface outward by the specified thickness. The fluid mesh keeps its boundary layer. Requires boundary layer meshing with inward extrusion.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
-                     </property>
-                     <property name="text">
-                      <string>Generate Solid Wall Mesh (Separate Region)</string>
-                     </property>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QWidget" name="widget_wallThickness" native="true">
-                     <layout class="QHBoxLayout" name="horizontalLayout_wallThickness">
-                      <property name="spacing">
-                       <number>5</number>
-                      </property>
-                      <property name="leftMargin">
-                       <number>15</number>
-                      </property>
-                      <property name="topMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="rightMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="bottomMargin">
-                       <number>0</number>
-                      </property>
-                      <item>
-                       <widget class="QLabel" name="label_wallThickness">
-                        <property name="text">
-                         <string>Wall Thickness:</string>
-                        </property>
-                       </widget>
-                      </item>
-                      <item>
-                       <widget class="QDoubleSpinBox" name="dsbWallThicknessT">
-                        <property name="decimals">
-                         <number>4</number>
-                        </property>
-                        <property name="maximum">
-                         <double>10000000.000000000000000</double>
-                        </property>
-                        <property name="singleStep">
-                         <double>0.100000000000000</double>
-                        </property>
-                        <property name="value">
-                         <double>0.500000000000000</double>
-                        </property>
-                       </widget>
-                      </item>
-                     </layout>
-                    </widget>
-                   </item>
-                   <item>
-                    <widget class="QWidget" name="widget_wallLayers" native="true">
-                     <layout class="QHBoxLayout" name="horizontalLayout_wallLayers">
-                      <property name="spacing">
-                       <number>5</number>
-                      </property>
-                      <property name="leftMargin">
-                       <number>15</number>
-                      </property>
-                      <property name="topMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="rightMargin">
-                       <number>0</number>
-                      </property>
-                      <property name="bottomMargin">
-                       <number>0</number>
-                      </property>
-                      <item>
-                       <widget class="QLabel" name="label_wallLayers">
-                        <property name="text">
-                         <string>Number of Wall Layers:</string>
-                        </property>
-                       </widget>
-                      </item>
-                      <item>
-                       <widget class="QSpinBox" name="sbWallLayersT">
-                        <property name="minimum">
-                         <number>1</number>
-                        </property>
-                        <property name="maximum">
-                         <number>20</number>
-                        </property>
-                        <property name="value">
-                         <number>2</number>
-                        </property>
-                       </widget>
-                      </item>
-                     </layout>
-                    </widget>
-                   </item>
                   </layout>
                  </widget>
                 </item>
@@ -2045,6 +1950,164 @@ Click the button to add it to the left table.</string>
                 </size>
                </property>
               </spacer>
+             </item>
+            </layout>
+           </widget>
+           <widget class="QWidget" name="MeshingWallMeshWidgetPage">
+            <property name="geometry">
+             <rect>
+              <x>0</x>
+              <y>0</y>
+              <width>333</width>
+              <height>386</height>
+             </rect>
+            </property>
+            <attribute name="label">
+             <string>Wall Mesh</string>
+            </attribute>
+            <layout class="QVBoxLayout" name="verticalLayout_wallMeshPage">
+             <property name="spacing">
+              <number>5</number>
+             </property>
+             <property name="leftMargin">
+              <number>5</number>
+             </property>
+             <property name="topMargin">
+              <number>5</number>
+             </property>
+             <property name="rightMargin">
+              <number>5</number>
+             </property>
+             <property name="bottomMargin">
+              <number>5</number>
+             </property>
+             <item>
+              <widget class="QCheckBox" name="checkBoxGenerateWallMesh">
+               <property name="toolTip">
+                <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;If selected, a solid vessel wall mesh is generated as a separate region by extruding the wall surface outward by the specified thickness. The fluid mesh keeps its boundary layer. Requires boundary layer meshing (in the Advanced Options page) with inward extrusion.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+               </property>
+               <property name="text">
+                <string>Generate Solid Wall Mesh (Separate Region)</string>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="label_wallMeshNote">
+               <property name="text">
+                <string>Requires Boundary Layer Meshing enabled with inward extrusion.</string>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QWidget" name="widget_wallThickness" native="true">
+               <layout class="QHBoxLayout" name="horizontalLayout_wallThickness">
+                <property name="spacing">
+                 <number>5</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="QLabel" name="label_wallThickness">
+                  <property name="text">
+                   <string>Global Wall Thickness:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QDoubleSpinBox" name="dsbWallThicknessT">
+                  <property name="decimals">
+                   <number>4</number>
+                  </property>
+                  <property name="maximum">
+                   <double>10000000.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.100000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>0.500000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QWidget" name="widget_wallLayers" native="true">
+               <layout class="QHBoxLayout" name="horizontalLayout_wallLayers">
+                <property name="spacing">
+                 <number>5</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="QLabel" name="label_wallLayers">
+                  <property name="text">
+                   <string>Number of Wall Layers:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QSpinBox" name="sbWallLayersT">
+                  <property name="minimum">
+                   <number>1</number>
+                  </property>
+                  <property name="maximum">
+                   <number>20</number>
+                  </property>
+                  <property name="value">
+                   <number>2</number>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
+              <widget class="QLabel" name="label_wallThicknessTable">
+               <property name="text">
+                <string>Per-face wall thickness (overrides global for wall faces):</string>
+               </property>
+               <property name="wordWrap">
+                <bool>true</bool>
+               </property>
+              </widget>
+             </item>
+             <item>
+              <widget class="QTableView" name="tableViewWallThickness">
+               <property name="contextMenuPolicy">
+                <enum>Qt::CustomContextMenu</enum>
+               </property>
+               <property name="editTriggers">
+                <set>QAbstractItemView::DoubleClicked|QAbstractItemView::EditKeyPressed</set>
+               </property>
+               <property name="selectionBehavior">
+                <enum>QAbstractItemView::SelectRows</enum>
+               </property>
+              </widget>
              </item>
             </layout>
            </widget>
