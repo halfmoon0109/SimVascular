@@ -41,7 +41,7 @@
 
 ## 빌드/실행 환경 분리
 - 코드 작성/수정: Mac (Claude Code, Codex CLI) — 실제 빌드/실행 불가능한 환경
-- 실제 빌드 및 실행: Linux 데스크톱의 Docker 컨테이너에서 git pull 후 재빌드
+- 실제 빌드 및 실행: Windows powershell에서 git pull 후 WSL2 Docker Desktop 컨테이너에서 재빌드
 - Mac 환경에서는 "테스트 통과"라고 단정하지 말 것. 가능한 범위 내 정적 검증(문법/명백한 참조 오류)만 수행
 
 ## 빌드 로그 피드백 루프
