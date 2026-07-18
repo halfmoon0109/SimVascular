@@ -67,6 +67,7 @@
 #include "sv_vtk_utils.h"
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #define MAXPATHLEN 1024
@@ -1900,6 +1901,146 @@ int TGenUtils_SmoothPointArray(vtkPolyData *surface, vtkDoubleArray *array, int 
   for (vtkIdType ptId = 0; ptId < numPts; ptId++)
   {
     array->SetValue(ptId, values[ptId]);
+  }
+
+  return SV_OK;
+}
+
+// --------------------------------------------
+// TGenUtils_ClampThicknessToConcaveCurvature
+// --------------------------------------------
+/**
+ * @brief Limits a wall thickness point array so the thickness nowhere
+ * exceeds a fraction of the local concave radius of curvature of the
+ * surface.
+ * @note When a surface is extruded outward along its point normals, the
+ * warp vectors of a concave region (such as the crotch where two vessels
+ * merge) converge; if the thickness is larger than the concave radius of
+ * curvature the extruded outer wall folds over and self-intersects. For
+ * each point the concave curvature is estimated from its one-ring
+ * neighbors: a neighbor at distance d that rises a height h above the
+ * point's tangent plane (measured along the outward normal) implies a
+ * curvature of about 2*h/d^2, and the largest such value over the
+ * neighbors is used. The thickness at the point is then clamped to
+ * factor divided by that curvature, but never reduced below a small
+ * fraction of its original value so the wall keeps a positive thickness.
+ * Convex and flat regions (h <= 0 for all neighbors) are left unchanged.
+ * Only the thickness values change; the surface points (the fluid/wall
+ * interface) never move.
+ * @param surface The surface being extruded; must have a 3-component
+ * 'Normals' point data array with the outward point normals.
+ * @param array The wall thickness point array to clamp; must have exactly
+ * one component and one tuple per surface point.
+ * @param factor The maximum allowed thickness as a fraction of the concave
+ * radius of curvature; a value of zero or less leaves the array unchanged.
+ * @return SV_OK if the array is clamped.
+ */
+
+int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface, vtkDoubleArray *array, double factor)
+{
+  if (factor <= 0.0)
+  {
+    return SV_OK;
+  }
+
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot clamp a thickness array without a surface and an array\n");
+    return SV_ERROR;
+  }
+
+  if (array->GetNumberOfComponents() != 1)
+  {
+    fprintf(stderr,"The thickness array to clamp must have exactly one component\n");
+    return SV_ERROR;
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array size does not match the number of surface points\n");
+    return SV_ERROR;
+  }
+
+  auto normals = surface->GetPointData()->GetArray("Normals");
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3 ||
+      normals->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface must have a 3-component 'Normals' point array to clamp the thickness\n");
+    return SV_ERROR;
+  }
+
+  // The clamp never reduces a thickness below this fraction of its
+  // original value.
+  const double minThicknessRatio = 0.1;
+
+  surface->BuildLinks();
+  auto cellIds = vtkSmartPointer<vtkIdList>::New();
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double normal[3];
+    normals->GetTuple(ptId, normal);
+    double normalLength = std::sqrt(normal[0]*normal[0] + normal[1]*normal[1] +
+        normal[2]*normal[2]);
+    if (normalLength <= 0.0)
+    {
+      continue;
+    }
+
+    double point[3];
+    surface->GetPoint(ptId, point);
+
+    // Estimate the largest concave curvature at the point from its
+    // one-ring neighbors. Visiting a neighbor more than once is harmless
+    // because only the maximum is kept.
+    double maxCurvature = 0.0;
+    surface->GetPointCells(ptId, cellIds);
+    for (vtkIdType i = 0; i < cellIds->GetNumberOfIds(); i++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellIds->GetId(i), npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] == ptId)
+        {
+          continue;
+        }
+        double neighbor[3];
+        surface->GetPoint(pts[j], neighbor);
+        double offset[3] = {neighbor[0]-point[0], neighbor[1]-point[1],
+            neighbor[2]-point[2]};
+        double distanceSquared = offset[0]*offset[0] + offset[1]*offset[1] +
+            offset[2]*offset[2];
+        if (distanceSquared <= 0.0)
+        {
+          continue;
+        }
+        double height = (offset[0]*normal[0] + offset[1]*normal[1] +
+            offset[2]*normal[2]) / normalLength;
+        if (height <= 0.0)
+        {
+          continue;
+        }
+        double curvature = 2.0*height/distanceSquared;
+        if (curvature > maxCurvature)
+        {
+          maxCurvature = curvature;
+        }
+      }
+    }
+
+    if (maxCurvature <= 0.0)
+    {
+      continue;
+    }
+
+    double thickness = array->GetValue(ptId);
+    double maxThickness = factor/maxCurvature;
+    if (thickness > maxThickness)
+    {
+      array->SetValue(ptId, std::max(maxThickness, minThicknessRatio*thickness));
+    }
   }
 
   return SV_OK;

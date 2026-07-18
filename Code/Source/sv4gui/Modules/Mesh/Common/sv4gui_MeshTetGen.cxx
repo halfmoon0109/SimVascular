@@ -411,6 +411,12 @@ bool sv4guiMeshTetGen::ParseCommand(std::string cmd, std::string& flag, double v
           values[0]=std::stod(params[1]);
           option=true;
         }
+        else if(paramSize==2 && params[0]=="wallthicknesscurvaturefactor")
+        {
+          flag="WallThicknessCurvatureFactor";
+          values[0]=std::stod(params[1]);
+          option=true;
+        }
         else if(paramSize==3 && params[0]=="localwallthickness")
         {
           flag="LocalWallThickness";

@@ -130,6 +130,7 @@ cvTetGenMeshObject::cvTetGenMeshObject() : cvMeshObject()
   meshoptions_.wallthickness=0.0;
   meshoptions_.numwallsublayers=2;
   meshoptions_.wallthicknesssmoothingiterations=5;
+  meshoptions_.wallthicknesscurvaturefactor=0.8;
   meshoptions_.refinement=0;
   meshoptions_.refinedsize=0;
   meshoptions_.sphereradius=0;
@@ -1060,6 +1061,20 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
       return SV_ERROR;
     }
     meshoptions_.wallthicknesssmoothingiterations=(int)values[0];
+  }
+  // Must be checked before the shorter 'WallThickness' prefix.
+  else if (!strncmp(flags,"WallThicknessCurvatureFactor",28)) {
+    if (numValues < 1)
+      return SV_ERROR;
+    // The GUI, Python API and .msh file paths all set options through here,
+    // so the valid range (0.0-1.0, matching the GUI spin box) is enforced
+    // once in this core path. A value of zero disables the clamp.
+    if (!std::isfinite(values[0]) || values[0] < 0.0 || values[0] > 1.0)
+    {
+      fprintf(stderr,"The wall thickness curvature factor must be between 0 and 1\n");
+      return SV_ERROR;
+    }
+    meshoptions_.wallthicknesscurvaturefactor=values[0];
   }
   else if (!strncmp(flags,"WallThickness",13)) {
     if (numValues < 1)
@@ -2280,18 +2295,42 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
     }
   }
 
+  // Clamp the thickness values in concave regions (such as the crotch
+  // where two vessels merge) where a thickness larger than the concave
+  // radius of curvature would make the outward extruded outer wall fold
+  // over and self-intersect. Only the thickness values change; the surface
+  // points (the fluid/wall interface) never move.
+  if (TGenUtils_ClampThicknessToConcaveCurvature(surface, thicknessArray,
+        meshoptions_.wallthicknesscurvaturefactor) != SV_OK)
+  {
+    fprintf(stderr,"Problem clamping the wall thickness array to the surface curvature\n");
+    return SV_ERROR;
+  }
+
   // Smooth the thickness values so the wall thickness transitions gradually
   // across face boundaries where neighboring faces have different local
-  // thicknesses; an abrupt step in the thickness would otherwise show up
-  // as a step in the extruded outer wall surface. Only the thickness values
-  // are smoothed; the surface points (the fluid/wall interface) never move.
-  // Without local overrides the thickness is uniform and smoothing is a no-op.
-  if (!localWallThickness_.empty())
+  // thicknesses and around clamped concave regions; an abrupt step in the
+  // thickness would otherwise show up as a step in the extruded outer wall
+  // surface. Only the thickness values are smoothed; the surface points
+  // (the fluid/wall interface) never move. Without local overrides or the
+  // curvature clamp the thickness is uniform and smoothing is a no-op.
+  if (!localWallThickness_.empty() || meshoptions_.wallthicknesscurvaturefactor > 0.0)
   {
     if (TGenUtils_SmoothPointArray(surface, thicknessArray,
           meshoptions_.wallthicknesssmoothingiterations) != SV_OK)
     {
       fprintf(stderr,"Problem smoothing the wall thickness array\n");
+      return SV_ERROR;
+    }
+
+    // The smoothing pulls the clamped values back up toward their
+    // unclamped neighbors, so the clamp is applied once more to restore
+    // the curvature limit; the thickness stays smooth away from the
+    // reclamped points.
+    if (TGenUtils_ClampThicknessToConcaveCurvature(surface, thicknessArray,
+          meshoptions_.wallthicknesscurvaturefactor) != SV_OK)
+    {
+      fprintf(stderr,"Problem clamping the wall thickness array to the surface curvature\n");
       return SV_ERROR;
     }
   }

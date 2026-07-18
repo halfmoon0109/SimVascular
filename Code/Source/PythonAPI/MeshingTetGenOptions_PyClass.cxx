@@ -117,6 +117,7 @@ PyObject * CreateTetGenOptionsType(PyObject* args, PyObject* kwargs);
 //   wall_thickness: float
 //   number_of_wall_layers: int
 //   wall_thickness_smoothing_iterations: int
+//   wall_thickness_curvature_factor: float
 //   local_wall_thickness: list({'face_id':int, 'thickness':float})
 //   local_wall_thickness_on: Boolean.
 //
@@ -162,6 +163,7 @@ typedef struct {
   double wall_thickness;
   int number_of_wall_layers;
   int wall_thickness_smoothing_iterations;
+  double wall_thickness_curvature_factor;
   PyObject* local_wall_thickness;
   int local_wall_thickness_on;
 
@@ -202,6 +204,7 @@ namespace TetGenOption {
   char* NumberOfWallLayers = "number_of_wall_layers";
   char* WallThickness = "wall_thickness";
   char* WallThicknessSmoothingIterations = "wall_thickness_smoothing_iterations";
+  char* WallThicknessCurvatureFactor = "wall_thickness_curvature_factor";
   //char* MeshWallFirst = "mesh_wall_first";
   //char* NewRegionBoundaryLayer = "new_region_boundary_layer";
   char* MinimumDihedralAngle = "minimum_dihedral_angle";
@@ -295,6 +298,7 @@ namespace TetGenOption {
       {std::string(NumberOfWallLayers), "NumberOfWallLayers"},
       {std::string(WallThickness), "WallThickness"},
       {std::string(WallThicknessSmoothingIterations), "WallThicknessSmoothingIterations"},
+      {std::string(WallThicknessCurvatureFactor), "WallThicknessCurvatureFactor"},
       //{std::string(MeshWallFirst), "MeshWallFirst"},
       //{std::string(NewRegionBoundaryLayer), "NewRegionBoundaryLayer"},
       {std::string(MinimumDihedralAngle), "MinDihedral"},
@@ -1014,6 +1018,7 @@ PyTetGenOptionsCreateFromList(cvMeshObject* mesher, std::vector<std::string>& op
     {pyToSvNameMap[NumberOfWallLayers], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->number_of_wall_layers = std::stoi(vals[0]); }},
     {pyToSvNameMap[WallThickness], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->wall_thickness = std::stod(vals[0]); }},
     {pyToSvNameMap[WallThicknessSmoothingIterations], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->wall_thickness_smoothing_iterations = std::stoi(vals[0]); }},
+    {pyToSvNameMap[WallThicknessCurvatureFactor], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->wall_thickness_curvature_factor = std::stod(vals[0]); }},
     //{pyToSvNameMap[LocalEdgeSize], [](OptType opt, ArgType vals, MapType fmap) -> void { PyTetGenOptionsAddLocalEdgeSize(opt,vals,fmap); }},
     {pyToSvNameMap[MinimumDihedralAngle], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->minimum_dihedral_angle = std::stod(vals[0]); }},
     {pyToSvNameMap[NoBisect], [](OptType opt, ArgType vals, MapType fmap) -> void { opt->no_bisect = Py_BuildValue("i", 1); }},
@@ -1252,6 +1257,7 @@ PyTetGenOptions_get_values(PyMeshingTetGenOptions* self, PyObject* args)
   PyDict_SetItemString(values, TetGenOption::NumberOfWallLayers, Py_BuildValue("i", self->number_of_wall_layers));
   PyDict_SetItemString(values, TetGenOption::WallThickness, Py_BuildValue("d", self->wall_thickness));
   PyDict_SetItemString(values, TetGenOption::WallThicknessSmoothingIterations, Py_BuildValue("i", self->wall_thickness_smoothing_iterations));
+  PyDict_SetItemString(values, TetGenOption::WallThicknessCurvatureFactor, Py_BuildValue("d", self->wall_thickness_curvature_factor));
 
   //PyDict_SetItemString(values, TetGenOption::Hausd, Py_BuildValue("d", self->hausd));
 
@@ -1340,6 +1346,7 @@ PyTetGenOptions_set_defaults(PyMeshingTetGenOptions* self)
   self->wall_thickness = 0.0;
   self->number_of_wall_layers = 2;
   self->wall_thickness_smoothing_iterations = 5;
+  self->wall_thickness_curvature_factor = 0.8;
   self->local_wall_thickness = PyList_New(0);
   Py_INCREF(self->local_wall_thickness);
   self->local_wall_thickness_on = 0;
@@ -1733,6 +1740,18 @@ PyDoc_STRVAR(wall_thickness_smoothing_iterations_doc,
    \n\
 ");
 
+PyDoc_STRVAR(wall_thickness_curvature_factor_doc,
+  "Type: float                                                             \n\
+   Default: 0.8                                                            \n\
+   \n\
+   Limits the wall thickness in concave regions (such as the crotch where  \n\
+   two vessels merge) to this fraction of the local concave radius of      \n\
+   curvature so the outward extruded outer wall does not fold over and     \n\
+   self-intersect. The valid range is 0.0 to 1.0; set to 0.0 to disable    \n\
+   the limit.                                                              \n\
+   \n\
+");
+
 PyDoc_STRVAR(volume_mesh_flag_doc,
   "Type: bool                                                              \n\
    Default: True                                                           \n\
@@ -1785,6 +1804,7 @@ static PyMemberDef PyTetGenOptionsMembers[] = {
     {TetGenOption::UseMMG, T_BOOL, offsetof(PyMeshingTetGenOptions, use_mmg), 0, use_mmg_doc},
     {TetGenOption::WallThickness, T_DOUBLE, offsetof(PyMeshingTetGenOptions, wall_thickness), 0, wall_thickness_doc},
     {TetGenOption::WallThicknessSmoothingIterations, T_INT, offsetof(PyMeshingTetGenOptions, wall_thickness_smoothing_iterations), 0, wall_thickness_smoothing_iterations_doc},
+    {TetGenOption::WallThicknessCurvatureFactor, T_DOUBLE, offsetof(PyMeshingTetGenOptions, wall_thickness_curvature_factor), 0, wall_thickness_curvature_factor_doc},
     //{TetGenOption::Verbose, T_OBJECT_EX, offsetof(PyMeshingTetGenOptions, verbose), 0, "Verbose"},
     {TetGenOption::VolumeMeshFlag, T_BOOL, offsetof(PyMeshingTetGenOptions, volume_mesh_flag), 0, volume_mesh_flag_doc},
     {nullptr}

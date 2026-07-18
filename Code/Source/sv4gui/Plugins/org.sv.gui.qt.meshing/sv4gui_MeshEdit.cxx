@@ -923,6 +923,7 @@ std::vector<std::string> sv4guiMeshEdit::CreateCmdsT()
       cmds.push_back("option WallThickness "+QString::number(ui->dsbWallThicknessT->value()).toStdString());
       cmds.push_back("option NumberOfWallLayers "+QString::number(ui->sbWallLayersT->value()).toStdString());
       cmds.push_back("option WallThicknessSmoothingIterations "+QString::number(ui->sbWallSmoothingT->value()).toStdString());
+      cmds.push_back("option WallThicknessCurvatureFactor "+QString::number(ui->dsbWallCurvatureT->value()).toStdString());
 
       for(int i=0;i<m_TableModelWallThickness->rowCount();i++)
       {
@@ -1409,6 +1410,7 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
     ui->dsbWallThicknessT->setValue(0.5);
     ui->sbWallLayersT->setValue(2);
     ui->sbWallSmoothingT->setValue(5);
+    ui->dsbWallCurvatureT->setValue(0.8);
 
     ui->checkBoxRadiusBasedT->setChecked(false);
 
@@ -1779,6 +1781,10 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
         else if (flag == "WallThicknessSmoothingIterations")
         {
           ui->sbWallSmoothingT->setValue(values[0]);
+        }
+        else if (flag == "WallThicknessCurvatureFactor")
+        {
+          ui->dsbWallCurvatureT->setValue(values[0]);
         }
         else
         {

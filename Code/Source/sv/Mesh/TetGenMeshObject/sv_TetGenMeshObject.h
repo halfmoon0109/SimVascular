@@ -86,6 +86,7 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
     double wallthickness;
     int numwallsublayers;
     int wallthicknesssmoothingiterations;
+    double wallthicknesscurvaturefactor;
     int refinement;
     double refinedsize;
     double sphereradius;

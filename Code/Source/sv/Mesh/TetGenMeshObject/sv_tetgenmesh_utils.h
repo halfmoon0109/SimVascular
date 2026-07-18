@@ -124,4 +124,8 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothPointArray(vtkPolyData *surface,
     vtkDoubleArray *array,
     int iterations);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    double factor);
+
 #endif //__CV_TETGENMESH_UTILS_H
