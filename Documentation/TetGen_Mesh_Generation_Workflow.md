@@ -140,6 +140,7 @@ option WallThickness 0.5
 option NumberOfWallLayers 2
 option WallThicknessSmoothingIterations 5
 option WallThicknessCurvatureFactor 0.8
+option WallThicknessRadiusFactor 0.0
 localWallThickness wall_aorta 0.8
 generateMesh
 writeMesh
@@ -172,6 +173,9 @@ options.wall_thickness = 0.5
 options.number_of_wall_layers = 2
 options.wall_thickness_smoothing_iterations = 5
 options.wall_thickness_curvature_factor = 0.8
+# 반경 적응 두께(선택): centerline 계산이 켜져 있어야 한다.
+# options.radius_meshing_on = True
+# options.wall_thickness_radius_factor = 0.15
 
 mesher.generate_mesh(options)
 ```
@@ -289,15 +293,36 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
 
 `WallThickness` point data 배열은 다음 원칙으로 만든다.
 
-1. 모든 point를 global wall thickness로 초기화한다.
+1. 각 point의 base 두께를 정한다. 기본은 global wall thickness이며,
+   `WallThicknessRadiusFactor`가 활성화되면 반경 기반 값을 쓴다(9.2 참고).
 2. `LocalWallThickness`가 지정된 face는 local 값을 사용한다.
 3. 여러 face가 만나는 point는 연결된 고유 `ModelFaceID`별 두께를 평균한다.
+   local override가 없는 face는 그 point의 base 두께를 쓴다.
 4. 같은 face의 triangle 수는 평균 가중치에 영향을 주지 않아야 한다.
 
 예를 들어 두 face의 두께가 각각 `0.5`, `1.0`이면 공유점의 초기 두께는
 두 face의 triangle 밀도와 관계없이 `0.75`가 되어야 한다.
 
-### 9.2 곡률 기반 두께 제한
+### 9.2 반경 적응 두께
+
+`WallThicknessRadiusFactor`가 `0`보다 크면 각 벽 node의 base 두께를 단일
+상수가 아니라 **국소 혈관 반경 × factor**로 설정한다. 소구경 혈관(예: PCoA)은
+자동으로 얇아지고 대구경 혈관(예: ICA)은 두꺼워져, 서로 다른 구경의 혈관이
+만나는 접합부 두께가 기하에 따라 전이된다.
+
+- 국소 반경은 `sys_geom_distancetocenterlines()`로 계산한 각 벽 표면 node의
+  **centerline까지의 거리**(`DistanceToCenterlines`)를 사용한다.
+- centerline은 mesher가 직접 계산하지 않는다. radius(centerline) 메싱 경로가
+  계산한 centerline을 `cvTetGenMeshObject::SetCenterlines()`로 전달받아
+  재사용한다. 따라서 이 옵션을 쓰려면 centerline 계산(radius 메싱 또는
+  `compute_centerlines`)을 함께 켜야 하며, centerline이 없으면 명확한 에러로
+  종료한다.
+- 두께는 global `WallThickness`를 상한, 그 20%를 하한으로 클램프해 반경 추정이
+  튀거나 극소혈관에서 두께가 0에 수렴하는 것을 막는다.
+- 유효 범위는 0.0~1.0이며 `0.0`이면 상수 `WallThickness`를 그대로 쓴다.
+- 표면 point 좌표(fluid/wall interface)는 이동하지 않는다.
+
+### 9.3 곡률 기반 두께 제한
 
 `WallThicknessCurvatureFactor`가 `0`보다 크면
 `TGenUtils_ClampThicknessToConcaveCurvature()`가 스무딩 전에 `WallThickness`
@@ -315,11 +340,11 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
 전역적인 자기 교차 부재를 보장하지 않는다. 생성된 메시의 품질(음수 체적,
 aspect ratio, 표면 교차)은 별도로 확인해야 한다.
 
-### 9.3 두께 스무딩
+### 9.4 두께 스무딩
 
-local wall thickness가 존재하거나 곡률 기반 두께 제한이 활성화된 경우
-`TGenUtils_SmoothPointArray()`가 `WallThickness` 배열을 반복 Laplacian
-averaging으로 스무딩한다.
+local wall thickness가 존재하거나 곡률 기반 두께 제한 또는 반경 적응 두께가
+활성화된 경우 `TGenUtils_SmoothPointArray()`가 `WallThickness` 배열을 반복
+Laplacian averaging으로 스무딩한다.
 
 각 반복에서 point의 새 값은 이전 반복의 다음 값들을 평균하여 계산한다.
 
@@ -335,7 +360,7 @@ averaging으로 스무딩한다.
 스무딩이 클램프된 값을 이웃 방향으로 다시 끌어올리므로, 곡률 기반 두께 제한이
 활성화된 경우 스무딩 후 클램프를 한 번 더 적용해 제한을 복원한다.
 
-### 9.4 바깥쪽 압출
+### 9.5 바깥쪽 압출
 
 `WallThickness` 배열을 surface에 추가한 후
 `VMTKUtils_BoundaryLayerMesh()`를 다시 호출한다.
