@@ -845,15 +845,43 @@ PyTetGenOptionsAddLocalEdgeSize(PyMeshingTetGenOptions* options, std::vector<std
 //
 //   <command content="localWallThickness wall_aorta 0.05" />
 //
-void
+// Returns true if the option was added. A malformed command (missing
+// values, a face name not in the model, or a non-numeric thickness) is
+// reported and skipped so an old or hand-edited .msh file does not
+// crash the loader.
+//
+bool
 PyTetGenOptionsAddLocalWallThickness(PyMeshingTetGenOptions* options, std::vector<std::string>& vals, std::map<std::string,int>& faceMap)
 {
   auto api = PyUtilApiFunction("", PyRunTimeErr, __func__);
 
+  if (vals.size() < 2) {
+      std::cout << "ERROR: A localWallThickness command in the .msh file needs a face name and a thickness." << std::endl;
+      return false;
+  }
+
   // Map the string face name to an int ID.
-  int faceID = faceMap[vals[0]];
-  auto thickness = std::stod(vals[1]);
-  auto value = CreateLocalWallThicknessValue(api, faceID, thickness);
+  auto face = faceMap.find(vals[0]);
+  if (face == faceMap.end()) {
+      std::cout << "ERROR: The face '" << vals[0] << "' in a localWallThickness command in the .msh file is not a face of the model." << std::endl;
+      return false;
+  }
+
+  double thickness;
+  try {
+      thickness = std::stod(vals[1]);
+  } catch (const std::exception& exception) {
+      std::cout << "ERROR: The thickness '" << vals[1] << "' in a localWallThickness command in the .msh file is not a number." << std::endl;
+      return false;
+  }
+
+  auto value = CreateLocalWallThicknessValue(api, face->second, thickness);
+  if (value == nullptr) {
+      PyErr_Clear();
+      std::cout << "ERROR: The localWallThickness command 'localWallThickness " << vals[0] << " " << vals[1]
+          << "' in the .msh file has invalid values." << std::endl;
+      return false;
+  }
 
   // Create a new list or add the wall thickness to an existing list.
   if (options->local_wall_thickness == Py_None) {
@@ -863,6 +891,8 @@ PyTetGenOptionsAddLocalWallThickness(PyMeshingTetGenOptions* options, std::vecto
   } else {
       PyList_Append(options->local_wall_thickness, value);
   }
+
+  return true;
 }
 
 //------------------------------------
@@ -948,8 +978,9 @@ PyTetGenOptionsAddMeshSizeOptions(PyMeshingTetGenOptions* options, std::map<std:
       //   <command content="localWallThickness wall_aorta 0.05" />
       //
       } else if (name == CommandLocalWallThickness) {
-          PyTetGenOptionsAddLocalWallThickness(options, values, faceMap);
-          options->local_wall_thickness_on = 1;
+          if (PyTetGenOptionsAddLocalWallThickness(options, values, faceMap)) {
+              options->local_wall_thickness_on = 1;
+          }
       }
   }
 }
