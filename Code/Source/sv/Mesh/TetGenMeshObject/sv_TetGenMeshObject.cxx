@@ -1349,6 +1349,14 @@ int cvTetGenMeshObject::GenerateMesh() {
   //
   if (meshoptions_.wallmeshflag)
   {
+    // The wall mesh is generated inside the surface remeshing / boundary
+    // layer path, so without these flags GenerateMesh() would silently
+    // finish without a wall mesh.
+    if (!meshoptions_.surfacemeshflag || !meshoptions_.volumemeshflag)
+    {
+      fprintf(stderr,"Surface and volume meshing must be enabled to generate a vessel wall mesh\n");
+      return SV_ERROR;
+    }
     if (!meshoptions_.boundarylayermeshflag)
     {
       fprintf(stderr,"Boundary layer meshing must be enabled to generate a vessel wall mesh\n");
@@ -1408,7 +1416,8 @@ int cvTetGenMeshObject::GenerateMesh() {
         if (GenerateMeshSizingFunction() != SV_OK)
           return SV_ERROR;
       }
-      NewMesh();
+      if (NewMesh() != SV_OK)
+        return SV_ERROR;
     }
     //In this case, we only are doing a surface remesh, and we are essentially
     //done
@@ -1452,7 +1461,8 @@ int cvTetGenMeshObject::GenerateMesh() {
         return SV_ERROR;
       }
     }
-    NewMesh();
+    if (NewMesh() != SV_OK)
+      return SV_ERROR;
   }
 
   //Here we set all the mesh flags for TetGen!
@@ -1591,7 +1601,11 @@ int cvTetGenMeshObject::GenerateMesh() {
   // This is a post meshing step that needs to be done for boundary layer mesh.
   if (meshoptions_.boundarylayermeshflag)
   {
-    AppendBoundaryLayerMesh();
+    if (AppendBoundaryLayerMesh() != SV_OK)
+    {
+      fprintf(stderr,"Problem appending the boundary layer mesh\n");
+      return SV_ERROR;
+    }
   }
 #endif
 
