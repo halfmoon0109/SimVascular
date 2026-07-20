@@ -1922,8 +1922,12 @@ int TGenUtils_SmoothPointArray(vtkPolyData *surface, vtkDoubleArray *array, int 
  * point's tangent plane (measured along the outward normal) implies a
  * curvature of about 2*h/d^2, and the largest such value over the
  * neighbors is used. The thickness at the point is then clamped to
- * factor divided by that curvature, but never reduced below a small
- * fraction of its original value so the wall keeps a positive thickness.
+ * factor divided by that curvature; the limit is always enforced so the
+ * clamp is idempotent, and a warning is printed when it reduces a
+ * thickness below a small fraction of its requested value because the
+ * resulting wall elements may be very thin there. The one-ring estimate
+ * is local, so the clamp reduces but does not guarantee the absence of
+ * global self-intersections of the extruded outer wall.
  * Convex and flat regions (h <= 0 for all neighbors) are left unchanged.
  * Only the thickness values change; the surface points (the fluid/wall
  * interface) never move.
@@ -1970,9 +1974,11 @@ int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface, vtkDoubleAr
     return SV_ERROR;
   }
 
-  // The clamp never reduces a thickness below this fraction of its
-  // original value.
-  const double minThicknessRatio = 0.1;
+  // The curvature limit is always enforced; when it reduces a thickness
+  // below this fraction of its requested value the wall elements there
+  // may be very thin, so the reduction is reported as a warning.
+  const double thinThicknessRatio = 0.1;
+  vtkIdType numThinPts = 0;
 
   surface->BuildLinks();
   auto cellIds = vtkSmartPointer<vtkIdList>::New();
@@ -2039,8 +2045,19 @@ int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface, vtkDoubleAr
     double maxThickness = factor/maxCurvature;
     if (thickness > maxThickness)
     {
-      array->SetValue(ptId, std::max(maxThickness, minThicknessRatio*thickness));
+      array->SetValue(ptId, maxThickness);
+      if (maxThickness < thinThicknessRatio*thickness)
+      {
+        numThinPts++;
+      }
     }
+  }
+
+  if (numThinPts > 0)
+  {
+    fprintf(stderr,"Warning: the curvature limit reduced the wall thickness below %g%% of its\
+ requested value at %lld points; the wall elements there may be very thin\n",
+        100.0*thinThicknessRatio, (long long)numThinPts);
   }
 
   return SV_OK;
