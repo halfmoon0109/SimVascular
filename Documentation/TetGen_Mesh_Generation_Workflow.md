@@ -139,6 +139,7 @@ option GenerateWallMesh
 option WallThickness 0.5
 option NumberOfWallLayers 2
 option WallThicknessSmoothingIterations 5
+option WallThicknessCurvatureFactor 0.8
 localWallThickness wall_aorta 0.8
 generateMesh
 writeMesh
@@ -146,6 +147,11 @@ writeMesh
 
 명령 기록은 GUI 프로젝트에 저장되며, 기존 메시를 다시 생성할 때 동일한 명령을
 재실행한다.
+
+주의: `WallThicknessCurvatureFactor`의 코어 기본값은 `0.8`이므로, 이 명령이
+없는 기존 명령 기록을 재실행해도 곡률 기반 두께 제한이 활성화된다. 이는 병합
+부위의 자기 교차를 줄이기 위한 의도된 동작 변경이며, 이전과 동일한 결과가
+필요하면 `option WallThicknessCurvatureFactor 0.0`을 명시해 비활성화한다.
 
 ### 4.2 Python API 경로
 
@@ -165,6 +171,7 @@ options.generate_wall_mesh = True
 options.wall_thickness = 0.5
 options.number_of_wall_layers = 2
 options.wall_thickness_smoothing_iterations = 5
+options.wall_thickness_curvature_factor = 0.8
 
 mesher.generate_mesh(options)
 ```
@@ -290,10 +297,29 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
 예를 들어 두 face의 두께가 각각 `0.5`, `1.0`이면 공유점의 초기 두께는
 두 face의 triangle 밀도와 관계없이 `0.75`가 되어야 한다.
 
-### 9.2 두께 스무딩
+### 9.2 곡률 기반 두께 제한
 
-local wall thickness가 존재하면 `TGenUtils_SmoothPointArray()`가 `WallThickness`
-배열을 반복 Laplacian averaging으로 스무딩한다.
+`WallThicknessCurvatureFactor`가 `0`보다 크면
+`TGenUtils_ClampThicknessToConcaveCurvature()`가 스무딩 전에 `WallThickness`
+배열을 제한한다.
+
+- 각 point의 오목 곡률을 one-ring 이웃으로부터 추정한다(이웃까지의 거리 `d`,
+  법선 방향 높이 `h`에 대해 곡률 근사 `2h/d^2`의 최댓값).
+- 두께를 `factor / 곡률`(오목 곡률 반경의 `factor`배)로 제한한다. 제한은 항상
+  적용되어 클램프는 멱등적이며, 요청 두께의 10% 미만으로 줄어든 point 개수는
+  경고로 보고된다.
+- 볼록하거나 평평한 영역은 변경하지 않으며, 표면 point 좌표(fluid/wall
+  interface)는 이동하지 않는다.
+
+추정이 국소적이므로 이 제한은 압출된 outer wall의 자기 교차 가능성을 줄일 뿐
+전역적인 자기 교차 부재를 보장하지 않는다. 생성된 메시의 품질(음수 체적,
+aspect ratio, 표면 교차)은 별도로 확인해야 한다.
+
+### 9.3 두께 스무딩
+
+local wall thickness가 존재하거나 곡률 기반 두께 제한이 활성화된 경우
+`TGenUtils_SmoothPointArray()`가 `WallThickness` 배열을 반복 Laplacian
+averaging으로 스무딩한다.
 
 각 반복에서 point의 새 값은 이전 반복의 다음 값들을 평균하여 계산한다.
 
@@ -306,7 +332,10 @@ local wall thickness가 존재하면 `TGenUtils_SmoothPointArray()`가 `WallThic
 스무딩은 두께 scalar만 변경한다. 원래 표면 point 좌표와 fluid/wall interface는
 이동하지 않는다. 반복 횟수가 `0`이면 스무딩을 수행하지 않는다.
 
-### 9.3 바깥쪽 압출
+스무딩이 클램프된 값을 이웃 방향으로 다시 끌어올리므로, 곡률 기반 두께 제한이
+활성화된 경우 스무딩 후 클램프를 한 번 더 적용해 제한을 복원한다.
+
+### 9.4 바깥쪽 압출
 
 `WallThickness` 배열을 surface에 추가한 후
 `VMTKUtils_BoundaryLayerMesh()`를 다시 호출한다.
