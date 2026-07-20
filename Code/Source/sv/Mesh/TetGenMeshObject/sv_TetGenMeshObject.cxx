@@ -1040,9 +1040,17 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
       fprintf(stderr,"Must give face id and local wall thickness\n");
       return SV_ERROR;
     }
-    if (values[1] <= 0.0)
+    // The GUI, Python API and .msh file paths all set options through here,
+    // so finiteness (a NaN passes a '<= 0' check) and the integer face id
+    // are enforced once in this core path.
+    if (!std::isfinite(values[0]) || values[0] != std::floor(values[0]))
     {
-      fprintf(stderr,"Local wall thickness must be greater than zero\n");
+      fprintf(stderr,"The local wall thickness face id must be an integer\n");
+      return SV_ERROR;
+    }
+    if (!std::isfinite(values[1]) || values[1] <= 0.0)
+    {
+      fprintf(stderr,"Local wall thickness must be a finite value greater than zero\n");
       return SV_ERROR;
     }
     localWallThickness_[(int)values[0]]=values[1];
@@ -1081,9 +1089,10 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
       return SV_ERROR;
     // A value of zero means the wall thickness is not set; whether a
     // positive wall thickness has been set is checked in GenerateMesh().
-    if (values[0] < 0.0)
+    // A NaN passes a '< 0' check, so finiteness is checked explicitly.
+    if (!std::isfinite(values[0]) || values[0] < 0.0)
     {
-      fprintf(stderr,"Wall thickness must be greater than zero\n");
+      fprintf(stderr,"Wall thickness must be a finite value greater than zero\n");
       return SV_ERROR;
     }
     meshoptions_.wallthickness=values[0];
@@ -1091,9 +1100,12 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
   else if (!strncmp(flags,"NumberOfWallLayers",18)) {
     if (numValues < 1)
       return SV_ERROR;
-    if ((int)values[0] < 1)
+    // Converting a NaN to int is undefined and a fractional value would
+    // silently be truncated, so both are rejected here.
+    if (!std::isfinite(values[0]) || values[0] < 1.0 ||
+        values[0] != std::floor(values[0]))
     {
-      fprintf(stderr,"Number of wall layers must be at least one\n");
+      fprintf(stderr,"The number of wall layers must be an integer of at least one\n");
       return SV_ERROR;
     }
     meshoptions_.numwallsublayers=(int)values[0];
