@@ -194,6 +194,10 @@ bool sv4guiMeshTetGen::Execute(std::string flag, double values[20], std::string 
             return false;
         }
 
+        // Keep the centerlines so a radius-adaptive wall thickness
+        // (WallThicknessRadiusFactor) can be computed from them.
+        m_cvTetGenMesh->SetCenterlines(centerlines);
+
         //delete centerlines;
         //delete solid;
 
