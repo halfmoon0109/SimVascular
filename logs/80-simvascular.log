@@ -1,0 +1,114 @@
+[  0%] Built target dcmdump-copy
+[  0%] Copying dicom2 to /work/build/SimVascular-build/bin/dicom2
+[  0%] Built target dcmodify-copy
+[  0%] Built target _simvascular_thirdparty_tetgen
+[  1%] Built target _simvascular_thirdparty_zlib
+[  2%] Built target _simvascular_vtksvio
+[  3%] Built target _simvascular_utils
+[  3%] Built target _simvascular_vtksvcommon
+[  7%] Built target _simvascular_thirdparty_vmtk
+[  8%] Built target _simvascular_module_imageprocessing
+[  9%] Built target _simvascular_module_multiphysics
+[  9%] Built target _simvascular_module_ml
+[ 10%] Built target _simvascular_thirdparty_solverio
+[ 10%] Built target dicom2-copy
+[ 11%] Built target _simvascular_vtksvgeometry
+[ 12%] Built target _simvascular_repository
+[ 13%] Built target _simvascular_vtksvboolean
+[ 15%] Built target _simvascular_vtksvmisc
+Consolidate compiler generated dependencies of target _simvascular_vmtk_utils
+[ 15%] Built target _simvascular_solid
+[ 15%] Built target _simvascular_post
+[ 16%] Built target _simvascular_vtksvnurbs
+[ 16%] Building CXX object Source/sv/Mesh/VMTKUtils/CMakeFiles/_simvascular_vmtk_utils.dir/sv_vmtk_utils.cxx.o
+[ 17%] Built target _simvascular_itk_lset
+[ 17%] Built target _simvascular_mesh
+[ 18%] Built target _simvascular_geom
+[ 19%] Built target _simvascular_vtksvparameterization
+[ 19%] Built target _simvascular_adaptor
+[ 19%] Built target _simvascular_common
+[ 19%] Built target _simvascular_image
+[ 21%] Built target _simvascular_vtksvsegmentation
+[ 21%] Built target _simvascular_opencascade_solid
+[ 22%] Built target _simvascular_path
+[ 23%] Built target _simvascular_module_common
+[ 24%] Built target _simvascular_segmentation
+[ 25%] Built target _simvascular_module_path
+[ 28%] Built target _simvascular_module_segmentation
+[ 28%] Built target _simvascular_module_qtwidgets
+[ 28%] Linking CXX shared library ../../../../lib/lib_simvascular_vmtk_utils.so
+[ 28%] Built target _simvascular_vmtk_utils
+[ 29%] Linking CXX shared library ../../../../lib/lib_simvascular_polydata_solid.so
+[ 29%] Built target _simvascular_polydata_solid
+[ 29%] Linking CXX shared library ../../../../lib/lib_simvascular_mmg_mesh.so
+[ 29%] Built target _simvascular_mmg_mesh
+Consolidate compiler generated dependencies of target _simvascular_tetgen_mesh
+[ 29%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshObject.cxx.o
+[ 29%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshSystem.cxx.o
+[ 29%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_utils.cxx.o
+[ 29%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model.so
+Appending zipped resources to _simvascular_module_model
+[ 31%] Built target _simvascular_module_model
+[ 31%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model_occt.so
+[ 32%] Built target _simvascular_module_model_occt
+[ 32%] Linking CXX shared library ../../../../lib/lib_simvascular_tetgen_mesh.so
+[ 32%] Built target _simvascular_tetgen_mesh
+Consolidate compiler generated dependencies of target _simvascular_tetgen_adaptor
+[ 32%] Building CXX object Source/sv/Mesh/TetGenAdapt/CMakeFiles/_simvascular_tetgen_adaptor.dir/sv_TetGenAdapt.cxx.o
+[ 32%] Linking CXX shared library ../../../../lib/lib_simvascular_tetgen_adaptor.so
+[ 32%] Built target _simvascular_tetgen_adaptor
+Consolidate compiler generated dependencies of target _simvascular_module_mesh
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshTetGen.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_RegisterTetGenFunction.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshTetGenAdaptor.cxx.o
+[ 32%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_mesh.so
+[ 33%] Built target _simvascular_module_mesh
+Consolidate compiler generated dependencies of target _simvascular_module_simulation
+[ 33%] Linking CXX shared library ../../../../lib/lib_simvascular_module_rom_simulation.so
+[ 33%] Linking CXX shared library ../../../../lib/lib_simvascular_module_simulation.so
+[ 34%] Built target _simvascular_module_rom_simulation
+[ 35%] Built target _simvascular_module_simulation
+[ 35%] Linking CXX shared library ../../../../lib/lib_simvascular_module_projectmanagement.so
+[ 37%] Built target _simvascular_module_projectmanagement
+[ 37%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_projectdatanodes.so
+[ 37%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_datamanager.so
+[ 37%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_projectmanager.so
+[ 38%] Built target org_sv_projectdatanodes
+[ 41%] Built target org_sv_gui_qt_projectmanager
+[ 45%] Built target org_sv_gui_qt_datamanager
+[ 45%] Generating ui_sv4gui_MeshEdit.h
+Detected locale "C" with character encoding "ANSI_X3.4-1968", which is not UTF-8.
+Qt depends on a UTF-8 locale, and has switched to "C.UTF-8" instead.
+If this causes problems, reconfigure your locale. See the locale(1) manual
+for more information.
+[ 45%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_pathplanning.so
+[ 45%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_imageprocessing.so
+[ 45%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_multiphysics.so
+[ 45%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_simulation.so
+[ 45%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_mitksegmentation.so
+[ 45%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_application.so
+[ 45%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_segmentation.so
+Consolidate compiler generated dependencies of target org_sv_gui_qt_meshing
+[ 45%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshEdit.cxx.o
+[ 52%] Built target org_sv_gui_qt_simulation
+[ 57%] Built target org_sv_gui_qt_segmentation
+[ 60%] Built target org_sv_gui_qt_pathplanning
+[ 64%] Built target org_sv_gui_qt_imageprocessing
+[ 70%] Built target org_sv_gui_qt_application
+[ 74%] Built target org_sv_gui_qt_multiphysics
+[ 81%] Built target org_sv_gui_qt_mitksegmentation
+Consolidate compiler generated dependencies of target org_sv_gui_qt_modeling
+[ 81%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_modeling.so
+[ 86%] Built target org_sv_gui_qt_modeling
+[ 86%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_romsimulation.so
+[ 94%] Built target org_sv_gui_qt_romsimulation
+Consolidate compiler generated dependencies of target _simvascular_python_api
+[ 94%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Meshing_PyModule.cxx.o
+[ 94%] Linking CXX shared library ../../lib/lib_simvascular_python_api.so
+[ 95%] Built target _simvascular_python_api
+[ 95%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_pythondatanodes.so
+[ 96%] Built target org_sv_pythondatanodes
+[ 97%] Linking CXX executable ../../bin/simvascular
+[ 97%] Built target simvascular
+[ 97%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_meshing.so
+[100%] Built target org_sv_gui_qt_meshing
