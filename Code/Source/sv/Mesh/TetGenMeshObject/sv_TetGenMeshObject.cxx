@@ -92,6 +92,7 @@ cvTetGenMeshObject::cvTetGenMeshObject() : cvMeshObject()
   boundarylayermesh_ = nullptr;
   innerblmesh_ = nullptr;
   wallmesh_ = nullptr;
+  centerlines_ = nullptr;
   holelist_ = nullptr;
   regionlist_ = nullptr;
   regionsizelist_ = nullptr;
@@ -131,6 +132,7 @@ cvTetGenMeshObject::cvTetGenMeshObject() : cvMeshObject()
   meshoptions_.numwallsublayers=2;
   meshoptions_.wallthicknesssmoothingiterations=5;
   meshoptions_.wallthicknesscurvaturefactor=0.8;
+  meshoptions_.wallthicknessradiusfactor=0.0;
   meshoptions_.refinement=0;
   meshoptions_.refinedsize=0;
   meshoptions_.sphereradius=0;
@@ -207,6 +209,9 @@ cvTetGenMeshObject::~cvTetGenMeshObject()
 
   if (wallmesh_ != nullptr)
     wallmesh_->Delete();
+
+  if (centerlines_ != nullptr)
+    centerlines_->Delete();
 
   if (holelist_ != nullptr)
     holelist_->Delete();
@@ -1084,6 +1089,22 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
     }
     meshoptions_.wallthicknesscurvaturefactor=values[0];
   }
+  // Must be checked before the shorter 'WallThickness' prefix.
+  else if (!strncmp(flags,"WallThicknessRadiusFactor",25)) {
+    if (numValues < 1)
+      return SV_ERROR;
+    // The GUI, Python API and .msh file paths all set options through here,
+    // so the valid range (0.0-1.0) is enforced once in this core path. A
+    // value of zero disables the radius-adaptive thickness. The thickness at
+    // each wall node becomes this fraction of the local vessel radius
+    // (distance to the centerlines), clamped to the global WallThickness.
+    if (!std::isfinite(values[0]) || values[0] < 0.0 || values[0] > 1.0)
+    {
+      fprintf(stderr,"The wall thickness radius factor must be between 0 and 1\n");
+      return SV_ERROR;
+    }
+    meshoptions_.wallthicknessradiusfactor=values[0];
+  }
   else if (!strncmp(flags,"WallThickness",13)) {
     if (numValues < 1)
       return SV_ERROR;
@@ -1132,6 +1153,33 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
 void cvTetGenMeshObject::ClearLocalWallThickness()
 {
   localWallThickness_.clear();
+}
+
+// -------------------
+//  SetCenterlines
+// -------------------
+/**
+ * @brief Stores the centerlines used to compute a radius-adaptive wall
+ * thickness (see GenerateWallMesh). The mesher takes its own reference so
+ * the caller may release theirs; any previously stored centerlines are
+ * released first. Passing null clears the stored centerlines.
+ */
+void cvTetGenMeshObject::SetCenterlines(vtkPolyData* centerlines)
+{
+  if (centerlines_ == centerlines)
+  {
+    return;
+  }
+  if (centerlines_ != nullptr)
+  {
+    centerlines_->Delete();
+    centerlines_ = nullptr;
+  }
+  if (centerlines != nullptr)
+  {
+    centerlines_ = vtkPolyData::New();
+    centerlines_->DeepCopy(centerlines);
+  }
 }
 
 // --------------------
