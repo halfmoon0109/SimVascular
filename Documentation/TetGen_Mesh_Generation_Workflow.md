@@ -173,8 +173,11 @@ options.wall_thickness = 0.5
 options.number_of_wall_layers = 2
 options.wall_thickness_smoothing_iterations = 5
 options.wall_thickness_curvature_factor = 0.8
-# 반경 적응 두께(선택): centerline 계산이 켜져 있어야 한다.
+# 반경 적응 두께(선택): centerline이 계산되어 있어야 한다.
+# radius_meshing_compute_centerlines 기본값은 False이므로 명시적으로 켜거나
+# radius_meshing_centerlines로 centerline을 직접 제공해야 한다.
 # options.radius_meshing_on = True
+# options.radius_meshing_compute_centerlines = True
 # options.wall_thickness_radius_factor = 0.15
 
 mesher.generate_mesh(options)
@@ -314,9 +317,11 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
   **centerline까지의 거리**(`DistanceToCenterlines`)를 사용한다.
 - centerline은 mesher가 직접 계산하지 않는다. radius(centerline) 메싱 경로가
   계산한 centerline을 `cvTetGenMeshObject::SetCenterlines()`로 전달받아
-  재사용한다. 따라서 이 옵션을 쓰려면 centerline 계산(radius 메싱 또는
-  `compute_centerlines`)을 함께 켜야 하며, centerline이 없으면 명확한 에러로
-  종료한다.
+  재사용한다. 따라서 이 옵션을 쓰려면 centerline이 계산되어 있어야 한다.
+  Python에서는 `radius_meshing_on`과 `radius_meshing_compute_centerlines`를
+  함께 켜거나(`radius_meshing_compute_centerlines` 기본값은 False),
+  `radius_meshing_centerlines`로 centerline을 직접 제공한다. GUI에서는
+  centerline(radius) 메싱을 켠다. centerline이 없으면 명확한 에러로 종료한다.
 - 두께는 global `WallThickness`를 상한, 그 20%를 하한으로 클램프해 반경 추정이
   튀거나 극소혈관에서 두께가 0에 수렴하는 것을 막는다.
 - 유효 범위는 0.0~1.0이며 `0.0`이면 상수 `WallThickness`를 그대로 쓴다.
