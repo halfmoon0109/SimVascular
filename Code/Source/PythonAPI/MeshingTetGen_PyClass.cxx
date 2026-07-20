@@ -331,6 +331,13 @@ SetOptions(PyUtilApiFunction& api, cvMeshObject* mesher, PyObject* options)
   //std::cout << "========= SetOptions =========" << std::endl;
   //std::cout << "[SetOptions] mesher: " << mesher << std::endl;
 
+  // Local wall thickness values accumulate in the mesher, so clear any
+  // values left from a previous mesh generation; the state must be fully
+  // defined by the options object being applied.
+  if (auto tetGenMesher = dynamic_cast<cvTetGenMeshObject*>(mesher)) {
+      tetGenMesher->ClearLocalWallThickness();
+  }
+
   // Set options that are not a list.
   //
   //std::cout << "[SetOptions] Set non-list options ... " << std::endl;

@@ -136,6 +136,7 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
 
   //Set curve sizes and other mesh options
   int SetMeshOptions(char *flags,int numValues, double *values);
+  void ClearLocalWallThickness();
 
   //Set boundary layer and/or specify wall faces
   int SetBoundaryLayer(int type, int id, int side, int nL, double* H);

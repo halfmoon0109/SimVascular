@@ -1119,6 +1119,21 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
   return SV_OK;
 }
 
+// --------------------------
+//  ClearLocalWallThickness
+// --------------------------
+/**
+ * @brief Removes all per-face wall thickness values set with the
+ * 'LocalWallThickness' option. The values otherwise accumulate in the
+ * mesher, so a caller applying a new set of options (e.g. the Python API
+ * reusing a mesher) must clear them first or values from a previous mesh
+ * generation would still be applied.
+ */
+void cvTetGenMeshObject::ClearLocalWallThickness()
+{
+  localWallThickness_.clear();
+}
+
 // --------------------
 //  SetBoundaryLayer
 // --------------------
