@@ -2074,7 +2074,8 @@ int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface, vtkDoubleAr
  * a local, one-ring estimate and can under-predict the fold at coarsely
  * meshed concave junctions, so this pass checks the actual extruded outer
  * geometry. The outer wall vertex of surface point p is p + t*n (thickness
- * along the point normal). For each surface triangle the winding of the
+ * along the unit point normal, matching how the extrusion normalizes the
+ * warp vectors before scaling them). For each surface triangle the winding of the
  * outer triangle (from the extruded vertices) is compared with the winding
  * of the inner triangle: when the thickness is too large in a concave region
  * the outer triangle collapses and inverts, flipping the winding. The
@@ -2138,6 +2139,32 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
     minThickness[ptId] = minThicknessRatio*array->GetValue(ptId);
   }
 
+  // The extrusion moves each point by thickness*unit normal (the vmtk
+  // boundary layer generator normalizes the warp vectors before scaling them
+  // by the thickness), so the point normals are normalized here to compute
+  // the same outer vertex. The stored normals are not always unit vectors:
+  // the surface point normals are averaged where coincident points are
+  // merged, which shortens them. Points with a degenerate normal cannot be
+  // extruded in any direction and their thickness cannot fix a fold, so the
+  // triangles using them are left out of the check.
+  std::vector<double> unitNormals(3*numPts, 0.0);
+  std::vector<bool> validNormal(numPts, false);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double normal[3];
+    normals->GetTuple(ptId, normal);
+    double length = std::sqrt(normal[0]*normal[0] + normal[1]*normal[1] +
+        normal[2]*normal[2]);
+    if (length <= 0.0)
+    {
+      continue;
+    }
+    unitNormals[3*ptId] = normal[0]/length;
+    unitNormals[3*ptId+1] = normal[1]/length;
+    unitNormals[3*ptId+2] = normal[2]/length;
+    validNormal[ptId] = true;
+  }
+
   // Returns the unit normal of a triangle from three points, or false if
   // the triangle is degenerate.
   auto triangleNormal = [](const double a[3], const double b[3],
@@ -2177,13 +2204,17 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
         continue;
       }
 
+      if (!validNormal[pts[0]] || !validNormal[pts[1]] || !validNormal[pts[2]])
+      {
+        continue;
+      }
+
       double inner[3][3];
       double outer[3][3];
       for (int i = 0; i < 3; i++)
       {
-        double normal[3];
         surface->GetPoint(pts[i], inner[i]);
-        normals->GetTuple(pts[i], normal);
+        const double *normal = &unitNormals[3*pts[i]];
         double thickness = array->GetValue(pts[i]);
         outer[i][0] = inner[i][0] + thickness*normal[0];
         outer[i][1] = inner[i][1] + thickness*normal[1];
