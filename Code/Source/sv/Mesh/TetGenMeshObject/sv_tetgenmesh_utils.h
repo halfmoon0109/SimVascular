@@ -128,4 +128,8 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData
     vtkDoubleArray *array,
     double factor);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    int maxIterations);
+
 #endif //__CV_TETGENMESH_UTILS_H

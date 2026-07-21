@@ -2062,3 +2062,182 @@ int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface, vtkDoubleAr
 
   return SV_OK;
 }
+
+// -----------------------------------------
+// TGenUtils_LimitThicknessToPreventFold
+// -----------------------------------------
+/**
+ * @brief Reduces a wall thickness point array where extruding the surface
+ * outward by the thickness would fold the outer wall over itself, so the
+ * generated wall mesh does not self-intersect.
+ * @note The curvature clamp (TGenUtils_ClampThicknessToConcaveCurvature) is
+ * a local, one-ring estimate and can under-predict the fold at coarsely
+ * meshed concave junctions, so this pass checks the actual extruded outer
+ * geometry. The outer wall vertex of surface point p is p + t*n (thickness
+ * along the point normal). For each surface triangle the winding of the
+ * outer triangle (from the extruded vertices) is compared with the winding
+ * of the inner triangle: when the thickness is too large in a concave region
+ * the outer triangle collapses and inverts, flipping the winding. The
+ * thickness at the vertices of every inverted (or near-collapsed) triangle is
+ * reduced and the check repeated until no triangle folds or the iteration
+ * limit is reached. Reduction is bounded by a small fraction of each point's
+ * original thickness; triangles still folded at that bound are reported so
+ * the fold is surfaced rather than silently produced. Only the thickness
+ * values change; the surface points (the fluid/wall interface) never move.
+ * This is a local test and does not detect a global collision of two
+ * separate surface regions.
+ * @param surface The surface being extruded; must have a 3-component
+ * 'Normals' point data array with the outward point normals.
+ * @param array The wall thickness point array; one component, one tuple per
+ * surface point.
+ * @param maxIterations The maximum number of reduce-and-recheck iterations.
+ * @return SV_OK if the array is processed.
+ */
+
+int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *array, int maxIterations)
+{
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot limit a thickness array without a surface and an array\n");
+    return SV_ERROR;
+  }
+
+  if (maxIterations <= 0)
+  {
+    return SV_OK;
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+
+  auto normals = surface->GetPointData()->GetArray("Normals");
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3 ||
+      normals->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface must have a 3-component 'Normals' point array to limit the thickness\n");
+    return SV_ERROR;
+  }
+
+  // A triangle is treated as folded when the outer winding has turned by
+  // more than this much from the inner winding (a dot product of the unit
+  // face normals at or below the threshold). A small positive value also
+  // catches nearly collapsed outer triangles, not only fully inverted ones.
+  const double foldThreshold = 0.1;
+  // Each folded point's thickness is scaled by this factor per iteration.
+  const double reductionFactor = 0.8;
+  // The thickness is never reduced below this fraction of its original value.
+  const double minThicknessRatio = 0.05;
+
+  std::vector<double> minThickness(numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    minThickness[ptId] = minThicknessRatio*array->GetValue(ptId);
+  }
+
+  // Returns the unit normal of a triangle from three points, or false if
+  // the triangle is degenerate.
+  auto triangleNormal = [](const double a[3], const double b[3],
+      const double c[3], double normal[3]) -> bool
+  {
+    double ab[3] = {b[0]-a[0], b[1]-a[1], b[2]-a[2]};
+    double ac[3] = {c[0]-a[0], c[1]-a[1], c[2]-a[2]};
+    normal[0] = ab[1]*ac[2] - ab[2]*ac[1];
+    normal[1] = ab[2]*ac[0] - ab[0]*ac[2];
+    normal[2] = ab[0]*ac[1] - ab[1]*ac[0];
+    double length = std::sqrt(normal[0]*normal[0] + normal[1]*normal[1] +
+        normal[2]*normal[2]);
+    if (length <= 0.0)
+    {
+      return false;
+    }
+    normal[0] /= length;
+    normal[1] /= length;
+    normal[2] /= length;
+    return true;
+  };
+
+  vtkIdType numFoldedCells = 0;
+  int iter = 0;
+  for (; iter < maxIterations; iter++)
+  {
+    std::vector<bool> foldedPoint(numPts, false);
+    numFoldedCells = 0;
+
+    for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellId, npts, pts);
+      if (npts != 3)
+      {
+        continue;
+      }
+
+      double inner[3][3];
+      double outer[3][3];
+      for (int i = 0; i < 3; i++)
+      {
+        double normal[3];
+        surface->GetPoint(pts[i], inner[i]);
+        normals->GetTuple(pts[i], normal);
+        double thickness = array->GetValue(pts[i]);
+        outer[i][0] = inner[i][0] + thickness*normal[0];
+        outer[i][1] = inner[i][1] + thickness*normal[1];
+        outer[i][2] = inner[i][2] + thickness*normal[2];
+      }
+
+      double innerNormal[3];
+      double outerNormal[3];
+      if (!triangleNormal(inner[0], inner[1], inner[2], innerNormal))
+      {
+        continue;
+      }
+      // A degenerate outer triangle means the thickness has collapsed the
+      // face, which is itself a fold.
+      bool outerOk = triangleNormal(outer[0], outer[1], outer[2], outerNormal);
+      double dot = outerOk ? (innerNormal[0]*outerNormal[0] +
+          innerNormal[1]*outerNormal[1] + innerNormal[2]*outerNormal[2]) : -1.0;
+
+      if (dot <= foldThreshold)
+      {
+        numFoldedCells++;
+        for (int i = 0; i < 3; i++)
+        {
+          foldedPoint[pts[i]] = true;
+        }
+      }
+    }
+
+    if (numFoldedCells == 0)
+    {
+      break;
+    }
+
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      if (!foldedPoint[ptId])
+      {
+        continue;
+      }
+      double reduced = reductionFactor*array->GetValue(ptId);
+      if (reduced < minThickness[ptId])
+      {
+        reduced = minThickness[ptId];
+      }
+      array->SetValue(ptId, reduced);
+    }
+  }
+
+  if (numFoldedCells > 0)
+  {
+    fprintf(stderr,"Warning: the extruded outer wall still folds over at %lld triangles after %d\
+ thickness reduction iterations; the wall mesh may self-intersect there. Refine the surface mesh or\
+ reduce the wall thickness at the junction\n", (long long)numFoldedCells, iter);
+  }
+
+  return SV_OK;
+}

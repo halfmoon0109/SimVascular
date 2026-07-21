@@ -2489,6 +2489,19 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
     }
   }
 
+  // Final safety pass: the curvature clamp is a local estimate and can miss
+  // a fold at a coarsely meshed junction, so check the actual extruded outer
+  // geometry (point + thickness*normal) and reduce the thickness wherever an
+  // outer triangle would invert, so the wall mesh does not self-intersect.
+  // This runs unconditionally because it only reduces thickness where a fold
+  // would otherwise occur. Only the thickness values change; the surface
+  // points (the fluid/wall interface) never move.
+  if (TGenUtils_LimitThicknessToPreventFold(surface, thicknessArray, 20) != SV_OK)
+  {
+    fprintf(stderr,"Problem limiting the wall thickness array to prevent the outer wall folding over\n");
+    return SV_ERROR;
+  }
+
   surface->GetPointData()->RemoveArray("WallThickness");
   surface->GetPointData()->AddArray(thicknessArray);
 
