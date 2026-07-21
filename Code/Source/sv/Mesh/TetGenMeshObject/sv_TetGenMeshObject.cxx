@@ -2340,75 +2340,13 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   thicknessArray->SetNumberOfTuples(numPts);
   thicknessArray->SetName("WallThickness");
 
-  // Build the base per-node wall thickness. By default every node uses the
-  // global wall thickness. When a radius factor is set the base thickness at
-  // each node instead follows the local vessel radius (its distance to the
-  // centerlines), so thin vessels get thin walls and large vessels thick
-  // walls. This makes the thickness at junctions of different-sized vessels
-  // (such as ICA-PCoA) transition with the geometry instead of being a single
-  // constant. The value is clamped to the global wall thickness as an upper
-  // bound and to a fraction of it as a lower bound so a poor radius estimate
-  // or a very small vessel cannot produce a degenerate thickness.
-  std::vector<double> baseThickness(numPts, meshoptions_.wallthickness);
-  if (meshoptions_.wallthicknessradiusfactor > 0.0)
-  {
-    if (centerlines_ == nullptr)
-    {
-      fprintf(stderr,"A radius-adaptive wall thickness (WallThicknessRadiusFactor) was requested \
-but no centerlines are available; enable centerline (radius) meshing so the centerlines are computed\n");
-      return SV_ERROR;
-    }
-
-    // Compute the distance of each wall surface node to the centerlines; this
-    // distance is the local vessel radius at the node.
-    cvPolyData surfaceCv(surface);
-    cvPolyData linesCv(centerlines_);
-    cvPolyData* distanceCv = nullptr;
-    if (sys_geom_distancetocenterlines(&surfaceCv, &linesCv, &distanceCv) != SV_OK ||
-        distanceCv == nullptr)
-    {
-      fprintf(stderr,"Problem computing the distance to centerlines for the radius-adaptive wall thickness\n");
-      return SV_ERROR;
-    }
-
-    auto distancePd = distanceCv->GetVtkPolyData();
-    auto radius = (distancePd == nullptr) ? nullptr :
-      vtkDoubleArray::SafeDownCast(distancePd->GetPointData()->GetArray("DistanceToCenterlines"));
-    if (radius == nullptr || radius->GetNumberOfTuples() != numPts)
-    {
-      fprintf(stderr,"The computed distance to centerlines does not match the wall surface points\n");
-      delete distanceCv;
-      return SV_ERROR;
-    }
-
-    const double maxThickness = meshoptions_.wallthickness;
-    const double minThickness = 0.2 * meshoptions_.wallthickness;
-    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
-    {
-      double thickness = meshoptions_.wallthicknessradiusfactor * radius->GetValue(ptId);
-      if (thickness > maxThickness)
-      {
-        thickness = maxThickness;
-      }
-      if (thickness < minThickness)
-      {
-        thickness = minThickness;
-      }
-      baseThickness[ptId] = thickness;
-    }
-    delete distanceCv;
-  }
-
-  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
-  {
-    thicknessArray->SetValue(ptId, baseThickness[ptId]);
-  }
-
-  // Override the base wall thickness for faces with a local wall thickness.
-  // A point shared by faces with different thicknesses gets the arithmetic
-  // mean of the unique face thicknesses, so the value at a face boundary
-  // does not depend on how many triangles each face is divided into or on
-  // the order the cells are visited.
+  // Build the requested per-node wall thickness: the global wall thickness,
+  // or the local wall thickness of the face the node belongs to when one is
+  // set for it. A point shared by faces with different thicknesses gets the
+  // arithmetic mean of the unique face thicknesses, so the value at a face
+  // boundary does not depend on how many triangles each face is divided into
+  // or on the order the cells are visited.
+  std::vector<double> requestedThickness(numPts, meshoptions_.wallthickness);
   if (!localWallThickness_.empty())
   {
     auto faceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
@@ -2441,10 +2379,81 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
       {
         auto localThickness = localWallThickness_.find(faceId);
         thicknessSum += (localThickness == localWallThickness_.end()) ?
-          baseThickness[ptId] : localThickness->second;
+          meshoptions_.wallthickness : localThickness->second;
       }
-      thicknessArray->SetValue(ptId, thicknessSum / pointFaceIds[ptId].size());
+      requestedThickness[ptId] = thicknessSum / pointFaceIds[ptId].size();
     }
+  }
+
+  // When a radius factor is set the thickness at each node follows the local
+  // vessel radius (its distance to the centerlines), so thin vessels get thin
+  // walls and large vessels thick walls. This makes the thickness at junctions
+  // of different-sized vessels (such as ICA-PCoA) transition with the geometry
+  // instead of being constant, and it also varies the thickness along a single
+  // face as the vessel tapers, which a per-face thickness cannot do.
+  //
+  // The radius-based value is bounded by the thickness requested at the node
+  // (its local face thickness, or the global thickness), so the radius factor
+  // refines the requested thickness rather than replacing it: a face given a
+  // local thickness keeps it as the upper bound and only gets thinner where
+  // the vessel narrows. The lower bound is a small fraction of the requested
+  // thickness so a poor radius estimate cannot produce a degenerate thickness,
+  // and it is small enough not to constrain a model spanning a wide range of
+  // vessel sizes (such as aorta to cerebral arteries).
+  const double minThicknessRatio = 0.05;
+  std::vector<double> baseThickness(requestedThickness);
+  if (meshoptions_.wallthicknessradiusfactor > 0.0)
+  {
+    if (centerlines_ == nullptr)
+    {
+      fprintf(stderr,"A radius-adaptive wall thickness (WallThicknessRadiusFactor) was requested \
+but no centerlines are available; enable centerline (radius) meshing so the centerlines are computed\n");
+      return SV_ERROR;
+    }
+
+    // Compute the distance of each wall surface node to the centerlines; this
+    // distance is the local vessel radius at the node.
+    cvPolyData surfaceCv(surface);
+    cvPolyData linesCv(centerlines_);
+    cvPolyData* distanceCv = nullptr;
+    if (sys_geom_distancetocenterlines(&surfaceCv, &linesCv, &distanceCv) != SV_OK ||
+        distanceCv == nullptr)
+    {
+      fprintf(stderr,"Problem computing the distance to centerlines for the radius-adaptive wall thickness\n");
+      return SV_ERROR;
+    }
+
+    auto distancePd = distanceCv->GetVtkPolyData();
+    auto radius = (distancePd == nullptr) ? nullptr :
+      vtkDoubleArray::SafeDownCast(distancePd->GetPointData()->GetArray("DistanceToCenterlines"));
+    if (radius == nullptr || radius->GetNumberOfTuples() != numPts)
+    {
+      fprintf(stderr,"The computed distance to centerlines does not match the wall surface points\n");
+      delete distanceCv;
+      return SV_ERROR;
+    }
+
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      double maxThickness = requestedThickness[ptId];
+      double minThickness = minThicknessRatio * maxThickness;
+      double thickness = meshoptions_.wallthicknessradiusfactor * radius->GetValue(ptId);
+      if (thickness > maxThickness)
+      {
+        thickness = maxThickness;
+      }
+      if (thickness < minThickness)
+      {
+        thickness = minThickness;
+      }
+      baseThickness[ptId] = thickness;
+    }
+    delete distanceCv;
+  }
+
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    thicknessArray->SetValue(ptId, baseThickness[ptId]);
   }
 
   // Clamp the thickness values in concave regions (such as the crotch
