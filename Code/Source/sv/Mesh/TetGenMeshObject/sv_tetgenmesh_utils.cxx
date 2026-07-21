@@ -2271,12 +2271,19 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
  thickness reduction iterations; the wall mesh may self-intersect there. Refine the surface mesh or\
  reduce the wall thickness at the junction\n", (long long)foldedCells.size(), iter);
 
-    // Report where the triangles that could not be fixed are and how they
-    // compare with the thickness left at them, so a fold that the thickness
-    // cannot fix can be told apart from one that the thickness caused. A
-    // triangle whose edges are much shorter than the remaining thickness is a
-    // surface sliver: shrinking the thickness by the bounded amount cannot
-    // unfold it and the surface has to be remeshed there instead.
+    // Report where the triangles that could not be fixed are, what shape they
+    // have and how far apart their point normals are, so a fold the thickness
+    // cannot fix can be told apart from one the thickness caused. Reducing the
+    // thickness moves the outer vertices by at most twice the thickness, which
+    // can only turn the outer face normal enough to register as folded when
+    // that displacement is comparable with the size of the triangle. So a
+    // triangle still folded at the reduction bound is either nearly
+    // degenerate, which shows up as a minimum altitude (twice the area over
+    // the longest edge) far below its edge lengths, or it has point normals
+    // pointing in very different directions, which shows up as a small
+    // smallest normal dot product. Neither is fixed by the thickness: the
+    // first needs the surface remeshed there, the second needs the normals
+    // at that junction fixed.
     const size_t maxReported = 10;
     for (size_t i = 0; i < foldedCells.size() && i < maxReported; i++)
     {
@@ -2295,36 +2302,56 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
         }
       }
 
-      double minEdge = -1.0;
+      double edges[3];
       double maxEdge = 0.0;
       for (int j = 0; j < 3; j++)
       {
         const double *a = corner[j];
         const double *b = corner[(j+1)%3];
-        double edge = std::sqrt((b[0]-a[0])*(b[0]-a[0]) + (b[1]-a[1])*(b[1]-a[1]) +
+        edges[j] = std::sqrt((b[0]-a[0])*(b[0]-a[0]) + (b[1]-a[1])*(b[1]-a[1]) +
             (b[2]-a[2])*(b[2]-a[2]));
-        if (minEdge < 0.0 || edge < minEdge)
+        if (edges[j] > maxEdge)
         {
-          minEdge = edge;
-        }
-        if (edge > maxEdge)
-        {
-          maxEdge = edge;
+          maxEdge = edges[j];
         }
       }
 
-      double thickness = 0.0;
-      double thicknessRatio = 0.0;
+      // The area from the cross product of two edges, and the altitude on the
+      // longest edge; a nearly degenerate triangle has an altitude orders of
+      // magnitude below its edges.
+      double ab[3], ac[3], cross[3];
+      for (int k = 0; k < 3; k++)
+      {
+        ab[k] = corner[1][k] - corner[0][k];
+        ac[k] = corner[2][k] - corner[0][k];
+      }
+      cross[0] = ab[1]*ac[2] - ab[2]*ac[1];
+      cross[1] = ab[2]*ac[0] - ab[0]*ac[2];
+      cross[2] = ab[0]*ac[1] - ab[1]*ac[0];
+      double area = 0.5*std::sqrt(cross[0]*cross[0] + cross[1]*cross[1] + cross[2]*cross[2]);
+      double altitude = (maxEdge > 0.0) ? 2.0*area/maxEdge : 0.0;
+
+      // The smallest dot product between the point normals; a value near one
+      // means the three points are extruded in nearly the same direction.
+      double minNormalDot = 1.0;
       for (int j = 0; j < 3; j++)
       {
-        thickness += array->GetValue(pts[j])/3.0;
-        thicknessRatio += (originalThickness[pts[j]] > 0.0) ?
-          array->GetValue(pts[j])/(3.0*originalThickness[pts[j]]) : 0.0;
+        const double *a = &unitNormals[3*pts[j]];
+        const double *b = &unitNormals[3*pts[(j+1)%3]];
+        double normalDot = a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+        if (normalDot < minNormalDot)
+        {
+          minNormalDot = normalDot;
+        }
       }
 
-      fprintf(stderr,"  folded triangle at (%.6g, %.6g, %.6g): edges %.6g to %.6g, thickness %.6g\
- (%.1f%% of the requested thickness)\n", center[0], center[1], center[2], minEdge, maxEdge,
-          thickness, 100.0*thicknessRatio);
+      fprintf(stderr,"  folded triangle at (%.6g, %.6g, %.6g):\n", center[0], center[1], center[2]);
+      fprintf(stderr,"    edges %.6g %.6g %.6g, area %.6g, altitude %.6g\n", edges[0], edges[1],
+          edges[2], area, altitude);
+      fprintf(stderr,"    thickness %.6g %.6g %.6g (requested %.6g %.6g %.6g)\n",
+          array->GetValue(pts[0]), array->GetValue(pts[1]), array->GetValue(pts[2]),
+          originalThickness[pts[0]], originalThickness[pts[1]], originalThickness[pts[2]]);
+      fprintf(stderr,"    smallest point normal dot %.6g\n", minNormalDot);
     }
   }
 
