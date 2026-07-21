@@ -2133,10 +2133,12 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
   // The thickness is never reduced below this fraction of its original value.
   const double minThicknessRatio = 0.05;
 
+  std::vector<double> originalThickness(numPts);
   std::vector<double> minThickness(numPts);
   for (vtkIdType ptId = 0; ptId < numPts; ptId++)
   {
-    minThickness[ptId] = minThicknessRatio*array->GetValue(ptId);
+    originalThickness[ptId] = array->GetValue(ptId);
+    minThickness[ptId] = minThicknessRatio*originalThickness[ptId];
   }
 
   // The extrusion moves each point by thickness*unit normal (the vmtk
@@ -2187,12 +2189,12 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
     return true;
   };
 
-  vtkIdType numFoldedCells = 0;
+  std::vector<vtkIdType> foldedCells;
   int iter = 0;
   for (; iter < maxIterations; iter++)
   {
     std::vector<bool> foldedPoint(numPts, false);
-    numFoldedCells = 0;
+    foldedCells.clear();
 
     for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
     {
@@ -2235,7 +2237,7 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
 
       if (dot <= foldThreshold)
       {
-        numFoldedCells++;
+        foldedCells.push_back(cellId);
         for (int i = 0; i < 3; i++)
         {
           foldedPoint[pts[i]] = true;
@@ -2243,7 +2245,7 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
       }
     }
 
-    if (numFoldedCells == 0)
+    if (foldedCells.empty())
     {
       break;
     }
@@ -2263,11 +2265,67 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
     }
   }
 
-  if (numFoldedCells > 0)
+  if (!foldedCells.empty())
   {
     fprintf(stderr,"Warning: the extruded outer wall still folds over at %lld triangles after %d\
  thickness reduction iterations; the wall mesh may self-intersect there. Refine the surface mesh or\
- reduce the wall thickness at the junction\n", (long long)numFoldedCells, iter);
+ reduce the wall thickness at the junction\n", (long long)foldedCells.size(), iter);
+
+    // Report where the triangles that could not be fixed are and how they
+    // compare with the thickness left at them, so a fold that the thickness
+    // cannot fix can be told apart from one that the thickness caused. A
+    // triangle whose edges are much shorter than the remaining thickness is a
+    // surface sliver: shrinking the thickness by the bounded amount cannot
+    // unfold it and the surface has to be remeshed there instead.
+    const size_t maxReported = 10;
+    for (size_t i = 0; i < foldedCells.size() && i < maxReported; i++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(foldedCells[i], npts, pts);
+
+      double center[3] = {0.0, 0.0, 0.0};
+      double corner[3][3];
+      for (int j = 0; j < 3; j++)
+      {
+        surface->GetPoint(pts[j], corner[j]);
+        for (int k = 0; k < 3; k++)
+        {
+          center[k] += corner[j][k]/3.0;
+        }
+      }
+
+      double minEdge = -1.0;
+      double maxEdge = 0.0;
+      for (int j = 0; j < 3; j++)
+      {
+        const double *a = corner[j];
+        const double *b = corner[(j+1)%3];
+        double edge = std::sqrt((b[0]-a[0])*(b[0]-a[0]) + (b[1]-a[1])*(b[1]-a[1]) +
+            (b[2]-a[2])*(b[2]-a[2]));
+        if (minEdge < 0.0 || edge < minEdge)
+        {
+          minEdge = edge;
+        }
+        if (edge > maxEdge)
+        {
+          maxEdge = edge;
+        }
+      }
+
+      double thickness = 0.0;
+      double thicknessRatio = 0.0;
+      for (int j = 0; j < 3; j++)
+      {
+        thickness += array->GetValue(pts[j])/3.0;
+        thicknessRatio += (originalThickness[pts[j]] > 0.0) ?
+          array->GetValue(pts[j])/(3.0*originalThickness[pts[j]]) : 0.0;
+      }
+
+      fprintf(stderr,"  folded triangle at (%.6g, %.6g, %.6g): edges %.6g to %.6g, thickness %.6g\
+ (%.1f%% of the requested thickness)\n", center[0], center[1], center[2], minEdge, maxEdge,
+          thickness, 100.0*thicknessRatio);
+    }
   }
 
   return SV_OK;
