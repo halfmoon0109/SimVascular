@@ -68,7 +68,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <utility>
 #include <vector>
 
 #define MAXPATHLEN 1024
@@ -2460,6 +2462,196 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
           minThickness[pts[1]], minThickness[pts[2]]);
       fprintf(stderr,"    smallest point normal dot %.6g\n", minNormalDot);
     }
+  }
+
+  return SV_OK;
+}
+
+// -----------------------------------------
+// TGenUtils_ReportSurfaceTriangleQuality
+// -----------------------------------------
+/**
+ * @brief Reports the shape quality of the triangles of a surface.
+ * @note A wall thickness cannot be extruded off a triangle without folding it
+ * unless the outer vertices move apart by less than the triangle's smallest
+ * altitude, so a sliver (a triangle whose altitude has collapsed against its
+ * edge lengths) cannot carry a wall at all and no thickness value fixes it.
+ * The fold prevention pass (TGenUtils_LimitThicknessToPreventFold) can only
+ * thin the wall down to such a triangle; the triangle itself has to be gone
+ * before the extrusion. This report is called on both sides of the surface
+ * remeshing so a sliver reaching the extrusion can be traced to the model
+ * surface or to the remeshing. Nothing is modified.
+ * @param surface The surface to report on.
+ * @param label A short name for the pipeline stage, printed with the report.
+ * @return SV_OK if the surface is reported on.
+ */
+
+int TGenUtils_ReportSurfaceTriangleQuality(vtkPolyData *surface, const char *label)
+{
+  if (surface == nullptr)
+  {
+    fprintf(stderr,"Cannot report the triangle quality of a null surface\n");
+    return SV_ERROR;
+  }
+
+  if (surface->NeedToBuildCells())
+  {
+    surface->BuildCells();
+  }
+
+  // The aspect ratio of a triangle is its longest edge over its smallest
+  // altitude, scaled so an equilateral triangle is 1.0, matching the
+  // convention of the tetrahedron quality report.
+  const double equilateralScale = 0.5*std::sqrt(3.0);
+  // Triangles at or above this aspect ratio are listed individually.
+  const double reportAspect = 10.0;
+  const size_t maxReported = 5;
+
+  vtkIdType numTris = 0;
+  double minAspect = 0.0;
+  double maxAspect = 0.0;
+  double sumAspect = 0.0;
+  vtkIdType numAbove10 = 0;
+  vtkIdType numAbove30 = 0;
+  vtkIdType numAbove100 = 0;
+  vtkIdType numDegenerate = 0;
+
+  // The worst triangles, kept sorted by decreasing aspect ratio.
+  std::vector<std::pair<double,vtkIdType> > worst;
+
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+
+    double corner[3][3];
+    for (int i = 0; i < 3; i++)
+    {
+      surface->GetPoint(pts[i], corner[i]);
+    }
+
+    double maxEdge = 0.0;
+    for (int i = 0; i < 3; i++)
+    {
+      const double *a = corner[i];
+      const double *b = corner[(i+1)%3];
+      double edge = std::sqrt((b[0]-a[0])*(b[0]-a[0]) + (b[1]-a[1])*(b[1]-a[1]) +
+          (b[2]-a[2])*(b[2]-a[2]));
+      if (edge > maxEdge)
+      {
+        maxEdge = edge;
+      }
+    }
+
+    double ab[3], ac[3], cross[3];
+    for (int k = 0; k < 3; k++)
+    {
+      ab[k] = corner[1][k] - corner[0][k];
+      ac[k] = corner[2][k] - corner[0][k];
+    }
+    cross[0] = ab[1]*ac[2] - ab[2]*ac[1];
+    cross[1] = ab[2]*ac[0] - ab[0]*ac[2];
+    cross[2] = ab[0]*ac[1] - ab[1]*ac[0];
+    double area = 0.5*std::sqrt(cross[0]*cross[0] + cross[1]*cross[1] + cross[2]*cross[2]);
+
+    // A triangle with no area or no extent has no aspect ratio to report; it
+    // is counted separately because it is a defect on its own.
+    if (maxEdge <= 0.0 || area <= 0.0)
+    {
+      numDegenerate++;
+      continue;
+    }
+
+    double altitude = 2.0*area/maxEdge;
+    double aspect = equilateralScale*maxEdge/altitude;
+
+    if (numTris == 0 || aspect < minAspect)
+    {
+      minAspect = aspect;
+    }
+    if (aspect > maxAspect)
+    {
+      maxAspect = aspect;
+    }
+    sumAspect += aspect;
+    numTris++;
+
+    if (aspect > 10.0)
+    {
+      numAbove10++;
+    }
+    if (aspect > 30.0)
+    {
+      numAbove30++;
+    }
+    if (aspect > 100.0)
+    {
+      numAbove100++;
+    }
+
+    if (aspect >= reportAspect)
+    {
+      worst.push_back(std::make_pair(aspect, cellId));
+      std::sort(worst.begin(), worst.end(),
+          std::greater<std::pair<double,vtkIdType> >());
+      if (worst.size() > maxReported)
+      {
+        worst.resize(maxReported);
+      }
+    }
+  }
+
+  fprintf(stdout,"Surface triangle quality (%s), aspect ratio (1.0 is an equilateral triangle):\n",
+      (label == nullptr) ? "surface" : label);
+  if (numTris == 0)
+  {
+    fprintf(stdout,"  No triangles\n");
+    return SV_OK;
+  }
+
+  fprintf(stdout,"  Number of triangles: %lld\n", (long long)numTris);
+  fprintf(stdout,"  Min / Avg / Max: %.3f / %.3f / %.3f\n", minAspect,
+      sumAspect/(double)numTris, maxAspect);
+  fprintf(stdout,"  Aspect ratio > 10: %lld, > 30: %lld, > 100: %lld\n",
+      (long long)numAbove10, (long long)numAbove30, (long long)numAbove100);
+  if (numDegenerate > 0)
+  {
+    fprintf(stdout,"  Zero area triangles: %lld\n", (long long)numDegenerate);
+  }
+
+  for (size_t i = 0; i < worst.size(); i++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(worst[i].second, npts, pts);
+
+    double center[3] = {0.0, 0.0, 0.0};
+    double corner[3][3];
+    for (int j = 0; j < 3; j++)
+    {
+      surface->GetPoint(pts[j], corner[j]);
+      for (int k = 0; k < 3; k++)
+      {
+        center[k] += corner[j][k]/3.0;
+      }
+    }
+
+    double edges[3];
+    for (int j = 0; j < 3; j++)
+    {
+      const double *a = corner[j];
+      const double *b = corner[(j+1)%3];
+      edges[j] = std::sqrt((b[0]-a[0])*(b[0]-a[0]) + (b[1]-a[1])*(b[1]-a[1]) +
+          (b[2]-a[2])*(b[2]-a[2]));
+    }
+
+    fprintf(stdout,"  aspect ratio %.3f at (%.6g, %.6g, %.6g), edges %.6g %.6g %.6g\n",
+        worst[i].first, center[0], center[1], center[2], edges[0], edges[1], edges[2]);
   }
 
   return SV_OK;

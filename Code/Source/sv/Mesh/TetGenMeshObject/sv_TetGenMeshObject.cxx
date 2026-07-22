@@ -1950,6 +1950,12 @@ int cvTetGenMeshObject::GenerateSurfaceRemesh()
     meshsizingfunction = nullptr;
   }
 
+  // Report the triangle shape quality on both sides of the remeshing. A
+  // sliver reaching the wall extrusion cannot be fixed by any wall thickness
+  // (see TGenUtils_LimitThicknessToPreventFold), so it has to be traced to
+  // either the model surface or the remeshing itself.
+  TGenUtils_ReportSurfaceTriangleQuality(polydatasolid_, "before surface remesh");
+
 #ifdef SV_USE_MMG
   if (meshoptions_.usemmg)
   {
@@ -1988,6 +1994,8 @@ int cvTetGenMeshObject::GenerateSurfaceRemesh()
 #ifdef SV_USE_MMG
   }
 #endif
+
+  TGenUtils_ReportSurfaceTriangleQuality(polydatasolid_, "after surface remesh");
 
   int meshInfo[3];
   if (TGenUtils_CheckSurfaceMesh(polydatasolid_, meshInfo) != SV_OK)
@@ -2188,6 +2196,12 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
 
   auto originalsurfpd = vtkSmartPointer<vtkPolyData>::New();
   originalsurfpd->DeepCopy(cleaner->GetOutput());
+
+  // This surface is shared: the fluid boundary layer, the TetGen fluid volume
+  // and the extruded solid wall are all derived from it, so a sliver here is
+  // in all three. It is reported after the cleaning because merging coincident
+  // points can itself change the triangles.
+  TGenUtils_ReportSurfaceTriangleQuality(originalsurfpd, "fluid/wall interface surface");
 
   // Create a sizing function vtk data array named 'MeshSizingFunction' for the 
   // current mesh used to define the size of the mesh at each node. 

@@ -132,4 +132,7 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *sur
     vtkDoubleArray *array,
     int maxIterations);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_ReportSurfaceTriangleQuality(vtkPolyData *surface,
+    const char *label);
+
 #endif //__CV_TETGENMESH_UTILS_H
