@@ -68,6 +68,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <vector>
 
 #define MAXPATHLEN 1024
@@ -2080,10 +2081,16 @@ int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface, vtkDoubleAr
  * of the inner triangle: when the thickness is too large in a concave region
  * the outer triangle collapses and inverts, flipping the winding. The
  * thickness at the vertices of every inverted (or near-collapsed) triangle is
- * reduced and the check repeated until no triangle folds or the iteration
- * limit is reached. Reduction is bounded by a small fraction of each point's
- * original thickness; triangles still folded at that bound are reported so
- * the fold is surfaced rather than silently produced. Only the thickness
+ * levelled to the smallest of the three (an imbalance between them folds the
+ * triangle on its own and a proportional reduction would never remove it),
+ * then reduced, and the check repeated until no triangle folds or the
+ * iteration limit is reached. Reduction is bounded by a small fraction of each
+ * point's original thickness, or by a fraction of the smallest altitude of the
+ * triangles using the point where that is smaller: a sliver in the input
+ * surface cannot carry a thickness of the order of its altitude no matter what
+ * fraction of the requested value that is. Triangles still folded at that
+ * bound are reported so the fold is surfaced rather than silently produced.
+ * Only the thickness
  * values change; the surface points (the fluid/wall interface) never move.
  * This is a local test and does not detect a global collision of two
  * separate surface regions.
@@ -2138,15 +2145,91 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
   const double foldThreshold = 0.1;
   // Each folded point's thickness is scaled by this factor per iteration.
   const double reductionFactor = 0.8;
-  // The thickness is never reduced below this fraction of its original value.
+  // The thickness is never reduced below this fraction of its original value,
+  // unless the geometric bound below is smaller.
   const double minThicknessRatio = 0.05;
+  // A triangle can only be extruded without folding while the outer vertices
+  // move apart by less than the triangle's smallest altitude, so the thickness
+  // is also allowed down to this fraction of that altitude. On a well shaped
+  // triangle the smallest altitude is comparable with the edge lengths and
+  // this bound sits above the ratio floor, which then decides; on a sliver
+  // (a nearly degenerate triangle in the input surface) the altitude collapses
+  // and the fold cannot be removed at the ratio floor at all, so the bound
+  // lets the thickness go further down there and only there.
+  const double minAltitudeRatio = 0.5;
 
   std::vector<double> originalThickness(numPts);
-  std::vector<double> minThickness(numPts);
   for (vtkIdType ptId = 0; ptId < numPts; ptId++)
   {
     originalThickness[ptId] = array->GetValue(ptId);
+  }
+
+  // The smallest altitude of a triangle is twice its area over its longest
+  // edge; the bound for a point is the smallest one over the triangles using
+  // it. Points not used by any triangle keep the ratio floor.
+  std::vector<double> altitudeBound(numPts, std::numeric_limits<double>::max());
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+
+    double corner[3][3];
+    for (int i = 0; i < 3; i++)
+    {
+      surface->GetPoint(pts[i], corner[i]);
+    }
+
+    double maxEdge = 0.0;
+    for (int i = 0; i < 3; i++)
+    {
+      const double *a = corner[i];
+      const double *b = corner[(i+1)%3];
+      double edge = std::sqrt((b[0]-a[0])*(b[0]-a[0]) + (b[1]-a[1])*(b[1]-a[1]) +
+          (b[2]-a[2])*(b[2]-a[2]));
+      if (edge > maxEdge)
+      {
+        maxEdge = edge;
+      }
+    }
+    if (maxEdge <= 0.0)
+    {
+      continue;
+    }
+
+    double ab[3], ac[3], cross[3];
+    for (int k = 0; k < 3; k++)
+    {
+      ab[k] = corner[1][k] - corner[0][k];
+      ac[k] = corner[2][k] - corner[0][k];
+    }
+    cross[0] = ab[1]*ac[2] - ab[2]*ac[1];
+    cross[1] = ab[2]*ac[0] - ab[0]*ac[2];
+    cross[2] = ab[0]*ac[1] - ab[1]*ac[0];
+    double area = 0.5*std::sqrt(cross[0]*cross[0] + cross[1]*cross[1] + cross[2]*cross[2]);
+    double bound = minAltitudeRatio*2.0*area/maxEdge;
+
+    for (int i = 0; i < 3; i++)
+    {
+      if (bound < altitudeBound[pts[i]])
+      {
+        altitudeBound[pts[i]] = bound;
+      }
+    }
+  }
+
+  std::vector<double> minThickness(numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
     minThickness[ptId] = minThicknessRatio*originalThickness[ptId];
+    if (altitudeBound[ptId] < minThickness[ptId])
+    {
+      minThickness[ptId] = altitudeBound[ptId];
+    }
   }
 
   // The extrusion moves each point by thickness*unit normal (the vmtk
@@ -2202,6 +2285,14 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
   for (; iter < maxIterations; iter++)
   {
     std::vector<bool> foldedPoint(numPts, false);
+    // The thickness a folded point is pulled down to before it is scaled: the
+    // smallest thickness on the folded triangles using it. The outer vertices
+    // of a triangle move apart by the difference of the thicknesses as well as
+    // by the spread of the normals, so an imbalance between the three points
+    // folds the triangle on its own. Scaling all three by the same factor keeps
+    // that imbalance forever, which is why a fold driven by it survives every
+    // iteration; levelling the three first removes it in one step.
+    std::vector<double> foldTarget(numPts, std::numeric_limits<double>::max());
     foldedCells.clear();
 
     for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
@@ -2246,9 +2337,15 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
       if (dot <= foldThreshold)
       {
         foldedCells.push_back(cellId);
+        double smallest = array->GetValue(pts[0]);
+        for (int i = 1; i < 3; i++)
+        {
+          smallest = std::min(smallest, array->GetValue(pts[i]));
+        }
         for (int i = 0; i < 3; i++)
         {
           foldedPoint[pts[i]] = true;
+          foldTarget[pts[i]] = std::min(foldTarget[pts[i]], smallest);
         }
       }
     }
@@ -2264,7 +2361,7 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
       {
         continue;
       }
-      double reduced = reductionFactor*array->GetValue(ptId);
+      double reduced = reductionFactor*std::min(array->GetValue(ptId), foldTarget[ptId]);
       if (reduced < minThickness[ptId])
       {
         reduced = minThickness[ptId];
@@ -2359,6 +2456,8 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
       fprintf(stderr,"    thickness %.6g %.6g %.6g (requested %.6g %.6g %.6g)\n",
           array->GetValue(pts[0]), array->GetValue(pts[1]), array->GetValue(pts[2]),
           originalThickness[pts[0]], originalThickness[pts[1]], originalThickness[pts[2]]);
+      fprintf(stderr,"    reduction floor %.6g %.6g %.6g\n", minThickness[pts[0]],
+          minThickness[pts[1]], minThickness[pts[2]]);
       fprintf(stderr,"    smallest point normal dot %.6g\n", minNormalDot);
     }
   }

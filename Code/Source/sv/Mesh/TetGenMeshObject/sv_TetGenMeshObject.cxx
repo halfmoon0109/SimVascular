@@ -2505,7 +2505,11 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
   // This runs unconditionally because it only reduces thickness where a fold
   // would otherwise occur. Only the thickness values change; the surface
   // points (the fluid/wall interface) never move.
-  if (TGenUtils_LimitThicknessToPreventFold(surface, thicknessArray, 20) != SV_OK)
+  // 30 iterations of the 0.8 reduction factor reach 0.1% of the requested
+  // thickness, enough to clear a fold at a sliver triangle, whose thickness
+  // has to drop to the order of the sliver's altitude; each iteration only
+  // walks the surface triangles once and costs nothing against the meshing.
+  if (TGenUtils_LimitThicknessToPreventFold(surface, thicknessArray, 30) != SV_OK)
   {
     fprintf(stderr,"Problem limiting the wall thickness array to prevent the outer wall folding over\n");
     return SV_ERROR;
