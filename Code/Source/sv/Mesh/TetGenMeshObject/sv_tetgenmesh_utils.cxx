@@ -2123,6 +2123,14 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
     return SV_ERROR;
   }
 
+  // The cells are walked below with GetCellPoints, which needs the cell array
+  // built. The caller is not required to have built it, and relying on an
+  // earlier pass having done so would break if the passes are reordered.
+  if (surface->NeedToBuildCells())
+  {
+    surface->BuildCells();
+  }
+
   // A triangle is treated as folded when the outer winding has turned by
   // more than this much from the inner winding (a dot product of the unit
   // face normals at or below the threshold). A small positive value also
