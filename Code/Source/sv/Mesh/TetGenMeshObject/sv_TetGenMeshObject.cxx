@@ -2547,6 +2547,42 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
     return SV_ERROR;
   }
 
+  // Diagnostic: report how far the thickness passes (curvature clamp,
+  // smoothing, fold prevention) reduced the wall below the requested value.
+  // A wall much thinner than requested is the thin part of a junction
+  // depression, so this locates the worst thinning from the log alone.
+  {
+    int numBelow90 = 0, numBelow50 = 0, numBelow25 = 0;
+    double minRatio = 1.0;
+    vtkIdType thinnestId = -1;
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      double requested = baseThickness[ptId];
+      if (requested <= 0.0)
+      {
+        continue;
+      }
+      double ratio = thicknessArray->GetValue(ptId) / requested;
+      if (ratio < 0.90) { numBelow90++; }
+      if (ratio < 0.50) { numBelow50++; }
+      if (ratio < 0.25) { numBelow25++; }
+      if (ratio < minRatio)
+      {
+        minRatio = ratio;
+        thinnestId = ptId;
+      }
+    }
+    fprintf(stdout,"Wall thickness reduction (final vs requested): points below 90%%/50%%/25%%: %d/%d/%d of %d\n",
+        numBelow90, numBelow50, numBelow25, numPts);
+    if (thinnestId >= 0)
+    {
+      double p[3];
+      surface->GetPoint(thinnestId, p);
+      fprintf(stdout,"  thinnest ratio %.3f (final %.5g / requested %.5g) at (%.5g, %.5g, %.5g)\n",
+          minRatio, thicknessArray->GetValue(thinnestId), baseThickness[thinnestId], p[0], p[1], p[2]);
+    }
+  }
+
   surface->GetPointData()->RemoveArray("WallThickness");
   surface->GetPointData()->AddArray(thicknessArray);
 
