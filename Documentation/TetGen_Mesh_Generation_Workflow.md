@@ -334,12 +334,40 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
   하한 자체가 반경 적응을 무력화하지 않게 하기 위한 것이다.
 - 반경 추정(`DistanceToCenterlines`)은 분지 crotch에서 가장 가까운 centerline이
   옆 가지의 것일 수 있어 접합부에서 가장 부정확하다. 접합부 겹침(fold-over)의
-  처방으로는 쓰지 말고(9.5 참고), 혈관 구경차가 큰 모델의 두께 배분 용도로만
+  처방으로는 쓰지 말고(9.6 참고), 혈관 구경차가 큰 모델의 두께 배분 용도로만
   사용한다.
 - 유효 범위는 0.0~1.0이며 `0.0`이면 상수 `WallThickness`를 그대로 쓴다.
 - 표면 point 좌표(fluid/wall interface)는 이동하지 않는다.
 
-### 9.3 곡률 기반 두께 제한
+### 9.3 압출 warp vector 스무딩 (방향)
+
+바깥 벽은 각 표면 point의 normal 방향으로 압출된다(9.7 참고). 오목한 접합부
+(두 혈관이 합쳐지는 crotch 등)에서는 이웃한 point normal이 서로 수렴하므로,
+완전히 뒤집히는 fold가 아니어도 바깥 벽이 안쪽으로 파이고(inward dip) 그 자리
+벽 요소가 비틀린다. 원인은 두께 *크기*가 아니라 압출 *방향*이므로 두께를
+줄여도(9.2, 반경 적응) 해소되지 않는다.
+
+두께 배열을 구성한 직후, 곡률 클램프(9.4) 앞에서
+`TGenUtils_SmoothWarpVectorsInConcaveRegions()`가 `Normals` 배열의 방향을
+오목 영역에서만 완화한다.
+
+- 각 point의 **오목도**를 초기 기하·normal에서 한 번 계산한다: tangent 평면
+  위로 올라오는(높이 `h > 0`) one-ring 이웃에 대한 상승각 sine `h/d`의 평균.
+  볼록·평평한 point는 `0`이므로 곧은 관은 변경되지 않는다.
+- 각 반복에서 오목 point의 normal을 `(1-w)·자신 + w·이웃 평균`으로 블렌딩한
+  뒤 재정규화한다. 가중치 `w = maxRelaxation × 오목도`이며 Jacobi 방식이라
+  point 순회 순서에 무관하다. 반복 횟수는 `WallThicknessSmoothingIterations`,
+  `maxRelaxation`은 `0.5`를 쓴다.
+- boundary edge(cap rim) 위의 point는 pin하여, `SetCapBoundaryNormals()`가
+  cap 평면에 맞춰 세팅한 normal을 보존한다(벽이 cap에서 평평하게 유지됨).
+
+normal *방향*만 바뀐다. 두께는 별도 `WallThickness` 배열에서 오고 압출기는
+warp vector 크기를 두께로 쓰지 않으므로(`UseWarpVectorMagnitudeAsThickness=0`)
+벽 두께는 불변이며, 표면 point 좌표(fluid/wall interface)도 이동하지 않는다.
+오목 point 수와 최대 방향 변화(도)를 로그로 보고한다. 이후 클램프(9.4)와
+fold 방지(9.6)는 스무딩된 방향을 기준으로 동작한다.
+
+### 9.4 곡률 기반 두께 제한
 
 `WallThicknessCurvatureFactor`가 `0`보다 크면
 `TGenUtils_ClampThicknessToConcaveCurvature()`가 스무딩 전에 `WallThickness`
@@ -357,7 +385,7 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
 전역적인 자기 교차 부재를 보장하지 않는다. 생성된 메시의 품질(음수 체적,
 aspect ratio, 표면 교차)은 별도로 확인해야 한다.
 
-### 9.4 두께 스무딩
+### 9.5 두께 스무딩
 
 local wall thickness가 존재하거나 곡률 기반 두께 제한 또는 반경 적응 두께가
 활성화된 경우 `TGenUtils_SmoothPointArray()`가 `WallThickness` 배열을 반복
@@ -377,9 +405,9 @@ Laplacian averaging으로 스무딩한다.
 스무딩이 클램프된 값을 이웃 방향으로 다시 끌어올리므로, 곡률 기반 두께 제한이
 활성화된 경우 스무딩 후 클램프를 한 번 더 적용해 제한을 복원한다.
 
-### 9.5 fold-over 방지 (압출 기하 검출)
+### 9.6 fold-over 방지 (압출 기하 검출)
 
-곡률 클램프(9.3)는 one-ring 국소 추정이라 거칠게 메싱된 접합부에서 fold를
+곡률 클램프(9.4)는 one-ring 국소 추정이라 거칠게 메싱된 접합부에서 fold를
 놓칠 수 있고, 압출 후처리(`VMTKUtils_ReorderTetElements`)는 음수 체적 tet를
 노드 재정렬로 뒤집어 **접힌 요소를 감춘다**(관례상 음수와 실제 fold를 구분
 못 함). 그래서 압출 직전에 `TGenUtils_LimitThicknessToPreventFold()`가 실제
@@ -406,7 +434,7 @@ Laplacian averaging으로 스무딩한다.
 - 국소 검사이므로 서로 떨어진 두 표면 구간이 압출 후 충돌하는 **전역 자기
   교차는 검출하지 못한다.**
 
-### 9.6 바깥쪽 압출
+### 9.7 바깥쪽 압출
 
 `WallThickness` 배열을 surface에 추가한 후
 `VMTKUtils_BoundaryLayerMesh()`를 다시 호출한다.
