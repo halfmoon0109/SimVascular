@@ -2342,6 +2342,14 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
     return SV_ERROR;
   }
 
+  // Echo the wall mesh options actually in effect so the log unambiguously
+  // shows which values (in particular the concave curvature factor) drove
+  // this run, independent of how the GUI or command history set them.
+  fprintf(stdout,"Wall mesh options in effect: WallThickness %g, CurvatureFactor %g, RadiusFactor %g, SmoothingIterations %d, NumberOfWallLayers %d\n",
+      meshoptions_.wallthickness, meshoptions_.wallthicknesscurvaturefactor,
+      meshoptions_.wallthicknessradiusfactor, meshoptions_.wallthicknesssmoothingiterations,
+      meshoptions_.numwallsublayers);
+
   // Create a point data array giving the wall thickness at each node
   // of the surface.
   //
