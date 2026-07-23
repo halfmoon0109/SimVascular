@@ -1732,6 +1732,12 @@ int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh)
   double maxRatio = 0.0;
   double sumRatio = 0.0;
 
+  // Track the worst few tetrahedra (highest aspect ratio) so their location
+  // is reported; this tells whether the worst element is at a junction or at
+  // a known input-surface sliver.
+  const int numWorstToReport = 5;
+  std::vector<std::pair<double,vtkIdType>> worstTets;
+
   auto aspectRatio = vtkSmartPointer<vtkDoubleArray>::New();
   aspectRatio->SetNumberOfComponents(1);
   aspectRatio->SetNumberOfTuples(mesh->GetNumberOfCells());
@@ -1766,6 +1772,20 @@ int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh)
     {
       numDistorted++;
     }
+
+    // Keep the top 'numWorstToReport' tetrahedra sorted by descending aspect
+    // ratio.
+    if ((int)worstTets.size() < numWorstToReport || ratio > worstTets.back().first)
+    {
+      auto pos = std::lower_bound(worstTets.begin(), worstTets.end(), ratio,
+          [](const std::pair<double,vtkIdType>& entry, double value)
+          { return entry.first > value; });
+      worstTets.insert(pos, std::make_pair(ratio, cellId));
+      if ((int)worstTets.size() > numWorstToReport)
+      {
+        worstTets.pop_back();
+      }
+    }
   }
 
   mesh->GetCellData()->RemoveArray("AspectRatio");
@@ -1798,6 +1818,32 @@ int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh)
   else
   {
     fprintf(stdout,"  Mesh quality assessment: POOR (consider adjusting the mesh size options or remeshing)\n");
+  }
+
+  // Report the location (centroid) of the worst elements so a high aspect
+  // ratio can be traced to a junction or to a known input-surface sliver.
+  auto worstPtIds = vtkSmartPointer<vtkIdList>::New();
+  for (auto& worst : worstTets)
+  {
+    mesh->GetCellPoints(worst.second, worstPtIds);
+    double centroid[3] = {0.0, 0.0, 0.0};
+    vtkIdType npts = worstPtIds->GetNumberOfIds();
+    for (vtkIdType k = 0; k < npts; k++)
+    {
+      double point[3];
+      mesh->GetPoint(worstPtIds->GetId(k), point);
+      centroid[0] += point[0];
+      centroid[1] += point[1];
+      centroid[2] += point[2];
+    }
+    if (npts > 0)
+    {
+      centroid[0] /= npts;
+      centroid[1] /= npts;
+      centroid[2] /= npts;
+    }
+    fprintf(stdout,"  aspect ratio %.3f at element centroid (%.5g, %.5g, %.5g)\n",
+        worst.first, centroid[0], centroid[1], centroid[2]);
   }
 
   return SV_OK;
