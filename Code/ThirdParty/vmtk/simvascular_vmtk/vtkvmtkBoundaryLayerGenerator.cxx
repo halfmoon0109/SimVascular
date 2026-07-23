@@ -32,6 +32,7 @@ Version:   $Revision: 1.7 $
 #include "vtkMath.h"
 #include "vtkLine.h"
 #include "vtkTriangle.h"
+#include <cmath>
 #include "vtkInformation.h"
 #include "vtkInformationVector.h"
 #include "vtkObjectFactory.h"
@@ -271,6 +272,23 @@ int vtkvmtkBoundaryLayerGenerator::RequestData(
   int finalNumberOfSubsteps = this->NumberOfSubsteps - initialNumberOfSubsteps - intermediateNumberOfSubsteps;
 
   this->BuildWarpVectors(input);
+
+  // Snapshot each warp vector's initial (outward normal) direction so the
+  // extrusion "depression" can be measured after untangling. vmtk keeps
+  // |warp| = thickness and only tilts its direction, so a large tilt away
+  // from the outward normal means the wall reaches less far outward there
+  // (an inward dip = the depression seen at junctions).
+  vtkDoubleArray* initialWarpDirections = vtkDoubleArray::New();
+  initialWarpDirections->SetNumberOfComponents(3);
+  initialWarpDirections->SetNumberOfTuples(numberOfInputPoints);
+  for (vtkIdType pointIdx=0; pointIdx<numberOfInputPoints; pointIdx++)
+    {
+    double initialWarp[3];
+    this->WarpVectorsArray->GetTuple(pointIdx,initialWarp);
+    vtkMath::Normalize(initialWarp);
+    initialWarpDirections->SetTuple(pointIdx,initialWarp);
+    }
+
   this->IncrementalWarpVectors(input,initialNumberOfSubsteps,relaxation);
 
   int iteration = 0;
@@ -295,6 +313,40 @@ int vtkvmtkBoundaryLayerGenerator::RequestData(
       check = this->CheckTangle(input,checkArray);
       }
     }
+
+  // Report the extrusion tilt distribution (the depression measure) and the
+  // worst-tilted point so the depression is visible from the log without a
+  // 3D view: a point whose final warp is tilted far from its outward normal
+  // reaches less outward there.
+  {
+    int numTilt15=0, numTilt30=0, numTilt45=0;
+    double minCosTilt=1.0;
+    vtkIdType worstTiltId=-1;
+    for (vtkIdType pointIdx=0; pointIdx<numberOfInputPoints; pointIdx++)
+      {
+      double finalWarp[3], initialDir[3];
+      this->WarpVectorsArray->GetTuple(pointIdx,finalWarp);
+      vtkMath::Normalize(finalWarp);
+      initialWarpDirections->GetTuple(pointIdx,initialDir);
+      double cosTilt = vtkMath::Dot(finalWarp,initialDir);
+      if (cosTilt>1.0) { cosTilt=1.0; }
+      if (cosTilt<-1.0) { cosTilt=-1.0; }
+      if (cosTilt<0.96593) { numTilt15++; }   // more than 15 degrees
+      if (cosTilt<0.86603) { numTilt30++; }   // more than 30 degrees
+      if (cosTilt<0.70711) { numTilt45++; }   // more than 45 degrees
+      if (cosTilt<minCosTilt) { minCosTilt=cosTilt; worstTiltId=pointIdx; }
+      }
+    std::cout << "Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: "
+      << numTilt15 << "/" << numTilt30 << "/" << numTilt45 << " of " << numberOfInputPoints << std::endl;
+    if (worstTiltId>=0)
+      {
+      double worstPoint[3];
+      input->GetPoint(worstTiltId,worstPoint);
+      std::cout << "  worst tilt " << acos(minCosTilt)*180.0/vtkMath::Pi() << " deg at ("
+        << worstPoint[0] << ", " << worstPoint[1] << ", " << worstPoint[2] << ")" << std::endl;
+      }
+  }
+  initialWarpDirections->Delete();
 
   int k;
   for (k=0; k<this->NumberOfSubLayers; k++)
@@ -684,7 +736,7 @@ int vtkvmtkBoundaryLayerGenerator::CheckTangle(vtkUnstructuredGrid* input, vtkUn
       checkArray->SetValue(j,0);
       }
     }
-  //std::cout << found <<" tangle triangles found"<<std::endl;
+  std::cout << found <<" tangle triangles found"<<std::endl;
 
   pointList->Delete();
   return check;
