@@ -1955,6 +1955,234 @@ int TGenUtils_SmoothPointArray(vtkPolyData *surface, vtkDoubleArray *array, int 
   return SV_OK;
 }
 
+// -------------------------------------------------
+// TGenUtils_SmoothWarpVectorsInConcaveRegions
+// -------------------------------------------------
+/**
+ * @brief Smooths the extrusion warp vectors (the point normals) of a surface
+ * in its concave regions so the outward wall extrusion does not dip inward
+ * and skew where the normals converge.
+ * @note When a surface is extruded outward along its point normals, the warp
+ * vectors of a concave region (such as the crotch where two vessels merge)
+ * converge toward each other, so the extruded outer wall dips inward and the
+ * wall elements there are twisted even when the wall does not fully fold over.
+ * The wall thickness is not the cause and reducing it does not fix the twist;
+ * the direction field is. This relaxes each concave point's normal toward the
+ * average of its one-ring neighbors' normals so the converging directions
+ * spread apart, and renormalizes it. Only the normal direction changes: the
+ * wall thickness (taken from a separate array) and the surface points (the
+ * fluid/wall interface) never move.
+ *
+ * Each point is relaxed in proportion to how concave it is. The concavity is
+ * the average, over the one-ring neighbors that rise above the point's
+ * tangent plane, of the sine of their rise angle (a dimensionless value that
+ * is zero on convex and flat regions), so convex and flat regions keep their
+ * normals and a straight tube is left unchanged. Points on a boundary edge
+ * (the cap rims, whose normals are set to lie in the cap plane) are pinned
+ * and never smoothed, so the wall stays flat at the caps.
+ * @param surface The surface being extruded; must have a 3-component normals
+ * point data array with the outward point normals.
+ * @param normalsArrayName The name of the normals point data array to smooth.
+ * @param iterations The number of relaxation iterations; a value less than
+ * one leaves the array unchanged.
+ * @param maxRelaxation The largest fraction of the neighbor average blended
+ * into a fully concave point's normal per iteration (between 0 and 1); a
+ * value of zero or less leaves the array unchanged.
+ * @return SV_OK if the normals are smoothed.
+ */
+
+int TGenUtils_SmoothWarpVectorsInConcaveRegions(vtkPolyData *surface, const char *normalsArrayName,
+    int iterations, double maxRelaxation)
+{
+  if (iterations <= 0 || maxRelaxation <= 0.0)
+  {
+    return SV_OK;
+  }
+
+  if (surface == nullptr || normalsArrayName == nullptr)
+  {
+    fprintf(stderr,"Cannot smooth the warp vectors without a surface and an array name\n");
+    return SV_ERROR;
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  auto normals = surface->GetPointData()->GetArray(normalsArrayName);
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3 ||
+      normals->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface must have a 3-component '%s' point array to smooth the warp vectors\n",
+        normalsArrayName);
+    return SV_ERROR;
+  }
+
+  // Read the current normals into a flat working buffer (component k of point
+  // ptId is at index 3*ptId+k) so the array's own storage type does not
+  // matter.
+  std::vector<double> vectors(3*numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    normals->GetTuple(ptId, &vectors[3*ptId]);
+  }
+
+  // Build the one-ring point neighbors of each point and, at the same time,
+  // detect the points on a boundary edge (an edge used by a single cell, such
+  // as the cap rims). Boundary points are pinned so the cap normals set to
+  // lie in the cap plane are kept and the wall stays flat at the caps.
+  surface->BuildLinks();
+  std::vector<std::vector<vtkIdType>> neighbors(numPts);
+  std::vector<char> pinned(numPts, 0);
+  auto cellIds = vtkSmartPointer<vtkIdList>::New();
+  auto edgeNeighbors = vtkSmartPointer<vtkIdList>::New();
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    surface->GetPointCells(ptId, cellIds);
+    auto& ptNeighbors = neighbors[ptId];
+    for (vtkIdType i = 0; i < cellIds->GetNumberOfIds(); i++)
+    {
+      vtkIdType cellId = cellIds->GetId(i);
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellId, npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] == ptId)
+        {
+          continue;
+        }
+        if (std::find(ptNeighbors.begin(), ptNeighbors.end(), pts[j]) == ptNeighbors.end())
+        {
+          ptNeighbors.push_back(pts[j]);
+        }
+        // The edge (ptId, pts[j]) is a boundary edge when no other cell
+        // shares it, which makes both its endpoints boundary points.
+        surface->GetCellEdgeNeighbors(cellId, ptId, pts[j], edgeNeighbors);
+        if (edgeNeighbors->GetNumberOfIds() == 0)
+        {
+          pinned[ptId] = 1;
+        }
+      }
+    }
+  }
+
+  // Precompute a per-point relaxation weight from the initial geometry and
+  // normals. The concavity is the average sine of the rise angle over the
+  // neighbors above the tangent plane and is zero on convex and flat points,
+  // so only concave points are relaxed.
+  std::vector<double> weight(numPts, 0.0);
+  vtkIdType numConcavePts = 0;
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    if (pinned[ptId] || neighbors[ptId].empty())
+    {
+      continue;
+    }
+    const double *normal = &vectors[3*ptId];
+    double normalLength = std::sqrt(normal[0]*normal[0] + normal[1]*normal[1] +
+        normal[2]*normal[2]);
+    if (normalLength <= 0.0)
+    {
+      continue;
+    }
+    double point[3];
+    surface->GetPoint(ptId, point);
+    double concavitySum = 0.0;
+    int concaveCount = 0;
+    for (auto neighborId : neighbors[ptId])
+    {
+      double neighbor[3];
+      surface->GetPoint(neighborId, neighbor);
+      double offset[3] = {neighbor[0]-point[0], neighbor[1]-point[1], neighbor[2]-point[2]};
+      double distance = std::sqrt(offset[0]*offset[0] + offset[1]*offset[1] +
+          offset[2]*offset[2]);
+      if (distance <= 0.0)
+      {
+        continue;
+      }
+      double height = (offset[0]*normal[0] + offset[1]*normal[1] +
+          offset[2]*normal[2]) / normalLength;
+      if (height <= 0.0)
+      {
+        continue;
+      }
+      concavitySum += height/distance;   // sine of the rise angle, in [0,1)
+      concaveCount++;
+    }
+    if (concaveCount > 0)
+    {
+      weight[ptId] = maxRelaxation * (concavitySum/concaveCount);
+      numConcavePts++;
+    }
+  }
+
+  // Relax each concave point's normal toward its neighbor average (Jacobi
+  // iteration, so the result is independent of the point visiting order) and
+  // renormalize; pinned and convex/flat points keep their normals. Track the
+  // largest direction change so the effect is observable in the log.
+  double maxAngleChange = 0.0;
+  std::vector<double> smoothed(3*numPts);
+  for (int iter = 0; iter < iterations; iter++)
+  {
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      smoothed[3*ptId] = vectors[3*ptId];
+      smoothed[3*ptId+1] = vectors[3*ptId+1];
+      smoothed[3*ptId+2] = vectors[3*ptId+2];
+      double w = weight[ptId];
+      if (w <= 0.0 || neighbors[ptId].empty())
+      {
+        continue;
+      }
+      double average[3] = {0.0, 0.0, 0.0};
+      for (auto neighborId : neighbors[ptId])
+      {
+        average[0] += vectors[3*neighborId];
+        average[1] += vectors[3*neighborId+1];
+        average[2] += vectors[3*neighborId+2];
+      }
+      double count = (double)neighbors[ptId].size();
+      average[0] /= count; average[1] /= count; average[2] /= count;
+      double blended[3] = {
+        (1.0-w)*vectors[3*ptId]   + w*average[0],
+        (1.0-w)*vectors[3*ptId+1] + w*average[1],
+        (1.0-w)*vectors[3*ptId+2] + w*average[2]};
+      double length = std::sqrt(blended[0]*blended[0] + blended[1]*blended[1] +
+          blended[2]*blended[2]);
+      if (length <= 0.0)
+      {
+        continue;   // degenerate average; keep the current normal
+      }
+      smoothed[3*ptId]   = blended[0]/length;
+      smoothed[3*ptId+1] = blended[1]/length;
+      smoothed[3*ptId+2] = blended[2]/length;
+    }
+    vectors.swap(smoothed);
+  }
+
+  // Write the smoothed normals back and report the largest direction change,
+  // measured against the original normals.
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double original[3];
+    normals->GetTuple(ptId, original);
+    double dot = original[0]*vectors[3*ptId] + original[1]*vectors[3*ptId+1] +
+        original[2]*vectors[3*ptId+2];
+    if (dot > 1.0) { dot = 1.0; }
+    if (dot < -1.0) { dot = -1.0; }
+    double angle = std::acos(dot);
+    if (angle > maxAngleChange)
+    {
+      maxAngleChange = angle;
+    }
+    normals->SetTuple(ptId, &vectors[3*ptId]);
+  }
+
+  std::cout << "Smoothed the wall extrusion warp vectors at " << numConcavePts
+      << " concave points (max direction change " << maxAngleChange*180.0/M_PI
+      << " degrees)" << std::endl;
+
+  return SV_OK;
+}
+
 // --------------------------------------------
 // TGenUtils_ClampThicknessToConcaveCurvature
 // --------------------------------------------

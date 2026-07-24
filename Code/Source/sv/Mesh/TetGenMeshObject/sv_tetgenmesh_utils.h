@@ -124,6 +124,11 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothPointArray(vtkPolyData *surface,
     vtkDoubleArray *array,
     int iterations);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothWarpVectorsInConcaveRegions(vtkPolyData *surface,
+    const char *normalsArrayName,
+    int iterations,
+    double maxRelaxation);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface,
     vtkDoubleArray *array,
     double factor);
