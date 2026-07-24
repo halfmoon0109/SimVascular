@@ -2540,13 +2540,37 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
     }
   }
 
-  // Final safety pass: the curvature clamp is a local estimate and can miss
-  // a fold at a coarsely meshed junction, so check the actual extruded outer
-  // geometry (point + thickness*normal) and reduce the thickness wherever an
-  // outer triangle would invert, so the wall mesh does not self-intersect.
-  // This runs unconditionally because it only reduces thickness where a fold
-  // would otherwise occur. Only the thickness values change; the surface
-  // points (the fluid/wall interface) never move.
+  // Preserve the assigned thickness at concave junctions by rounding the outer
+  // wall outward into a smooth convex fillet instead of letting the fold
+  // prevention pass thin it there (which reaches less far outward and so caves
+  // in as the junction "depression"). The naive outer surface (each point at
+  // its thickness along the normal) self-intersects at a concave crotch even
+  // though every point is at the full thickness, because the outward normals
+  // converge; this moves those outer points outward and apart into a fillet
+  // that keeps the thickness and does not self-intersect, the way the outer
+  // side of a thick welded junction fills with material. The inner surface
+  // (the fluid/wall interface) is fixed; only the outer surface moves, encoded
+  // back into the normal (extrusion direction) and thickness (extrusion
+  // magnitude) so the existing extrusion reproduces it. It runs after the
+  // thickness is finalized and before the fold prevention pass, which stays as
+  // the safety net for a degenerate input sliver that no rounding can carry.
+  const double outerRoundingRelaxation = 0.5;
+  const double maxFilletRatio = 3.0;
+  if (TGenUtils_RoundOuterWallToPreserveThickness(surface, thicknessArray,
+        meshoptions_.wallthicknesssmoothingiterations, outerRoundingRelaxation, maxFilletRatio) != SV_OK)
+  {
+    fprintf(stderr,"Problem rounding the outer wall to preserve the junction thickness\n");
+    return SV_ERROR;
+  }
+
+  // Final safety pass: the rounding above keeps the thickness at concave
+  // junctions, but a degenerate input sliver cannot carry a wall in any
+  // direction, so check the actual extruded outer geometry (point +
+  // thickness*normal) and reduce the thickness wherever an outer triangle
+  // would still invert, so the wall mesh does not self-intersect. This runs
+  // unconditionally because it only reduces thickness where a fold would
+  // otherwise occur. Only the thickness values change; the surface points
+  // (the fluid/wall interface) never move.
   // 30 iterations of the 0.8 reduction factor reach 0.1% of the requested
   // thickness, enough to clear a fold at a sliver triangle, whose thickness
   // has to drop to the order of the sliver's altitude; each iteration only

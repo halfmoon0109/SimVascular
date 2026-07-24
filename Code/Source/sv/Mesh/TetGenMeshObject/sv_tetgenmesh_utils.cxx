@@ -2742,6 +2742,323 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
 }
 
 // -----------------------------------------
+// TGenUtils_RoundOuterWallToPreserveThickness
+// -----------------------------------------
+/**
+ * @brief Rounds the outer wall surface outward at concave junctions so the
+ * assigned wall thickness is preserved there instead of the wall being thinned
+ * (which shows up as an inward depression).
+ * @note The wall is built by extruding the inner surface outward by the
+ * thickness along the point normals. At a concave junction (the crotch where
+ * two vessels merge) the outward normals converge, so the naive outer surface
+ * (each point at its thickness along its normal) self-intersects even though
+ * every point sits at the full thickness. The fold prevention pass removes
+ * that self-intersection by thinning the wall, which then reaches less far
+ * outward and caves in. This instead keeps the thickness and moves the outer
+ * surface outward into a smooth convex fillet, the way the outer side of a
+ * thick welded junction fills with material rather than denting inward.
+ *
+ * The inner surface (the fluid/wall interface) is fixed and never moves; only
+ * the outer surface points move. Each outer point is relaxed toward the
+ * average of its one-ring neighbors' outer points (which fills a dip because a
+ * dip's neighbors sit further out), in proportion to how concave the point is,
+ * so convex and flat points and a straight tube are left unchanged. It is then
+ * pushed back out so its outward (normal) distance from the inner point is
+ * never below the assigned thickness, and capped so a very sharp crotch cannot
+ * spike outward without bound. Boundary (cap rim) points are pinned so the
+ * wall stays flat at the caps. The rounded outer surface is encoded back into
+ * the normals (the extrusion direction) and the thickness array (the extrusion
+ * magnitude) so the existing extrusion reproduces exactly this surface; the
+ * tangle test in the extrusion uses the same inverted/collapsed-triangle
+ * criterion, so a fold-free rounded surface leaves it nothing to undo.
+ *
+ * A degenerate junction triangle (an input sliver) still cannot carry a wall
+ * in any direction, so this only fills the junction depression; the following
+ * fold prevention pass remains the safety net that thins a sliver fold.
+ * @param surface The surface being extruded; must have a 3-component 'Normals'
+ * point data array with the outward point normals.
+ * @param array The wall thickness point array (the assigned thickness on
+ * entry); overwritten with the achieved outer distance, at least the assigned
+ * thickness.
+ * @param iterations The number of relaxation iterations.
+ * @param relaxation The fraction of the neighbor-average move applied to a
+ * fully concave point per iteration (between 0 and 1).
+ * @param maxFilletRatio The largest multiple of the assigned thickness the
+ * outer surface may bulge out to.
+ * @return SV_OK if the outer surface is rounded.
+ */
+
+int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleArray *array,
+    int iterations, double relaxation, double maxFilletRatio)
+{
+  if (iterations <= 0 || relaxation <= 0.0)
+  {
+    return SV_OK;
+  }
+
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot round the outer wall without a surface and a thickness array\n");
+    return SV_ERROR;
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+
+  auto normals = surface->GetPointData()->GetArray("Normals");
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3 ||
+      normals->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface must have a 3-component 'Normals' point array to round the outer wall\n");
+    return SV_ERROR;
+  }
+
+  if (maxFilletRatio < 1.0)
+  {
+    maxFilletRatio = 1.0;
+  }
+
+  // Unit point normals; the stored normals are averaged where coincident points
+  // merge and are not always unit length. A degenerate normal cannot be
+  // extruded, so those points are left untouched.
+  std::vector<double> unitNormals(3*numPts, 0.0);
+  std::vector<bool> validNormal(numPts, false);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double n[3];
+    normals->GetTuple(ptId, n);
+    double len = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+    if (len <= 0.0)
+    {
+      continue;
+    }
+    unitNormals[3*ptId]   = n[0]/len;
+    unitNormals[3*ptId+1] = n[1]/len;
+    unitNormals[3*ptId+2] = n[2]/len;
+    validNormal[ptId] = true;
+  }
+
+  // One-ring neighbors and the boundary (cap rim) points, built as in the
+  // warp-vector smoothing: a boundary edge is used by a single cell, and its
+  // endpoints are pinned so the wall stays flat at the caps.
+  surface->BuildLinks();
+  std::vector<std::vector<vtkIdType>> neighbors(numPts);
+  std::vector<char> pinned(numPts, 0);
+  auto cellIds = vtkSmartPointer<vtkIdList>::New();
+  auto edgeNeighbors = vtkSmartPointer<vtkIdList>::New();
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    surface->GetPointCells(ptId, cellIds);
+    auto& ptNeighbors = neighbors[ptId];
+    for (vtkIdType i = 0; i < cellIds->GetNumberOfIds(); i++)
+    {
+      vtkIdType cellId = cellIds->GetId(i);
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellId, npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] == ptId)
+        {
+          continue;
+        }
+        if (std::find(ptNeighbors.begin(), ptNeighbors.end(), pts[j]) == ptNeighbors.end())
+        {
+          ptNeighbors.push_back(pts[j]);
+        }
+        surface->GetCellEdgeNeighbors(cellId, ptId, pts[j], edgeNeighbors);
+        if (edgeNeighbors->GetNumberOfIds() == 0)
+        {
+          pinned[ptId] = 1;
+        }
+      }
+    }
+  }
+
+  // Per-point concavity weight (the average sine of the rise angle over the
+  // neighbors above the tangent plane), zero on convex and flat points, so only
+  // concave junctions are rounded. The assigned thickness is captured now
+  // because the array is overwritten with the achieved distance at the end.
+  std::vector<double> weight(numPts, 0.0);
+  std::vector<double> assignedThickness(numPts, 0.0);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    assignedThickness[ptId] = array->GetValue(ptId);
+    if (pinned[ptId] || !validNormal[ptId] || neighbors[ptId].empty())
+    {
+      continue;
+    }
+    const double *n = &unitNormals[3*ptId];
+    double p[3];
+    surface->GetPoint(ptId, p);
+    double concavitySum = 0.0;
+    int concaveCount = 0;
+    for (auto neighborId : neighbors[ptId])
+    {
+      double q[3];
+      surface->GetPoint(neighborId, q);
+      double offset[3] = {q[0]-p[0], q[1]-p[1], q[2]-p[2]};
+      double distance = std::sqrt(offset[0]*offset[0] + offset[1]*offset[1] + offset[2]*offset[2]);
+      if (distance <= 0.0)
+      {
+        continue;
+      }
+      double height = offset[0]*n[0] + offset[1]*n[1] + offset[2]*n[2];
+      if (height <= 0.0)
+      {
+        continue;
+      }
+      concavitySum += height/distance;   // sine of the rise angle, in [0,1)
+      concaveCount++;
+    }
+    if (concaveCount > 0)
+    {
+      weight[ptId] = concavitySum/concaveCount;
+    }
+  }
+
+  // Outer surface positions, initialized to the naive extrusion (each point at
+  // its assigned thickness along its normal); Jacobi updates use a second
+  // buffer so the result does not depend on the point visiting order.
+  std::vector<double> outer(3*numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double p[3];
+    surface->GetPoint(ptId, p);
+    const double *n = &unitNormals[3*ptId];
+    double t = assignedThickness[ptId];
+    outer[3*ptId]   = p[0] + t*n[0];
+    outer[3*ptId+1] = p[1] + t*n[1];
+    outer[3*ptId+2] = p[2] + t*n[2];
+  }
+
+  std::vector<double> nextOuter(outer);
+  for (int iter = 0; iter < iterations; iter++)
+  {
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      // Pinned, convex/flat, degenerate, or isolated points keep the naive
+      // outer position, so only concave junctions move.
+      if (pinned[ptId] || !validNormal[ptId] || weight[ptId] <= 0.0 || neighbors[ptId].empty())
+      {
+        nextOuter[3*ptId]   = outer[3*ptId];
+        nextOuter[3*ptId+1] = outer[3*ptId+1];
+        nextOuter[3*ptId+2] = outer[3*ptId+2];
+        continue;
+      }
+
+      // Move toward the average of the neighbors' outer points (a dip's
+      // neighbors sit further out, so this fills the dip), scaled by concavity.
+      double centroid[3] = {0.0, 0.0, 0.0};
+      for (auto neighborId : neighbors[ptId])
+      {
+        centroid[0] += outer[3*neighborId];
+        centroid[1] += outer[3*neighborId+1];
+        centroid[2] += outer[3*neighborId+2];
+      }
+      double inv = 1.0/(double)neighbors[ptId].size();
+      centroid[0] *= inv; centroid[1] *= inv; centroid[2] *= inv;
+
+      double blend = relaxation*weight[ptId];
+      double moved[3];
+      for (int k = 0; k < 3; k++)
+      {
+        moved[k] = outer[3*ptId+k] + blend*(centroid[k] - outer[3*ptId+k]);
+      }
+
+      // Keep the thickness: the outward (normal) distance from the inner point
+      // must not drop below the assigned thickness, and the fillet is capped so
+      // a very sharp crotch cannot spike outward without bound.
+      double p[3];
+      surface->GetPoint(ptId, p);
+      const double *n = &unitNormals[3*ptId];
+      double disp[3] = {moved[0]-p[0], moved[1]-p[1], moved[2]-p[2]};
+      double h = disp[0]*n[0] + disp[1]*n[1] + disp[2]*n[2];
+      double t = assignedThickness[ptId];
+      if (h < t)
+      {
+        double push = t - h;
+        moved[0] += push*n[0];
+        moved[1] += push*n[1];
+        moved[2] += push*n[2];
+        h = t;
+      }
+      double maxH = maxFilletRatio*t;
+      if (h > maxH)
+      {
+        double pull = h - maxH;
+        moved[0] -= pull*n[0];
+        moved[1] -= pull*n[1];
+        moved[2] -= pull*n[2];
+      }
+
+      nextOuter[3*ptId]   = moved[0];
+      nextOuter[3*ptId+1] = moved[1];
+      nextOuter[3*ptId+2] = moved[2];
+    }
+    outer.swap(nextOuter);
+  }
+
+  // Encode the rounded outer surface back into the extrusion inputs: the normal
+  // is the unit direction to the outer point and the thickness is the distance
+  // to it, so the existing extrusion places the outer node exactly here. Points
+  // that were not moved reproduce their original normal and thickness. The
+  // distance is euclidean, matching the wedge edge length the extrusion builds.
+  int numRaised = 0;
+  double maxRatio = 1.0;
+  vtkIdType maxRatioId = -1;
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    if (!validNormal[ptId])
+    {
+      continue;
+    }
+    double p[3];
+    surface->GetPoint(ptId, p);
+    double disp[3] = {outer[3*ptId]-p[0], outer[3*ptId+1]-p[1], outer[3*ptId+2]-p[2]};
+    double dist = std::sqrt(disp[0]*disp[0] + disp[1]*disp[1] + disp[2]*disp[2]);
+    if (dist <= 0.0)
+    {
+      continue;
+    }
+    double unit[3] = {disp[0]/dist, disp[1]/dist, disp[2]/dist};
+    normals->SetTuple(ptId, unit);
+    array->SetValue(ptId, dist);
+
+    double t = assignedThickness[ptId];
+    if (t > 0.0)
+    {
+      double ratio = dist/t;
+      if (ratio > 1.001)
+      {
+        numRaised++;
+      }
+      if (ratio > maxRatio)
+      {
+        maxRatio = ratio;
+        maxRatioId = ptId;
+      }
+    }
+  }
+
+  fprintf(stdout,"Wall outer rounding: filled the junction depression by raising %d concave points; "
+      "largest fillet %.3gx the assigned thickness", numRaised, maxRatio);
+  if (maxRatioId >= 0)
+  {
+    double p[3];
+    surface->GetPoint(maxRatioId, p);
+    fprintf(stdout," at (%.5g, %.5g, %.5g)", p[0], p[1], p[2]);
+  }
+  fprintf(stdout,"\n");
+
+  return SV_OK;
+}
+
+// -----------------------------------------
 // TGenUtils_ReportSurfaceTriangleQuality
 // -----------------------------------------
 /**
