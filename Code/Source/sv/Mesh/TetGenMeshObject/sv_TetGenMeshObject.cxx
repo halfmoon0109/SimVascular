@@ -2480,24 +2480,6 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
     thicknessArray->SetValue(ptId, baseThickness[ptId]);
   }
 
-  // Smooth the extrusion warp vectors (the point normals) in concave regions
-  // so the outward wall extrusion does not dip inward and twist where the
-  // normals converge (such as the crotch where two vessels merge). Unlike the
-  // thickness clamp and fold-prevention pass below, which only change the
-  // thickness magnitude, this changes the extrusion direction, which is what
-  // actually causes the inward dip and the twisted wall elements at junctions.
-  // Only the normal direction changes; the wall thickness and the surface
-  // points (the fluid/wall interface) never move, and the cap-boundary normals
-  // set by SetCapBoundaryNormals are pinned. It runs before the clamp and the
-  // fold-prevention pass so those act on the smoothed extrusion directions.
-  const double warpVectorRelaxation = 0.5;
-  if (TGenUtils_SmoothWarpVectorsInConcaveRegions(surface, "Normals",
-        meshoptions_.wallthicknesssmoothingiterations, warpVectorRelaxation) != SV_OK)
-  {
-    fprintf(stderr,"Problem smoothing the wall extrusion warp vectors\n");
-    return SV_ERROR;
-  }
-
   // Clamp the thickness values in concave regions (such as the crotch
   // where two vessels merge) where a thickness larger than the concave
   // radius of curvature would make the outward extruded outer wall fold
