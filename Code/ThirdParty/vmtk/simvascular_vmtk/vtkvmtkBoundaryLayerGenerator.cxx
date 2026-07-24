@@ -32,7 +32,10 @@ Version:   $Revision: 1.7 $
 #include "vtkMath.h"
 #include "vtkLine.h"
 #include "vtkTriangle.h"
+#include <algorithm>
 #include <cmath>
+#include <utility>
+#include <vector>
 #include "vtkInformation.h"
 #include "vtkInformationVector.h"
 #include "vtkObjectFactory.h"
@@ -320,8 +323,7 @@ int vtkvmtkBoundaryLayerGenerator::RequestData(
   // reaches less outward there.
   {
     int numTilt15=0, numTilt30=0, numTilt45=0;
-    double minCosTilt=1.0;
-    vtkIdType worstTiltId=-1;
+    std::vector<std::pair<double,vtkIdType> > tiltedPts;
     for (vtkIdType pointIdx=0; pointIdx<numberOfInputPoints; pointIdx++)
       {
       double finalWarp[3], initialDir[3];
@@ -331,19 +333,77 @@ int vtkvmtkBoundaryLayerGenerator::RequestData(
       double cosTilt = vtkMath::Dot(finalWarp,initialDir);
       if (cosTilt>1.0) { cosTilt=1.0; }
       if (cosTilt<-1.0) { cosTilt=-1.0; }
-      if (cosTilt<0.96593) { numTilt15++; }   // more than 15 degrees
+      if (cosTilt<0.96593) { numTilt15++; tiltedPts.push_back(std::make_pair(cosTilt,pointIdx)); }
       if (cosTilt<0.86603) { numTilt30++; }   // more than 30 degrees
       if (cosTilt<0.70711) { numTilt45++; }   // more than 45 degrees
-      if (cosTilt<minCosTilt) { minCosTilt=cosTilt; worstTiltId=pointIdx; }
       }
     std::cout << "Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: "
       << numTilt15 << "/" << numTilt30 << "/" << numTilt45 << " of " << numberOfInputPoints << std::endl;
-    if (worstTiltId>=0)
+
+    // Report the tilted points as spatially separated regions instead of a
+    // single worst point: one severe location otherwise hides every other
+    // junction, and the count alone cannot say whether the depression sits at
+    // one place or at every junction. Greedily take the worst remaining point,
+    // absorb every tilted point within a radius of it, and repeat; only the
+    // first few seeds are wanted, so this costs maxRegions passes over the
+    // tilted points rather than a full clustering.
+    if (!tiltedPts.empty())
       {
-      double worstPoint[3];
-      input->GetPoint(worstTiltId,worstPoint);
-      std::cout << "  worst tilt " << acos(minCosTilt)*180.0/vtkMath::Pi() << " deg at ("
-        << worstPoint[0] << ", " << worstPoint[1] << ", " << worstPoint[2] << ")" << std::endl;
+      std::sort(tiltedPts.begin(),tiltedPts.end());
+
+      double bounds[6];
+      input->GetBounds(bounds);
+      double dx = bounds[1]-bounds[0], dy = bounds[3]-bounds[2], dz = bounds[5]-bounds[4];
+      // 2% of the model diagonal keeps separate junctions apart while still
+      // absorbing all the points belonging to one depression.
+      double radius = 0.02*sqrt(dx*dx + dy*dy + dz*dz);
+      double radius2 = radius*radius;
+
+      const int maxRegions = 8;
+      std::vector<bool> absorbed(tiltedPts.size(),false);
+      int numRegions = 0;
+      std::cout << "  tilted regions (separated by " << radius << ", worst first):" << std::endl;
+      for (size_t i=0; i<tiltedPts.size() && numRegions<maxRegions; i++)
+        {
+        if (absorbed[i])
+          {
+          continue;
+          }
+        double seed[3];
+        input->GetPoint(tiltedPts[i].second,seed);
+        absorbed[i] = true;
+        int members = 1;
+        for (size_t j=i+1; j<tiltedPts.size(); j++)
+          {
+          if (absorbed[j])
+            {
+            continue;
+            }
+          double p[3];
+          input->GetPoint(tiltedPts[j].second,p);
+          double d2 = (p[0]-seed[0])*(p[0]-seed[0]) + (p[1]-seed[1])*(p[1]-seed[1])
+                    + (p[2]-seed[2])*(p[2]-seed[2]);
+          if (d2<radius2)
+            {
+            absorbed[j] = true;
+            members++;
+            }
+          }
+        numRegions++;
+        std::cout << "    [" << numRegions << "] tilt " << acos(tiltedPts[i].first)*180.0/vtkMath::Pi()
+          << " deg at (" << seed[0] << ", " << seed[1] << ", " << seed[2] << "), "
+          << members << " points" << std::endl;
+        }
+      if (numRegions==maxRegions)
+        {
+        int remaining = 0;
+        for (size_t i=0; i<tiltedPts.size(); i++)
+          {
+          if (!absorbed[i]) { remaining++; }
+          }
+        std::cout << "    ... " << remaining << " further tilted points outside these "
+          << maxRegions << " regions" << std::endl;
+        }
       }
   }
   initialWarpDirections->Delete();

@@ -66,9 +66,11 @@
   #include "sv_mmg_mesh_utils.h"
 #endif
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <set>
+#include <utility>
 #include <vector>
 #include <math.h>
 
@@ -2558,11 +2560,10 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
   // Diagnostic: report how far the thickness passes (curvature clamp,
   // smoothing, fold prevention) reduced the wall below the requested value.
   // A wall much thinner than requested is the thin part of a junction
-  // depression, so this locates the worst thinning from the log alone.
+  // depression, so this locates the thinning from the log alone.
   {
     int numBelow90 = 0, numBelow50 = 0, numBelow25 = 0;
-    double minRatio = 1.0;
-    vtkIdType thinnestId = -1;
+    std::vector<std::pair<double,vtkIdType> > thinPts;
     for (vtkIdType ptId = 0; ptId < numPts; ptId++)
     {
       double requested = baseThickness[ptId];
@@ -2571,23 +2572,78 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
         continue;
       }
       double ratio = thicknessArray->GetValue(ptId) / requested;
-      if (ratio < 0.90) { numBelow90++; }
+      if (ratio < 0.90) { numBelow90++; thinPts.push_back(std::make_pair(ratio,ptId)); }
       if (ratio < 0.50) { numBelow50++; }
       if (ratio < 0.25) { numBelow25++; }
-      if (ratio < minRatio)
-      {
-        minRatio = ratio;
-        thinnestId = ptId;
-      }
     }
     fprintf(stdout,"Wall thickness reduction (final vs requested): points below 90%%/50%%/25%%: %d/%d/%d of %d\n",
         numBelow90, numBelow50, numBelow25, numPts);
-    if (thinnestId >= 0)
+
+    // Report the thinned points as spatially separated regions instead of a
+    // single worst point. One severe local defect otherwise hides every other
+    // junction, so the log cannot distinguish "one bad spot" from "every
+    // junction is thinned" - which is the question that decides whether the
+    // fix belongs in the surface or in the thickness passes. Greedily take the
+    // worst remaining point, absorb every thinned point within a radius of it,
+    // and repeat. Only the first few seeds are wanted, so the cost is
+    // maxRegions passes over the thinned points, not a full clustering.
+    if (!thinPts.empty())
     {
-      double p[3];
-      surface->GetPoint(thinnestId, p);
-      fprintf(stdout,"  thinnest ratio %.3f (final %.5g / requested %.5g) at (%.5g, %.5g, %.5g)\n",
-          minRatio, thicknessArray->GetValue(thinnestId), baseThickness[thinnestId], p[0], p[1], p[2]);
+      std::sort(thinPts.begin(), thinPts.end());
+
+      double bounds[6];
+      surface->GetBounds(bounds);
+      double dx = bounds[1]-bounds[0], dy = bounds[3]-bounds[2], dz = bounds[5]-bounds[4];
+      // 2% of the model diagonal keeps separate junctions apart while still
+      // absorbing all the points belonging to one depression.
+      double radius = 0.02*sqrt(dx*dx + dy*dy + dz*dz);
+      double radius2 = radius*radius;
+
+      const int maxRegions = 8;
+      std::vector<bool> absorbed(thinPts.size(), false);
+      int numRegions = 0;
+      fprintf(stdout,"  thinned regions (separated by %.4g, worst first):\n", radius);
+      for (size_t i = 0; i < thinPts.size() && numRegions < maxRegions; i++)
+      {
+        if (absorbed[i])
+        {
+          continue;
+        }
+        vtkIdType seedId = thinPts[i].second;
+        double seed[3];
+        surface->GetPoint(seedId, seed);
+        absorbed[i] = true;
+        int members = 1;
+        for (size_t j = i+1; j < thinPts.size(); j++)
+        {
+          if (absorbed[j])
+          {
+            continue;
+          }
+          double p[3];
+          surface->GetPoint(thinPts[j].second, p);
+          double d2 = (p[0]-seed[0])*(p[0]-seed[0]) + (p[1]-seed[1])*(p[1]-seed[1])
+                    + (p[2]-seed[2])*(p[2]-seed[2]);
+          if (d2 < radius2)
+          {
+            absorbed[j] = true;
+            members++;
+          }
+        }
+        numRegions++;
+        fprintf(stdout,"    [%d] ratio %.3f (final %.5g / requested %.5g) at (%.5g, %.5g, %.5g), %d points\n",
+            numRegions, thinPts[i].first, thicknessArray->GetValue(seedId), baseThickness[seedId],
+            seed[0], seed[1], seed[2], members);
+      }
+      if (numRegions == maxRegions)
+      {
+        int remaining = 0;
+        for (size_t i = 0; i < thinPts.size(); i++)
+        {
+          if (!absorbed[i]) { remaining++; }
+        }
+        fprintf(stdout,"    ... %d further thinned points outside these %d regions\n", remaining, maxRegions);
+      }
     }
   }
 
