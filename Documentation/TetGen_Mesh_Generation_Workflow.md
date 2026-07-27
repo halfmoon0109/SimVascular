@@ -292,6 +292,10 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
 표면에서 바깥쪽으로 생성된다. 따라서 원래 모델 표면의 좌표가 fluid/wall interface로
 유지된다.
 
+코드 호출 경로, point별 두께 수식, 분지 접합부 처리, VMTK wedge 생성,
+tetrahedron 변환 및 유체–고체 병합의 상세 내용은
+[고체 혈관벽 메시 생성 알고리즘](Solid_Wall_Mesh_Generation.md)을 참고한다.
+
 ### 9.1 point별 두께 배열 생성
 
 `WallThickness` point data 배열은 다음 원칙으로 만든다.
@@ -334,12 +338,24 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
   하한 자체가 반경 적응을 무력화하지 않게 하기 위한 것이다.
 - 반경 추정(`DistanceToCenterlines`)은 분지 crotch에서 가장 가까운 centerline이
   옆 가지의 것일 수 있어 접합부에서 가장 부정확하다. 접합부 겹침(fold-over)의
-  처방으로는 쓰지 말고(9.5 참고), 혈관 구경차가 큰 모델의 두께 배분 용도로만
+  처방으로는 쓰지 말고(9.7 참고), 혈관 구경차가 큰 모델의 두께 배분 용도로만
   사용한다.
 - 유효 범위는 0.0~1.0이며 `0.0`이면 상수 `WallThickness`를 그대로 쓴다.
 - 표면 point 좌표(fluid/wall interface)는 이동하지 않는다.
 
-### 9.3 곡률 기반 두께 제한
+### 9.3 오목 영역 warp vector(normal) 스무딩
+
+두께 배열이 만들어진 직후, 곡률 제한 전에
+`TGenUtils_SmoothWarpVectorsInConcaveRegions()`가 오목 영역의 `Normals`(압출
+방향)를 스무딩한다. 바깥 압출 시 오목부(crotch)의 법선이 수렴해 outer wall이 안으로
+파이고 벽 요소가 뒤틀리므로, 각 오목 point의 법선을 one-ring 이웃 법선 평균 쪽으로
+오목도에 비례해 완화한 뒤 재정규화한다.
+
+- 볼록·평평한 point와 직관은 불변이고, cap rim point는 pin된다.
+- **법선 방향만 바뀌며 두께 값과 표면 point 좌표(fluid/wall interface)는 이동하지
+  않는다.** 반복 횟수가 `0`이면 수행하지 않는다.
+
+### 9.4 곡률 기반 두께 제한
 
 `WallThicknessCurvatureFactor`가 `0`보다 크면
 `TGenUtils_ClampThicknessToConcaveCurvature()`가 스무딩 전에 `WallThickness`
@@ -357,7 +373,7 @@ solid wall 옵션이 활성화된 경우 `GenerateBoundaryLayerMesh()` 안에서
 전역적인 자기 교차 부재를 보장하지 않는다. 생성된 메시의 품질(음수 체적,
 aspect ratio, 표면 교차)은 별도로 확인해야 한다.
 
-### 9.4 두께 스무딩
+### 9.5 두께 스무딩
 
 local wall thickness가 존재하거나 곡률 기반 두께 제한 또는 반경 적응 두께가
 활성화된 경우 `TGenUtils_SmoothPointArray()`가 `WallThickness` 배열을 반복
@@ -377,9 +393,26 @@ Laplacian averaging으로 스무딩한다.
 스무딩이 클램프된 값을 이웃 방향으로 다시 끌어올리므로, 곡률 기반 두께 제한이
 활성화된 경우 스무딩 후 클램프를 한 번 더 적용해 제한을 복원한다.
 
-### 9.5 fold-over 방지 (압출 기하 검출)
+### 9.6 바깥벽 라운딩(볼록 fillet)
 
-곡률 클램프(9.3)는 one-ring 국소 추정이라 거칠게 메싱된 접합부에서 fold를
+두께가 최종 확정된 뒤, 압출 직전에
+`TGenUtils_RoundOuterWallToPreserveThickness()`가 접합부 두께를 유지하면서 바깥면을
+바깥으로 밀어 볼록 fillet을 만든다. 오목 crotch에서는 법선이 수렴해 순진한 outer
+면이 자기교차하는데, fold 방지(9.7)가 이를 두께를 깎아 해소하면 벽이 덜 뻗어 안으로
+파인다. 라운딩은 대신 두께를 유지한 채 바깥면 point만 이동시켜 함몰을 메운다.
+
+- 각 바깥 point를 이웃 바깥 point 평균 쪽으로 오목도에 비례해 relax한다(함몰의
+  이웃이 더 바깥에 있어 골이 메워짐). 볼록·평평·직관은 불변, cap rim은 pin.
+- 이동 후 안쪽면과의 법선거리가 배정 두께 밑으로 내려가지 않게 되밀고, 뾰족한
+  crotch가 무한정 튀지 않게 배정 두께의 3배(`maxFilletRatio`)로 상한한다.
+- 결과를 `Normals`(방향)와 두께 배열(크기)로 재인코딩하므로 기존 압출이 그대로
+  재현한다. 두께 배열은 달성한 outer 거리(최소 배정 두께 이상)로 갱신된다.
+- 안쪽면(fluid/wall interface)은 고정, 바깥면 point만 이동한다. 퇴화 입력 sliver의
+  fold는 라운딩으로 못 없애므로 뒤의 fold 방지(9.7)가 안전망으로 남는다.
+
+### 9.7 fold-over 방지 (압출 기하 검출)
+
+곡률 클램프(9.4)는 one-ring 국소 추정이라 거칠게 메싱된 접합부에서 fold를
 놓칠 수 있고, 압출 후처리(`VMTKUtils_ReorderTetElements`)는 음수 체적 tet를
 노드 재정렬로 뒤집어 **접힌 요소를 감춘다**(관례상 음수와 실제 fold를 구분
 못 함). 그래서 압출 직전에 `TGenUtils_LimitThicknessToPreventFold()`가 실제
@@ -406,7 +439,7 @@ Laplacian averaging으로 스무딩한다.
 - 국소 검사이므로 서로 떨어진 두 표면 구간이 압출 후 충돌하는 **전역 자기
   교차는 검출하지 못한다.**
 
-### 9.6 바깥쪽 압출
+### 9.8 바깥쪽 압출
 
 `WallThickness` 배열을 surface에 추가한 후
 `VMTKUtils_BoundaryLayerMesh()`를 다시 호출한다.
