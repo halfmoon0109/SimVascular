@@ -107,6 +107,7 @@ Python API는 `MeshingTetGenOptions_PyClass.cxx`의 다음 속성을 같은 코�
 | `wall_thickness_curvature_factor` | `WallThicknessCurvatureFactor` |
 | `wall_thickness_radius_factor` | `WallThicknessRadiusFactor` |
 | `local_wall_thickness` | `LocalWallThickness` |
+| `local_wall_thickness_on` | (Python 전용 boolean; `local_wall_thickness` 목록의 적용 여부) |
 
 `MeshingTetGen_PyClass.cxx`의 `MesherTetGen_generate_mesh()`는 옵션을 설정한 뒤
 wall face ID를 `SetWalls()`로 전달하고 `GenerateMesh()`를 호출한다.
@@ -207,8 +208,12 @@ volume mesh, 유체 boundary layer가 모두 필요하다.
    공유 point를 분리하지 않는다.
 2. `vtkCleanPolyData`로 coincident point를 정리한다.
 3. 결과를 `originalsurfpd`에 deep copy한다.
-4. `MeshSizingFunction` point 배열을 만든다.
-5. `SetCapBoundaryNormals()`로 열린 cap rim의 normal을 cap 평면 방향에 맞춘다.
+4. `TGenUtils_ReportSurfaceTriangleQuality(originalsurfpd, "fluid/wall interface surface")`로
+   삼각형 품질을 보고한다. 이 표면은 유체 BL, TetGen 유체 체적, 고체벽 압출이 모두
+   파생되는 공유 표면이므로 여기의 sliver는 셋 모두에 들어간다. 점 병합이 삼각형을
+   바꿀 수 있어 clean **뒤에** 보고한다.
+5. `MeshSizingFunction` point 배열을 만든다.
+6. `SetCapBoundaryNormals()`로 열린 cap rim의 normal을 cap 평면 방향에 맞춘다.
 
 이 `originalsurfpd`가 유체 boundary layer와 고체벽 양쪽의 공통 시작 표면이다.
 유체 boundary layer를 압출하기 전에 별도 copy를 보관하므로, 유체 쪽 압출 결과가
@@ -252,6 +257,14 @@ capNormal_i = normalize(boundaryPoint_i - loopCenter)
   `maxedgesize × blthicknessfactor`다.
 - 꺼지면 point별 `MeshSizingFunction × blthicknessfactor`를 쓴다.
 - `numsublayers`와 `sublayerratio`가 두께 방향 분할을 정한다.
+
+> **알려진 부작용(코드 정리 대상)**: `GenerateBoundaryLayerMesh()`는 유체 boundary
+> layer 압출 전후로 `boundarylayermesh_normals.vtu`, `boundarylayermesh.vtu`,
+> `innerSurface.vtu` 세 파일을 **조건 없이 현재 작업 디렉터리에 기록한다**
+> (`sv_TetGenMeshObject.cxx`의 `TGenUtils_WriteVTU` 호출 3개). 프로토타입 커밋
+> `674275a0`의 잔재이며 알고리즘에는 관여하지 않지만, 메시 생성마다 전체 메시를
+> 디스크에 쓰므로 큰 모델에서는 비용이 있고 작업 디렉터리를 오염시킨다. 제거하는
+> 것이 맞으나 별도 커밋으로 다룬다.
 
 VMTK가 반환한 가장 안쪽 표면은 local 변수 `innerSurface`에 있고, 이 표면이
 `polydatasolid_`로 전달되어 cap 생성과 TetGen 유체 코어의 경계가 된다.
