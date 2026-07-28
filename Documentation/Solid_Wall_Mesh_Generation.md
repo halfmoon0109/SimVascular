@@ -41,6 +41,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - 원래 혈관 표면을 fluid/wall interface로 보존하는 방식
 - point별 요청 두께와 최종 두께를 계산하는 알고리즘
 - 분지 접합부에서 normal, 곡률, 두께, fold를 처리하는 방식
+- 접합부 thinning의 원인이 형상인지 두께 패스인지 가르는 `t/R` 진단
 - VMTK가 표면을 여러 layer의 wedge로 압출하는 방식
 - wedge를 tetrahedron으로 변환하는 방식
 - TetGen 유체 코어, 유체 경계층, 고체벽을 병합하는 방식
@@ -129,6 +130,7 @@ cvTetGenMeshObject::GenerateMesh()
         │      └─ GenerateWallMesh()
         │             ├─ point별 WallThickness 계산
         │             ├─ 오목 영역 warp vector(normal) 스무딩
+        │             ├─ t/R 진단(보고만, 수정 없음)
         │             ├─ 곡률 기반 두께 제한
         │             ├─ 두께 Laplacian 스무딩 + 곡률 재제한
         │             ├─ 바깥벽 라운딩(볼록 fillet)
@@ -275,7 +277,9 @@ global/local 요청 두께
 ```
 
 이와 별개로 오목 영역 warp vector(normal) 스무딩(8절)이 두께 계산 직후·곡률 제한
-직전에 실행된다. 이 단계는 두께 값이 아니라 압출 방향(normal)만 바꾼다. 바깥벽
+직전에 실행된다. 이 단계는 두께 값이 아니라 압출 방향(normal)만 바꾼다. 그 직후
+곡률 제한 직전에 `t/R` 진단(9.2절)이 실행되지만 이것은 보고만 하며 위 흐름에
+개입하지 않는다. 바깥벽
 라운딩(11.1절)은 두께를 유지하면서 바깥면을 밀어내고 그 달성 거리를 `WallThickness`
 값과 normal에 다시 인코딩하므로, 이후 fold 방지가 처리할 잔여 fold만 남긴다.
 
@@ -348,10 +352,17 @@ point의 normal을 one-ring 이웃 normal의 평균 쪽으로 완화해 수렴�
 형태로 스무딩한 point 수와 최대 방향 변화가 출력된다.
 
 이 단계는 압출 방향의 뒤틀림/함몰을 다루고, 접합부의 **두께 감소**(완만한 thinning)는
-곡률 제한(9절)이, 접합부 두께 **보존**은 바깥벽 라운딩(11.1절)이 담당한다. 각 단계의
+곡률 제한(9.1절)이, 접합부 두께 **보존**은 바깥벽 라운딩(11.1절)이 담당한다. 각 단계의
 역할이 다르므로 순서대로 적용된다.
 
-## 9. 오목 곡률 기반 두께 제한
+## 9. 오목 곡률: 두께 제한과 t/R 진단
+
+이 절의 두 단계는 같은 one-ring 곡률 추정을 공유하지만 역할이 다르다. 9.1의
+클램프는 두께를 실제로 줄이고, 9.2의 진단은 아무것도 바꾸지 않고 요청 두께가
+형상이 감당할 수 있는 범위인지만 보고한다. 실행 순서는 진단(9.2)이 먼저이고
+클램프(9.1)가 나중이다. 진단이 두께 감소 전 값을 봐야 하기 때문이다.
+
+### 9.1 곡률 기반 두께 제한
 
 `TGenUtils_ClampThicknessToConcaveCurvature()`는 한 point의 one-ring 이웃에서
 오목 곡률을 근사한다. 이웃까지의 제곱 거리 `d²`와 normal 방향 높이 `h`를 사용해
@@ -370,6 +381,58 @@ t(i) = min(t(i), t_limit(i))
 이 제한의 의미는 벽 두께가 국소 오목 곡률 반경의 일정 비율을 넘지 않게 하는
 것이다. 제한은 현재 값보다 작은 경우에만 적용되므로 반복 호출해도 값을 다시
 키우지 않는다.
+
+### 9.2 요청 두께 대비 곡률 반경(t/R) 진단
+
+`TGenUtils_ReportConcaveCurvatureVsThickness()`는 두께를 줄이는 어떤 패스보다
+먼저 실행되어 요청 두께 `t`를 국소 오목 곡률 반경 `R`과 비교해 보고한다. 두께
+배열도 surface도 수정하지 않는다.
+
+접합부가 얇아졌을 때 원인이 **형상이 요청 두께를 감당할 수 없어서**인지 **두께
+패스가 과하게 깎아서**인지를 가르는 값은 `t/R` 하나다. `t > R`이면 오목부를
+normal 방향으로 offset한 바깥면은 반드시 자기교차하므로, 어떤 오프셋 기반
+방법으로도 그 두께를 실을 수 없다. 반대로 `t < R`인데도 두께가 줄었다면 원인은
+형상이 아니라 두께 패스 쪽에 있다.
+
+기존 패스는 이 값을 간접적으로만 드러낸다. 곡률 클램프(9.1)는 factor가 `0`이면
+함수 본문이 통째로 건너뛰어져 아무것도 계산하지 않고, fold 방지(11.2절)는 자기가
+깎은 두께만 보고할 뿐 그렇게 강제한 비율은 보고하지 않는다. 게다가 fold 방지는
+0.8배 계단식 축소와 세 정점 평준화를 쓰므로, 깎인 비율에서 `R`을 역산하면 실제보다
+작게 나온다. 그래서 직접 측정이 필요하다.
+
+#### 곡률의 두 요약
+
+곡률 추정은 9.1과 같은 `2h/d²`를 쓰되 one-ring을 두 가지로 요약한다.
+
+| 요약 | 정의 | 성질 |
+| --- | --- | --- |
+| `R_smallest` | `1 / max(κ_ij)` | 클램프가 쓰는 값과 동일. 분모가 `d²`이라 퇴화 삼각형 하나에 발산 |
+| `R_typical` | `1 / median(κ_ij)` | 접평면 아래 이웃을 곡률 `0`으로 포함한 중앙값. 이웃 하나에 흔들리지 않음 |
+
+`R_typical`이 중앙값이면서 비오목 이웃을 `0`으로 포함하는 이유는, 그래야 이 값이
+**point 전체의 성질**이 되기 때문이다. 이웃 하나만 우연히 접평면 위로 올라온
+평평한 지점은 중앙값이 `0`에 머물러 접합부로 오분류되지 않고, one-ring 대부분이
+실제로 오목한 지점에서만 큰 값이 된다.
+
+두 값을 함께 읽으면 형상 문제와 메시 문제가 분리된다. 둘 다 작으면 진짜로 날카로운
+crotch이고, `R_typical`은 큰데 `R_smallest`만 작으면 형상이 아니라 퇴화 삼각형이
+만든 아티팩트다. 합성 검증에서 오목 원호는 `R`을 오차 `5e-17`로 복원하고, 퇴화
+이웃을 하나 추가하면 `R_smallest`는 `0.3 → 0.000505`로 붕괴하는 동안 `R_typical`은
+변하지 않는다.
+
+퇴화 삼각형(최소 altitude가 최장 edge의 5% 미만)을 쓰는 point는
+`[near-degenerate triangle]`로 따로 표시되므로, sliver가 원인인 구역과 형상이
+원인인 구역이 같은 목록에서 섞이지 않는다.
+
+#### 호출 위치
+
+warp vector 스무딩(8절) **직후**, 곡률 클램프(9.1) **직전**이다. 두 조건이 이
+위치를 강제한다.
+
+1. 높이 `h`를 재는 기준 normal이 실제 압출에 쓰이는 방향과 같아야 하므로 warp
+   스무딩보다 뒤여야 한다.
+2. 보고하는 `t`가 순수 요청값이어야 하므로 두께를 줄이는 모든 패스보다 앞이어야
+   한다.
 
 ## 10. 두께 Laplacian 스무딩과 재클램프
 
@@ -468,7 +531,11 @@ t_new(i) = max(t_min(i), t_reduced(i))
 필요하다. 이 검사와 축소를 최대 30회 반복한다.
 
 point별 하한은 fold 검사 시작 시 두께 `t_start(i)`와 그 point를 쓰는 삼각형의
-최소 altitude `a_min(i)`로 계산한다.
+최소 altitude `a_min(i)`로 계산한다. `t_start`는 요청 두께가 아니라 바깥벽
+라운딩(11.1절)까지 끝난 뒤의 값이다. 라운딩은 두께 배열을 달성한 outer 거리로
+덮어쓰므로, 라운딩이 크게 들어간 point에서는 이 하한도 그만큼 높아져 fold 방지가
+덜 공격적으로 동작한다. 라운딩이 이미 fold를 해소했다는 전제에서는 정합적이지만,
+sliver처럼 라운딩으로 풀리지 않는 지점이 라운딩을 받았다면 유의해야 한다.
 
 ```text
 triangle altitude = 2 × area / longestEdge
@@ -507,6 +574,13 @@ wrapper는 VMTK generator에 다음 값도 고정한다.
 - `SurfaceCellIdsArrayName = "ModelFaceID"`
 - surface cell과 sidewall cell 모두 포함
 - untangle을 위한 substep 수 `100`
+
+wrapper가 설정하지 않는 값 중 하나는 주의해서 읽어야 한다. VMTK generator에는
+point별 두께를 잘라내는 `MaximumLayerThickness`가 있지만 생성자 기본값이
+`VTK_VMTK_LARGE_DOUBLE`이고 wrapper가 이를 덮어쓰지 않으므로 실질적으로 걸리지
+않는다. 바깥벽 라운딩(11.1절)이 두께 배열에 배정 두께의 최대 3배까지 써 넣기
+때문에 이 상한이 라운딩 결과를 자를 수 있는지 의심할 수 있으나, 현재 구성에서는
+자르지 않는다.
 
 ### 12.1 warp vector 구성
 
@@ -566,6 +640,9 @@ VMTK는 시작 surface cell과 각 layer의 대응 cell을 연결한다.
 
 - 입력 triangle 하나와 다음 layer triangle을 연결해 `VTK_WEDGE` 하나를 만든다.
 - 입력 quad라면 `VTK_HEXAHEDRON`을 만든다.
+- generator에는 `VTK_QUADRATIC_TRIANGLE`을 `VTK_QUADRATIC_WEDGE`로 압출하는
+  경로도 있으나, SimVascular의 표면 재메시와 TetGen은 선형 삼각형만 만들므로 이
+  경로는 사용되지 않는다.
 - 입력 surface의 열린 boundary edge마다 layer 사이를 잇는 `VTK_QUAD`
   sidewall을 만든다.
 - 설정에 따라 원래 inner surface와 최종 outer surface cell도 결과에 포함한다.
@@ -715,6 +792,9 @@ mesher는 그 접합부를 다음 방식으로 연속적으로 처리한다.
 - interface surface의 triangle 품질
 - 오목 영역에서 스무딩한 warp vector point 수와 최대 normal 방향 변화
   (`Smoothed the wall extrusion warp vectors at ...`)
+- 요청 두께가 국소 오목 곡률 반경을 넘는 point 수(`t/R >= 1 / 2 / 4`)와 해당
+  구역별 `t`, `R_typical`, `R_smallest`, 퇴화 삼각형 인접 여부
+  (`Concave curvature vs requested wall thickness (t/R, ...)`)
 - 바깥벽 라운딩으로 끌어올린 오목 point 수와 최대 fillet 배율, 위치
   (`Wall outer rounding: ...`)
 - 곡률 제한으로 매우 얇아진 point 수
@@ -724,6 +804,12 @@ mesher는 그 접합부를 다음 방식으로 연속적으로 처리한다.
 - 얇아진 point를 **공간적으로 분리된 구역(thinned regions) 단위**로, 최악 구역부터
   각 구역의 대표 비율/좌표를 보고(단일 최악 point가 아니라 "한 곳만 나쁜지 vs
   모든 접합부가 얇은지"를 구분하기 위함)
+
+구역 목록은 두 곳에서 나온다. 두께 감소 진단의 `thinned regions`와 t/R 진단의
+`concave regions`이며, 둘 다 `TGenUtils_ClusterPointsIntoRegions()`로 같은 그리디
+방식과 같은 반경(모델 대각선의 2%)을 쓴다. 다만 **정렬 키가 서로 달라(두께는 비율
+오름차순, t/R은 비율 내림차순) 두 목록의 구역 번호는 대응하지 않는다.** 같은
+접합부를 대조할 때는 번호가 아니라 출력된 좌표를 기준으로 맞춰야 한다.
 - VMTK untangle 전후 warp tilt가 15/30/45도를 넘는 point 수와 최악 위치
 - VMTK `CheckTangle()`이 찾은 triangle 수
 - 최종 tetrahedron aspect ratio와 최악 요소 위치
@@ -769,9 +855,13 @@ Linux Docker 실행 환경에서 최소한 다음을 확인한다.
 8. 반경 적응 사용 시 `DistanceToCenterlines`가 branch별 실제 반경을 합리적으로
    나타내는가.
 9. VMTK warp tilt가 큰 위치와 시각적으로 움푹 들어간 위치가 일치하는가.
-10. wall layer 수를 바꿔도 총 두께가 유지되고 두께 방향 해상도만 변하는가.
-11. cap 및 sidewall의 `ModelFaceID`가 입력 face와 일치하는가.
-12. mesh-complete 출력 후에도 region, face, node, element ID가 보존되는가.
+10. `t/R >= 1`인 point 수가 접합부 규모인가(형상이 요청 두께를 감당 못 함), 아니면
+    거의 없는데도 `thinned regions`가 여러 개인가(두께 패스가 원인). 구역별
+    `R_typical`과 `R_smallest`가 함께 작은지(날카로운 형상), `R_smallest`만
+    작은지(퇴화 삼각형 아티팩트)도 함께 본다.
+11. wall layer 수를 바꿔도 총 두께가 유지되고 두께 방향 해상도만 변하는가.
+12. cap 및 sidewall의 `ModelFaceID`가 입력 face와 일치하는가.
+13. mesh-complete 출력 후에도 region, face, node, element ID가 보존되는가.
 
 Mac 개발 환경에서는 실제 SimVascular/VMTK/TetGen 빌드와 실행 성공을 단정하지
 않는다. 실행 검증 결과는 저장소의 `logs/`에 남긴다.
@@ -784,7 +874,7 @@ Mac 개발 환경에서는 실제 SimVascular/VMTK/TetGen 빌드와 실행 성�
 | --- | --- |
 | `Code/Source/sv/Mesh/TetGenMeshObject/sv_TetGenMeshObject.h` | `TGoptions`, `GenerateBoundaryLayerMesh`, `GenerateWallMesh`, `AppendBoundaryLayerMesh` |
 | `Code/Source/sv/Mesh/TetGenMeshObject/sv_TetGenMeshObject.cxx` | constructor 기본값, `SetMeshOptions`, `SetBoundaryLayer`, `SetWalls`, `GenerateMesh`, `GenerateSurfaceRemesh`, `SetCapBoundaryNormals`, `GenerateBoundaryLayerMesh`, `GenerateWallMesh`, `GenerateAndMeshCaps`, `AppendBoundaryLayerMesh` |
-| `Code/Source/sv/Mesh/TetGenMeshObject/sv_tetgenmesh_utils.cxx` | `TGenUtils_SmoothWarpVectorsInConcaveRegions`, `TGenUtils_SmoothPointArray`, `TGenUtils_ClampThicknessToConcaveCurvature`, `TGenUtils_RoundOuterWallToPreserveThickness`, `TGenUtils_LimitThicknessToPreventFold`, 품질 보고 함수 |
+| `Code/Source/sv/Mesh/TetGenMeshObject/sv_tetgenmesh_utils.cxx` | `TGenUtils_SmoothWarpVectorsInConcaveRegions`, `TGenUtils_SmoothPointArray`, `TGenUtils_ClampThicknessToConcaveCurvature`, `TGenUtils_ReportConcaveCurvatureVsThickness`, `TGenUtils_ClusterPointsIntoRegions`, `TGenUtils_RoundOuterWallToPreserveThickness`, `TGenUtils_LimitThicknessToPreventFold`, 품질 보고 함수 |
 | `Code/Source/sv/Mesh/VMTKUtils/sv_vmtk_utils.cxx` | `VMTKUtils_BoundaryLayerMesh`, `VMTKUtils_AppendData`, `VMTKUtils_CreateNewBoundaryLayerRegion`, `VMTKUtils_CreateBoundaryLayerSurfaceAndCaps`, `VMTKUtils_ReorderTetElements` |
 | `Code/ThirdParty/vmtk/simvascular_vmtk/vtkvmtkBoundaryLayerGenerator.cxx` | `RequestData`, `BuildWarpVectors`, `CheckTangle`, `LocalUntangle`, `WarpPoints` |
 | `Code/ThirdParty/vmtk/simvascular_vmtk/vtkvmtkUnstructuredGridTetraFilter.cxx` | `Execute` |
