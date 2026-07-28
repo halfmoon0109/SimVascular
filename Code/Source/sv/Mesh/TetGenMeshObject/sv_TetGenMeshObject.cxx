@@ -2498,6 +2498,21 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
     return SV_ERROR;
   }
 
+  // Diagnostic: report the requested thickness against the local concave
+  // radius of curvature (t/R) before any pass reduces the thickness. A junction
+  // with t/R > 1 cannot carry the requested thickness whatever the extrusion
+  // does, so this separates a junction whose shape is too sharp for the
+  // thickness from a thinning the passes below produce on a junction that could
+  // have carried it. It runs after the warp vectors are smoothed because the
+  // heights are measured along those normals, and it is independent of the
+  // curvature clamp, which is skipped entirely when its factor is zero.
+  // Nothing is modified.
+  if (TGenUtils_ReportConcaveCurvatureVsThickness(surface, thicknessArray) != SV_OK)
+  {
+    fprintf(stderr,"Problem reporting the concave curvature against the wall thickness\n");
+    return SV_ERROR;
+  }
+
   // Clamp the thickness values in concave regions (such as the crotch
   // where two vessels merge) where a thickness larger than the concave
   // radius of curvature would make the outward extruded outer wall fold
@@ -2607,66 +2622,39 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
     // single worst point. One severe local defect otherwise hides every other
     // junction, so the log cannot distinguish "one bad spot" from "every
     // junction is thinned" - which is the question that decides whether the
-    // fix belongs in the surface or in the thickness passes. Greedily take the
-    // worst remaining point, absorb every thinned point within a radius of it,
-    // and repeat. Only the first few seeds are wanted, so the cost is
-    // maxRegions passes over the thinned points, not a full clustering.
+    // fix belongs in the surface or in the thickness passes. The worst point
+    // has the smallest ratio, which is the order the clustering seeds in.
+    // A radius of 2% of the model diagonal keeps separate junctions apart while
+    // still absorbing all the points belonging to one depression.
     if (!thinPts.empty())
     {
-      std::sort(thinPts.begin(), thinPts.end());
-
-      double bounds[6];
-      surface->GetBounds(bounds);
-      double dx = bounds[1]-bounds[0], dy = bounds[3]-bounds[2], dz = bounds[5]-bounds[4];
-      // 2% of the model diagonal keeps separate junctions apart while still
-      // absorbing all the points belonging to one depression.
-      double radius = 0.02*sqrt(dx*dx + dy*dy + dz*dz);
-      double radius2 = radius*radius;
-
       const int maxRegions = 8;
-      std::vector<bool> absorbed(thinPts.size(), false);
-      int numRegions = 0;
-      fprintf(stdout,"  thinned regions (separated by %.4g, worst first):\n", radius);
-      for (size_t i = 0; i < thinPts.size() && numRegions < maxRegions; i++)
+      const double radiusFraction = 0.02;
+      std::vector<TGenUtilsPointRegion> regions;
+      double radius = 0.0;
+      int numOutside = 0;
+      if (TGenUtils_ClusterPointsIntoRegions(surface, thinPts, maxRegions, radiusFraction,
+            regions, radius, numOutside) != SV_OK)
       {
-        if (absorbed[i])
-        {
-          continue;
-        }
-        vtkIdType seedId = thinPts[i].second;
+        fprintf(stderr,"Problem clustering the thinned wall thickness points into regions\n");
+        return SV_ERROR;
+      }
+
+      fprintf(stdout,"  thinned regions (separated by %.4g, worst first):\n", radius);
+      for (size_t i = 0; i < regions.size(); i++)
+      {
+        vtkIdType seedId = regions[i].seedId;
         double seed[3];
         surface->GetPoint(seedId, seed);
-        absorbed[i] = true;
-        int members = 1;
-        for (size_t j = i+1; j < thinPts.size(); j++)
-        {
-          if (absorbed[j])
-          {
-            continue;
-          }
-          double p[3];
-          surface->GetPoint(thinPts[j].second, p);
-          double d2 = (p[0]-seed[0])*(p[0]-seed[0]) + (p[1]-seed[1])*(p[1]-seed[1])
-                    + (p[2]-seed[2])*(p[2]-seed[2]);
-          if (d2 < radius2)
-          {
-            absorbed[j] = true;
-            members++;
-          }
-        }
-        numRegions++;
         fprintf(stdout,"    [%d] ratio %.3f (final %.5g / requested %.5g) at (%.5g, %.5g, %.5g), %d points\n",
-            numRegions, thinPts[i].first, thicknessArray->GetValue(seedId), baseThickness[seedId],
-            seed[0], seed[1], seed[2], members);
+            (int)(i+1), thicknessArray->GetValue(seedId)/baseThickness[seedId],
+            thicknessArray->GetValue(seedId), baseThickness[seedId],
+            seed[0], seed[1], seed[2], regions[i].numPoints);
       }
-      if (numRegions == maxRegions)
+      if (numOutside > 0)
       {
-        int remaining = 0;
-        for (size_t i = 0; i < thinPts.size(); i++)
-        {
-          if (!absorbed[i]) { remaining++; }
-        }
-        fprintf(stdout,"    ... %d further thinned points outside these %d regions\n", remaining, maxRegions);
+        fprintf(stdout,"    ... %d further thinned points outside these %d regions\n",
+            numOutside, maxRegions);
       }
     }
   }

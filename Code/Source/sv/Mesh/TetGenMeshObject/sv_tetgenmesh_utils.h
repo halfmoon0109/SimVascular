@@ -55,6 +55,9 @@
 
 #include "simvascular_tetgen.h"
 
+#include <utility>
+#include <vector>
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_Init();
 //int cvTetGenMeshObjectUtils_Logon(char *filename);
 //int cvTetGenMeshObjectUtils_Logoff();
@@ -145,5 +148,25 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyDat
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportSurfaceTriangleQuality(vtkPolyData *surface,
     const char *label);
+
+// One spatially separated group of flagged surface points, seeded by the worst
+// point in the group. Only the seed and the size are kept because each caller
+// formats the region from its own per-point data, indexed by the seed id.
+struct TGenUtilsPointRegion
+{
+  vtkIdType seedId;
+  int numPoints;
+};
+
+SV_EXPORT_TETGEN_MESH int TGenUtils_ClusterPointsIntoRegions(vtkPolyData *surface,
+    std::vector<std::pair<double,vtkIdType> > &points,
+    int maxRegions,
+    double radiusFraction,
+    std::vector<TGenUtilsPointRegion> &regions,
+    double &radius,
+    int &numOutside);
+
+SV_EXPORT_TETGEN_MESH int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface,
+    vtkDoubleArray *array);
 
 #endif //__CV_TETGENMESH_UTILS_H

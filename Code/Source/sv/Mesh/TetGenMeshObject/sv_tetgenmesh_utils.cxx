@@ -2341,6 +2341,381 @@ int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface, vtkDoubleAr
 }
 
 // -----------------------------------------
+// TGenUtils_ClusterPointsIntoRegions
+// -----------------------------------------
+/**
+ * @brief Groups flagged surface points into spatially separated regions,
+ * worst first.
+ * @note A diagnostic that reports only its worst point is always pulled to the
+ * same single severe defect, which hides every other junction, so the log
+ * cannot distinguish "one bad spot" from "every junction is affected" - the
+ * question that decides whether a fix belongs in the input surface or in the
+ * thickness passes. The worst remaining point seeds a region, every flagged
+ * point within a radius of it is absorbed, and the process repeats. Only the
+ * first few seeds are wanted, so the cost is maxRegions passes over the flagged
+ * points rather than a full clustering. Nothing on the surface is modified.
+ * @param surface The surface the flagged points belong to.
+ * @param points The flagged points as (sort key, point id), sorted in place.
+ * The worst point is the one with the smallest key, so a caller whose worst
+ * value is its largest passes the negated value as the key.
+ * @param maxRegions The maximum number of regions to return.
+ * @param radiusFraction The region radius as a fraction of the diagonal of the
+ * surface bounding box.
+ * @param regions The seed and size of each region found, worst first.
+ * @param radius The absolute region radius used, for the caller to report.
+ * @param numOutside The flagged points left outside the returned regions, which
+ * is non-zero only when maxRegions regions were filled.
+ * @return SV_OK if the points are clustered.
+ */
+
+int TGenUtils_ClusterPointsIntoRegions(vtkPolyData *surface,
+    std::vector<std::pair<double,vtkIdType> > &points, int maxRegions,
+    double radiusFraction, std::vector<TGenUtilsPointRegion> &regions,
+    double &radius, int &numOutside)
+{
+  regions.clear();
+  radius = 0.0;
+  numOutside = 0;
+
+  if (surface == nullptr)
+  {
+    fprintf(stderr,"Cannot cluster surface points into regions without a surface\n");
+    return SV_ERROR;
+  }
+
+  if (points.empty() || maxRegions <= 0)
+  {
+    return SV_OK;
+  }
+
+  std::sort(points.begin(), points.end());
+
+  double bounds[6];
+  surface->GetBounds(bounds);
+  double dx = bounds[1]-bounds[0], dy = bounds[3]-bounds[2], dz = bounds[5]-bounds[4];
+  radius = radiusFraction*std::sqrt(dx*dx + dy*dy + dz*dz);
+  double radius2 = radius*radius;
+
+  std::vector<bool> absorbed(points.size(), false);
+  for (size_t i = 0; i < points.size() && (int)regions.size() < maxRegions; i++)
+  {
+    if (absorbed[i])
+    {
+      continue;
+    }
+    vtkIdType seedId = points[i].second;
+    double seed[3];
+    surface->GetPoint(seedId, seed);
+    absorbed[i] = true;
+    int members = 1;
+    for (size_t j = i+1; j < points.size(); j++)
+    {
+      if (absorbed[j])
+      {
+        continue;
+      }
+      double p[3];
+      surface->GetPoint(points[j].second, p);
+      double d2 = (p[0]-seed[0])*(p[0]-seed[0]) + (p[1]-seed[1])*(p[1]-seed[1])
+                + (p[2]-seed[2])*(p[2]-seed[2]);
+      if (d2 < radius2)
+      {
+        absorbed[j] = true;
+        members++;
+      }
+    }
+    TGenUtilsPointRegion region;
+    region.seedId = seedId;
+    region.numPoints = members;
+    regions.push_back(region);
+  }
+
+  for (size_t i = 0; i < points.size(); i++)
+  {
+    if (!absorbed[i])
+    {
+      numOutside++;
+    }
+  }
+
+  return SV_OK;
+}
+
+// -------------------------------------------------
+// TGenUtils_ReportConcaveCurvatureVsThickness
+// -------------------------------------------------
+/**
+ * @brief Reports the requested wall thickness against the local concave radius
+ * of curvature of the surface it is extruded from.
+ * @note Extruding a surface outward along its point normals makes the warp
+ * vectors of a concave region converge, so the outer wall self-intersects once
+ * the thickness exceeds the concave radius of curvature there. Whether that
+ * happens is decided by the single ratio t/R, and the thickness passes only
+ * ever observe it indirectly: the curvature clamp is skipped entirely when its
+ * factor is zero, and the fold-prevention pass reports the thickness it had to
+ * remove rather than the ratio that forced it. Reporting t/R directly separates
+ * a junction whose shape cannot carry the requested thickness (t/R > 1, where
+ * no offset-based method can avoid the self-intersection) from a thinning the
+ * thickness passes produce on a junction that could have carried it.
+ *
+ * The curvature at a point is estimated from its one-ring as in the curvature
+ * clamp: a neighbor at distance d rising a height h above the point's tangent
+ * plane implies a curvature of about 2*h/d^2. Two summaries of that one-ring
+ * are reported. The maximum matches the clamp and gives the smallest radius
+ * present, but it has d^2 in the denominator, so a single near-degenerate
+ * triangle makes it diverge and it cannot tell a sharp junction from a sliver.
+ * The median over the whole one-ring, counting the neighbors at or below the
+ * tangent plane as zero curvature, is insensitive to one bad neighbor and
+ * describes the shape of the junction: it is only large where most of the
+ * one-ring is genuinely concave. A region whose median radius is large while
+ * its smallest radius is tiny is a mesh artifact rather than a sharp shape, so
+ * the points using a near-degenerate triangle are flagged as well.
+ *
+ * This is a report; neither the thickness array nor the surface is modified. It
+ * is meant to be called after the warp vectors are smoothed, because the
+ * smoothing changes the normals the heights are measured along, and before any
+ * thickness reduction, so the thickness it reports is the requested one.
+ * @param surface The surface being extruded; must have a 3-component 'Normals'
+ * point data array with the outward point normals.
+ * @param array The wall thickness point array; one component, one tuple per
+ * surface point.
+ * @return SV_OK if the surface is reported on.
+ */
+
+int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleArray *array)
+{
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot report the concave curvature without a surface and a thickness array\n");
+    return SV_ERROR;
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+
+  auto normals = surface->GetPointData()->GetArray("Normals");
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3 ||
+      normals->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface must have a 3-component 'Normals' point array to report the concave curvature\n");
+    return SV_ERROR;
+  }
+
+  // A triangle whose smallest altitude has collapsed against its longest edge
+  // cannot carry a wall at all, and it also drives the one-ring curvature
+  // estimate to a meaningless value, so the points using one are flagged and
+  // read separately from the junctions.
+  const double sliverAltitudeRatio = 0.05;
+
+  surface->BuildLinks();
+
+  std::vector<double> ratioTypical(numPts, 0.0);
+  std::vector<double> radiusTypical(numPts, 0.0);
+  std::vector<double> radiusSmallest(numPts, 0.0);
+  std::vector<char> sliverAdjacent(numPts, 0);
+
+  std::vector<std::pair<double,vtkIdType> > flagged;
+  int numAtLeast1 = 0, numAtLeast2 = 0, numAtLeast4 = 0, numConcave = 0;
+  int numSliverAdjacent = 0;
+
+  auto cellIds = vtkSmartPointer<vtkIdList>::New();
+  std::vector<vtkIdType> neighbors;
+  std::vector<double> curvatures;
+
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double normal[3];
+    normals->GetTuple(ptId, normal);
+    double normalLength = std::sqrt(normal[0]*normal[0] + normal[1]*normal[1] +
+        normal[2]*normal[2]);
+    if (normalLength <= 0.0)
+    {
+      continue;
+    }
+
+    double thickness = array->GetValue(ptId);
+    if (thickness <= 0.0)
+    {
+      continue;
+    }
+
+    double point[3];
+    surface->GetPoint(ptId, point);
+
+    // Unique one-ring neighbors; unlike the clamp, which keeps only the
+    // maximum and is therefore indifferent to visiting a neighbor once per
+    // incident cell, the median would be biased by the duplicates. The
+    // smallest altitude relative to the longest edge over the incident
+    // triangles is collected in the same pass.
+    neighbors.clear();
+    double minAltitudeRatio = -1.0;
+    surface->GetPointCells(ptId, cellIds);
+    for (vtkIdType i = 0; i < cellIds->GetNumberOfIds(); i++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellIds->GetId(i), npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] == ptId)
+        {
+          continue;
+        }
+        if (std::find(neighbors.begin(), neighbors.end(), pts[j]) == neighbors.end())
+        {
+          neighbors.push_back(pts[j]);
+        }
+      }
+
+      if (npts != 3)
+      {
+        continue;
+      }
+      double a[3], b[3], c[3];
+      surface->GetPoint(pts[0], a);
+      surface->GetPoint(pts[1], b);
+      surface->GetPoint(pts[2], c);
+      double ab[3] = {b[0]-a[0], b[1]-a[1], b[2]-a[2]};
+      double ac[3] = {c[0]-a[0], c[1]-a[1], c[2]-a[2]};
+      double bc[3] = {c[0]-b[0], c[1]-b[1], c[2]-b[2]};
+      double cross[3] = {ab[1]*ac[2]-ab[2]*ac[1], ab[2]*ac[0]-ab[0]*ac[2],
+          ab[0]*ac[1]-ab[1]*ac[0]};
+      double area = 0.5*std::sqrt(cross[0]*cross[0] + cross[1]*cross[1] + cross[2]*cross[2]);
+      double lenAB = std::sqrt(ab[0]*ab[0] + ab[1]*ab[1] + ab[2]*ab[2]);
+      double lenAC = std::sqrt(ac[0]*ac[0] + ac[1]*ac[1] + ac[2]*ac[2]);
+      double lenBC = std::sqrt(bc[0]*bc[0] + bc[1]*bc[1] + bc[2]*bc[2]);
+      double longest = lenAB;
+      if (lenAC > longest) { longest = lenAC; }
+      if (lenBC > longest) { longest = lenBC; }
+      if (longest <= 0.0)
+      {
+        continue;
+      }
+      // The smallest altitude is 2*area/longestEdge, so this ratio is the
+      // altitude measured in units of the longest edge.
+      double altitudeRatio = 2.0*area/(longest*longest);
+      if (minAltitudeRatio < 0.0 || altitudeRatio < minAltitudeRatio)
+      {
+        minAltitudeRatio = altitudeRatio;
+      }
+    }
+
+    if (neighbors.empty())
+    {
+      continue;
+    }
+
+    if (minAltitudeRatio >= 0.0 && minAltitudeRatio < sliverAltitudeRatio)
+    {
+      sliverAdjacent[ptId] = 1;
+      numSliverAdjacent++;
+    }
+
+    // Curvature of every unique neighbor, with the neighbors at or below the
+    // tangent plane contributing zero. Keeping them makes the median describe
+    // the point as a whole: it stays near zero where only one neighbor happens
+    // to rise, and is only large where most of the one-ring is concave.
+    curvatures.clear();
+    double maxCurvature = 0.0;
+    for (auto neighborId : neighbors)
+    {
+      double neighbor[3];
+      surface->GetPoint(neighborId, neighbor);
+      double offset[3] = {neighbor[0]-point[0], neighbor[1]-point[1],
+          neighbor[2]-point[2]};
+      double distanceSquared = offset[0]*offset[0] + offset[1]*offset[1] +
+          offset[2]*offset[2];
+      if (distanceSquared <= 0.0)
+      {
+        continue;
+      }
+      double height = (offset[0]*normal[0] + offset[1]*normal[1] +
+          offset[2]*normal[2]) / normalLength;
+      double curvature = (height <= 0.0) ? 0.0 : 2.0*height/distanceSquared;
+      curvatures.push_back(curvature);
+      if (curvature > maxCurvature)
+      {
+        maxCurvature = curvature;
+      }
+    }
+
+    if (curvatures.empty() || maxCurvature <= 0.0)
+    {
+      continue;   // convex or flat: the outer wall spreads instead of folding
+    }
+
+    std::sort(curvatures.begin(), curvatures.end());
+    size_t middle = curvatures.size()/2;
+    double medianCurvature = (curvatures.size() % 2 == 1) ? curvatures[middle] :
+        0.5*(curvatures[middle-1] + curvatures[middle]);
+
+    numConcave++;
+    radiusSmallest[ptId] = 1.0/maxCurvature;
+    radiusTypical[ptId] = (medianCurvature > 0.0) ? 1.0/medianCurvature : 0.0;
+    double ratio = thickness*medianCurvature;   // t / R_typical
+    ratioTypical[ptId] = ratio;
+
+    if (ratio >= 1.0)
+    {
+      numAtLeast1++;
+      // The clustering seeds from the smallest key, so the worst (largest)
+      // ratio is passed negated.
+      flagged.push_back(std::make_pair(-ratio, ptId));
+    }
+    if (ratio >= 2.0) { numAtLeast2++; }
+    if (ratio >= 4.0) { numAtLeast4++; }
+  }
+
+  fprintf(stdout,"Concave curvature vs requested wall thickness (t/R, before any thickness reduction):\n");
+  fprintf(stdout,"  concave points: %d of %lld; points with t/R >= 1 / 2 / 4: %d/%d/%d\n",
+      numConcave, (long long)numPts, numAtLeast1, numAtLeast2, numAtLeast4);
+  fprintf(stdout,"  t/R > 1 means the outer wall must self-intersect there whatever the extrusion does;\n");
+  fprintf(stdout,"  points using a near-degenerate triangle (altitude < %g of the longest edge): %d\n",
+      sliverAltitudeRatio, numSliverAdjacent);
+
+  if (flagged.empty())
+  {
+    fprintf(stdout,"  no point requests a thickness above its concave radius of curvature\n");
+    return SV_OK;
+  }
+
+  const int maxRegions = 8;
+  const double radiusFraction = 0.02;
+  std::vector<TGenUtilsPointRegion> regions;
+  double regionRadius = 0.0;
+  int numOutside = 0;
+  if (TGenUtils_ClusterPointsIntoRegions(surface, flagged, maxRegions, radiusFraction,
+        regions, regionRadius, numOutside) != SV_OK)
+  {
+    fprintf(stderr,"Problem clustering the points whose thickness exceeds the concave radius of curvature\n");
+    return SV_ERROR;
+  }
+
+  fprintf(stdout,"  concave regions with t/R >= 1 (separated by %.4g, worst first):\n", regionRadius);
+  for (size_t i = 0; i < regions.size(); i++)
+  {
+    vtkIdType seedId = regions[i].seedId;
+    double seed[3];
+    surface->GetPoint(seedId, seed);
+    fprintf(stdout,"    [%d] t/R %.3g (t %.5g, R_typical %.5g, R_smallest %.5g) at (%.5g, %.5g, %.5g), %d points%s\n",
+        (int)(i+1), ratioTypical[seedId], array->GetValue(seedId), radiusTypical[seedId],
+        radiusSmallest[seedId], seed[0], seed[1], seed[2], regions[i].numPoints,
+        sliverAdjacent[seedId] ? "  [near-degenerate triangle]" : "");
+  }
+  if (numOutside > 0)
+  {
+    fprintf(stdout,"    ... %d further points with t/R >= 1 outside these %d regions\n",
+        numOutside, maxRegions);
+  }
+
+  return SV_OK;
+}
+
+// -----------------------------------------
 // TGenUtils_LimitThicknessToPreventFold
 // -----------------------------------------
 /**
