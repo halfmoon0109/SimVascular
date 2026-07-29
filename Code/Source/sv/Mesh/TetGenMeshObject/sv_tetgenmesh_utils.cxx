@@ -2365,17 +2365,25 @@ int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface, vtkDoubleAr
  * @param radius The absolute region radius used, for the caller to report.
  * @param numOutside The flagged points left outside the returned regions, which
  * is non-zero only when maxRegions regions were filled.
+ * @param numRegionsTotal Every region the flagged points form, not only the
+ * maxRegions reported. Reporting a truncated list cannot distinguish "these
+ * few junctions are affected" from "every junction is affected and only the
+ * worst few are shown", which is the question the caller is asking, so the
+ * clustering always runs to exhaustion and only the reported list is capped.
+ * The extra passes cost nothing because they walk the flagged points, not the
+ * surface.
  * @return SV_OK if the points are clustered.
  */
 
 int TGenUtils_ClusterPointsIntoRegions(vtkPolyData *surface,
     std::vector<std::pair<double,vtkIdType> > &points, int maxRegions,
     double radiusFraction, std::vector<TGenUtilsPointRegion> &regions,
-    double &radius, int &numOutside)
+    double &radius, int &numOutside, int &numRegionsTotal)
 {
   regions.clear();
   radius = 0.0;
   numOutside = 0;
+  numRegionsTotal = 0;
 
   if (surface == nullptr)
   {
@@ -2396,8 +2404,12 @@ int TGenUtils_ClusterPointsIntoRegions(vtkPolyData *surface,
   radius = radiusFraction*std::sqrt(dx*dx + dy*dy + dz*dz);
   double radius2 = radius*radius;
 
+  // The clustering runs over every flagged point so numRegionsTotal counts all
+  // of them; only the first maxRegions are kept for reporting, and the points
+  // absorbed by the regions past that cap are counted as "outside" so the
+  // reported list plus numOutside still accounts for every flagged point.
   std::vector<bool> absorbed(points.size(), false);
-  for (size_t i = 0; i < points.size() && (int)regions.size() < maxRegions; i++)
+  for (size_t i = 0; i < points.size(); i++)
   {
     if (absorbed[i])
     {
@@ -2424,17 +2436,17 @@ int TGenUtils_ClusterPointsIntoRegions(vtkPolyData *surface,
         members++;
       }
     }
-    TGenUtilsPointRegion region;
-    region.seedId = seedId;
-    region.numPoints = members;
-    regions.push_back(region);
-  }
-
-  for (size_t i = 0; i < points.size(); i++)
-  {
-    if (!absorbed[i])
+    numRegionsTotal++;
+    if ((int)regions.size() < maxRegions)
     {
-      numOutside++;
+      TGenUtilsPointRegion region;
+      region.seedId = seedId;
+      region.numPoints = members;
+      regions.push_back(region);
+    }
+    else
+    {
+      numOutside += members;
     }
   }
 
@@ -2476,19 +2488,41 @@ int TGenUtils_ClusterPointsIntoRegions(vtkPolyData *surface,
  * smoothing changes the normals the heights are measured along, and before any
  * thickness reduction, so the thickness it reports is the requested one.
  * @param surface The surface being extruded; must have a 3-component 'Normals'
- * point data array with the outward point normals.
+ * point data array with the outward point normals. The per-point ratio and
+ * radii are left on it as the 'ThicknessOverRadius', 'ConcaveRadiusTypical'
+ * and 'ConcaveRadiusSmallest' point arrays so the field can be viewed directly
+ * rather than only through the region summary in the log.
  * @param array The wall thickness point array; one component, one tuple per
  * surface point.
+ * @param inward Zero when the extrusion goes outward along the normals (the
+ * solid wall), non-zero when it goes inward (the fluid boundary layer). Only
+ * the side the extrusion converges on is at risk, and it is the opposite side
+ * for the two, so this flips which neighbors count as concave. Without it the
+ * fluid boundary layer cannot be measured on the same footing as the wall, and
+ * the two being extruded from the same surface in opposite directions is
+ * exactly what has to be compared.
+ * @param label Names the extrusion the report belongs to, so the wall and the
+ * fluid boundary layer are distinguishable in one log.
  * @return SV_OK if the surface is reported on.
  */
 
-int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleArray *array)
+int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleArray *array,
+    int inward, const char *label)
 {
   if (surface == nullptr || array == nullptr)
   {
     fprintf(stderr,"Cannot report the concave curvature without a surface and a thickness array\n");
     return SV_ERROR;
   }
+
+  if (label == nullptr)
+  {
+    label = "wall";
+  }
+  // The extrusion converges on the side it moves toward, so the heights that
+  // decide concavity are measured along the extrusion direction, not along the
+  // stored outward normal.
+  const double normalSign = inward ? -1.0 : 1.0;
 
   vtkIdType numPts = surface->GetNumberOfPoints();
   if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
@@ -2633,7 +2667,7 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
       {
         continue;
       }
-      double height = (offset[0]*normal[0] + offset[1]*normal[1] +
+      double height = normalSign*(offset[0]*normal[0] + offset[1]*normal[1] +
           offset[2]*normal[2]) / normalLength;
       double curvature = (height <= 0.0) ? 0.0 : 2.0*height/distanceSquared;
       curvatures.push_back(curvature);
@@ -2670,10 +2704,41 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
     if (ratio >= 4.0) { numAtLeast4++; }
   }
 
-  fprintf(stdout,"Concave curvature vs requested wall thickness (t/R, before any thickness reduction):\n");
+  // Leave the field on the surface so it can be viewed directly. The region
+  // summary below is a list of seeds, which answers "how bad is the worst" but
+  // not "which junctions light up"; that one is answered by looking at the
+  // field, so it has to leave the log behind and reach the written mesh.
+  {
+    auto ratioArray = vtkSmartPointer<vtkDoubleArray>::New();
+    ratioArray->SetName("ThicknessOverRadius");
+    ratioArray->SetNumberOfComponents(1);
+    ratioArray->SetNumberOfTuples(numPts);
+    auto typicalArray = vtkSmartPointer<vtkDoubleArray>::New();
+    typicalArray->SetName("ConcaveRadiusTypical");
+    typicalArray->SetNumberOfComponents(1);
+    typicalArray->SetNumberOfTuples(numPts);
+    auto smallestArray = vtkSmartPointer<vtkDoubleArray>::New();
+    smallestArray->SetName("ConcaveRadiusSmallest");
+    smallestArray->SetNumberOfComponents(1);
+    smallestArray->SetNumberOfTuples(numPts);
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      ratioArray->SetValue(ptId, ratioTypical[ptId]);
+      typicalArray->SetValue(ptId, radiusTypical[ptId]);
+      smallestArray->SetValue(ptId, radiusSmallest[ptId]);
+    }
+    surface->GetPointData()->RemoveArray("ThicknessOverRadius");
+    surface->GetPointData()->RemoveArray("ConcaveRadiusTypical");
+    surface->GetPointData()->RemoveArray("ConcaveRadiusSmallest");
+    surface->GetPointData()->AddArray(ratioArray);
+    surface->GetPointData()->AddArray(typicalArray);
+    surface->GetPointData()->AddArray(smallestArray);
+  }
+
+  fprintf(stdout,"Concave curvature vs requested thickness (t/R, before any thickness reduction) [%s]:\n", label);
   fprintf(stdout,"  concave points: %d of %lld; points with t/R >= 1 / 2 / 4: %d/%d/%d\n",
       numConcave, (long long)numPts, numAtLeast1, numAtLeast2, numAtLeast4);
-  fprintf(stdout,"  t/R > 1 means the outer wall must self-intersect there whatever the extrusion does;\n");
+  fprintf(stdout,"  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;\n");
   fprintf(stdout,"  points using a near-degenerate triangle (altitude < %g of the longest edge): %d\n",
       sliverAltitudeRatio, numSliverAdjacent);
 
@@ -2688,14 +2753,18 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
   std::vector<TGenUtilsPointRegion> regions;
   double regionRadius = 0.0;
   int numOutside = 0;
+  int numRegionsTotal = 0;
   if (TGenUtils_ClusterPointsIntoRegions(surface, flagged, maxRegions, radiusFraction,
-        regions, regionRadius, numOutside) != SV_OK)
+        regions, regionRadius, numOutside, numRegionsTotal) != SV_OK)
   {
     fprintf(stderr,"Problem clustering the points whose thickness exceeds the concave radius of curvature\n");
     return SV_ERROR;
   }
 
-  fprintf(stdout,"  concave regions with t/R >= 1 (separated by %.4g, worst first):\n", regionRadius);
+  // The total is the number that answers whether every junction is affected or
+  // only a few, so it is reported before the truncated list of the worst ones.
+  fprintf(stdout,"  concave regions with t/R >= 1: %d in total (separated by %.4g), worst %d shown:\n",
+      numRegionsTotal, regionRadius, (int)regions.size());
   for (size_t i = 0; i < regions.size(); i++)
   {
     vtkIdType seedId = regions[i].seedId;
@@ -2708,8 +2777,196 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
   }
   if (numOutside > 0)
   {
-    fprintf(stdout,"    ... %d further points with t/R >= 1 outside these %d regions\n",
-        numOutside, maxRegions);
+    fprintf(stdout,"    ... %d further points with t/R >= 1 in the remaining %d regions\n",
+        numOutside, numRegionsTotal - (int)regions.size());
+  }
+
+  return SV_OK;
+}
+
+// -------------------------------------------
+// TGenUtils_ReportAchievedWallThickness
+// -------------------------------------------
+/**
+ * @brief Reports the wall thickness the extrusion actually achieves, measured
+ * as the clearance from each outer point to the whole inner surface.
+ * @note Every existing pass reasons about the extrusion length, not the wall
+ * thickness. The rounding pass holds the outward distance from a point to its
+ * own outer point at or above the assigned thickness; the fold prevention pass
+ * tests whether an outer triangle inverts; the thickness reduction report
+ * divides the final extrusion length by the requested one. None of these is
+ * the thickness of the wall. The wall is only as thick as the closest approach
+ * of the outer surface to *any* part of the inner surface, and at a concave
+ * junction the outer point of one vessel moves toward the inner surface of the
+ * other vessel, which no distance along a point's own normal and no triangle
+ * orientation test can see. The existing report is therefore an upper bound:
+ * it says how much of the requested extrusion length survived, not how much
+ * wall was produced, so a junction can read as thinned to 90% while the wall
+ * there is far thinner, or read as full thickness while the outer surface has
+ * come within a fraction of it of the opposite side.
+ *
+ * The clearance is measured against the surface itself rather than against its
+ * points, so the value does not depend on where the vertices happen to fall.
+ * It also catches two distinct vessels whose walls interpenetrate without any
+ * junction being involved, which is the same defect and is otherwise invisible.
+ *
+ * This is a report; neither the thickness array nor the geometry is modified,
+ * although the achieved ratio is left on the surface as the
+ * 'AchievedThicknessRatio' point array so the field can be viewed. It is meant
+ * to be called after every thickness pass, on the final extrusion inputs.
+ * @param surface The surface being extruded; must have a 3-component 'Normals'
+ * point data array holding the final extrusion directions.
+ * @param array The final extrusion length per point, one tuple per point.
+ * @param requested The originally requested thickness per point, which the
+ * achieved clearance is reported against.
+ * @param label Names the extrusion the report belongs to.
+ * @return SV_OK if the surface is reported on.
+ */
+
+int TGenUtils_ReportAchievedWallThickness(vtkPolyData *surface, vtkDoubleArray *array,
+    const std::vector<double> &requested, const char *label)
+{
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot report the achieved wall thickness without a surface and a thickness array\n");
+    return SV_ERROR;
+  }
+
+  if (label == nullptr)
+  {
+    label = "wall";
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+
+  if ((vtkIdType)requested.size() != numPts)
+  {
+    fprintf(stderr,"The requested thickness must have one value per surface point\n");
+    return SV_ERROR;
+  }
+
+  auto normals = surface->GetPointData()->GetArray("Normals");
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3 ||
+      normals->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface must have a 3-component 'Normals' point array to report the achieved thickness\n");
+    return SV_ERROR;
+  }
+
+  auto locator = vtkSmartPointer<vtkCellLocator>::New();
+  locator->SetDataSet(surface);
+  locator->BuildLocator();
+
+  auto genericCell = vtkSmartPointer<vtkGenericCell>::New();
+
+  auto ratioArray = vtkSmartPointer<vtkDoubleArray>::New();
+  ratioArray->SetName("AchievedThicknessRatio");
+  ratioArray->SetNumberOfComponents(1);
+  ratioArray->SetNumberOfTuples(numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    ratioArray->SetValue(ptId, 1.0);
+  }
+
+  std::vector<double> achieved(numPts, 0.0);
+  std::vector<std::pair<double,vtkIdType> > flagged;
+  int numBelow90 = 0, numBelow50 = 0, numBelow25 = 0, numMeasured = 0;
+
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double want = requested[ptId];
+    if (want <= 0.0)
+    {
+      continue;
+    }
+
+    double n[3];
+    normals->GetTuple(ptId, n);
+    double len = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+    if (len <= 0.0)
+    {
+      continue;
+    }
+
+    double p[3];
+    surface->GetPoint(ptId, p);
+    double extrusion = array->GetValue(ptId);
+    double outer[3];
+    for (int k = 0; k < 3; k++)
+    {
+      outer[k] = p[k] + extrusion*n[k]/len;
+    }
+
+    // The closest point of the inner surface to this outer point; its distance
+    // is the wall thickness there, because the wall occupies the space between
+    // the two surfaces and nothing is thicker than that closest approach.
+    double closest[3];
+    vtkIdType cellId = -1;
+    int subId = 0;
+    double distanceSquared = 0.0;
+    locator->FindClosestPoint(outer, closest, genericCell, cellId, subId, distanceSquared);
+    double clearance = std::sqrt(distanceSquared);
+
+    achieved[ptId] = clearance;
+    numMeasured++;
+    double ratio = clearance/want;
+    ratioArray->SetValue(ptId, ratio);
+    if (ratio < 0.90)
+    {
+      numBelow90++;
+      flagged.push_back(std::make_pair(ratio, ptId));
+    }
+    if (ratio < 0.50) { numBelow50++; }
+    if (ratio < 0.25) { numBelow25++; }
+  }
+
+  surface->GetPointData()->RemoveArray("AchievedThicknessRatio");
+  surface->GetPointData()->AddArray(ratioArray);
+
+  fprintf(stdout,"Achieved thickness (outer point to the whole inner surface, vs requested) [%s]:\n", label);
+  fprintf(stdout,"  points below 90%%/50%%/25%%: %d/%d/%d of %d measured\n",
+      numBelow90, numBelow50, numBelow25, numMeasured);
+  fprintf(stdout,"  this is the wall actually produced; the extrusion length reported separately is an upper bound on it\n");
+
+  if (flagged.empty())
+  {
+    fprintf(stdout,"  every point achieves at least 90%% of its requested thickness\n");
+    return SV_OK;
+  }
+
+  const int maxRegions = 8;
+  const double radiusFraction = 0.02;
+  std::vector<TGenUtilsPointRegion> regions;
+  double regionRadius = 0.0;
+  int numOutside = 0;
+  int numRegionsTotal = 0;
+  if (TGenUtils_ClusterPointsIntoRegions(surface, flagged, maxRegions, radiusFraction,
+        regions, regionRadius, numOutside, numRegionsTotal) != SV_OK)
+  {
+    fprintf(stderr,"Problem clustering the points whose achieved wall thickness is below the requested one\n");
+    return SV_ERROR;
+  }
+
+  fprintf(stdout,"  regions below 90%%: %d in total (separated by %.4g), worst %d shown:\n",
+      numRegionsTotal, regionRadius, (int)regions.size());
+  for (size_t i = 0; i < regions.size(); i++)
+  {
+    vtkIdType seedId = regions[i].seedId;
+    double seed[3];
+    surface->GetPoint(seedId, seed);
+    fprintf(stdout,"    [%d] ratio %.3f (achieved %.5g / requested %.5g, extruded %.5g) at (%.5g, %.5g, %.5g), %d points\n",
+        (int)(i+1), achieved[seedId]/requested[seedId], achieved[seedId], requested[seedId],
+        array->GetValue(seedId), seed[0], seed[1], seed[2], regions[i].numPoints);
+  }
+  if (numOutside > 0)
+  {
+    fprintf(stdout,"    ... %d further points in the remaining %d regions\n",
+        numOutside, numRegionsTotal - (int)regions.size());
   }
 
   return SV_OK;

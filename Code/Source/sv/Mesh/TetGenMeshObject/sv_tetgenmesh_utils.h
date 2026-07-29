@@ -164,9 +164,17 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_ClusterPointsIntoRegions(vtkPolyData *surfac
     double radiusFraction,
     std::vector<TGenUtilsPointRegion> &regions,
     double &radius,
-    int &numOutside);
+    int &numOutside,
+    int &numRegionsTotal);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface,
-    vtkDoubleArray *array);
+    vtkDoubleArray *array,
+    int inward,
+    const char *label);
+
+SV_EXPORT_TETGEN_MESH int TGenUtils_ReportAchievedWallThickness(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    const std::vector<double> &requested,
+    const char *label);
 
 #endif //__CV_TETGENMESH_UTILS_H

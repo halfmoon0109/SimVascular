@@ -2251,6 +2251,51 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
 
   TGenUtils_WriteVTU("boundarylayermesh_normals.vtu", boundarylayermesh_);
 
+  // Measure the fluid boundary layer against its own concave curvature, the
+  // same way the solid wall is measured. The two are extruded from this one
+  // surface in opposite directions, so a junction that is concave for the wall
+  // is convex for the boundary layer and vice versa, and the ratio that
+  // decides whether an extrusion can succeed (t/R) is therefore a different
+  // number on each side. Reporting only the wall side leaves the claim that
+  // the boundary layer is safe as an assumption; this measures it.
+  {
+    double blThickness = meshoptions_.maxedgesize*meshoptions_.blthicknessfactor;
+    fprintf(stdout,"Fluid boundary layer options in effect: MaxEdgeSize %g, BLThicknessFactor %g, "
+        "constant thickness %d (total layer thickness %g), NumSubLayers %d, SubLayerRatio %g\n",
+        meshoptions_.maxedgesize, meshoptions_.blthicknessfactor, useConstantThickness,
+        blThickness, meshoptions_.numsublayers, meshoptions_.sublayerratio);
+
+    // vmtk builds the layer thickness per point as the sizing function scaled
+    // by the thickness factor, or as one constant when constant thickness is
+    // set; rebuild the same value here so the ratio is reported against the
+    // thickness that is actually extruded.
+    auto blThicknessArray = vtkSmartPointer<vtkDoubleArray>::New();
+    blThicknessArray->SetName("FluidLayerThickness");
+    blThicknessArray->SetNumberOfComponents(1);
+    blThicknessArray->SetNumberOfTuples(originalsurfpd->GetNumberOfPoints());
+    auto sizing = originalsurfpd->GetPointData()->GetArray(layerThicknessArrayName.c_str());
+    for (vtkIdType ptId = 0; ptId < originalsurfpd->GetNumberOfPoints(); ptId++)
+    {
+      double thickness = blThickness;
+      if (!useConstantThickness && sizing != nullptr)
+      {
+        thickness = sizing->GetComponent(ptId,0)*meshoptions_.blthicknessfactor;
+      }
+      blThicknessArray->SetValue(ptId, thickness);
+    }
+
+    if (TGenUtils_ReportConcaveCurvatureVsThickness(originalsurfpd, blThicknessArray, 1,
+          "fluid boundary layer, inward") != SV_OK)
+    {
+      fprintf(stderr,"Problem reporting the fluid boundary layer concave curvature\n");
+      return SV_ERROR;
+    }
+
+    originalsurfpd->GetPointData()->RemoveArray("ThicknessOverRadius");
+    originalsurfpd->GetPointData()->RemoveArray("ConcaveRadiusTypical");
+    originalsurfpd->GetPointData()->RemoveArray("ConcaveRadiusSmallest");
+  }
+
   if (VMTKUtils_BoundaryLayerMesh(boundarylayermesh_, innerSurface, meshoptions_.maxedgesize, meshoptions_.blthicknessfactor,
 	meshoptions_.numsublayers, meshoptions_.sublayerratio, sidewallCellEntityId, innerSurfaceCellId, negateWarpVectors,
 	markerListName, useConstantThickness, layerThicknessArrayName) != SV_OK)
@@ -2507,7 +2552,7 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
   // heights are measured along those normals, and it is independent of the
   // curvature clamp, which is skipped entirely when its factor is zero.
   // Nothing is modified.
-  if (TGenUtils_ReportConcaveCurvatureVsThickness(surface, thicknessArray) != SV_OK)
+  if (TGenUtils_ReportConcaveCurvatureVsThickness(surface, thicknessArray, 0, "solid wall, outward") != SV_OK)
   {
     fprintf(stderr,"Problem reporting the concave curvature against the wall thickness\n");
     return SV_ERROR;
@@ -2633,14 +2678,16 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
       std::vector<TGenUtilsPointRegion> regions;
       double radius = 0.0;
       int numOutside = 0;
+      int numRegionsTotal = 0;
       if (TGenUtils_ClusterPointsIntoRegions(surface, thinPts, maxRegions, radiusFraction,
-            regions, radius, numOutside) != SV_OK)
+            regions, radius, numOutside, numRegionsTotal) != SV_OK)
       {
         fprintf(stderr,"Problem clustering the thinned wall thickness points into regions\n");
         return SV_ERROR;
       }
 
-      fprintf(stdout,"  thinned regions (separated by %.4g, worst first):\n", radius);
+      fprintf(stdout,"  thinned regions: %d in total (separated by %.4g), worst %d shown:\n",
+          numRegionsTotal, radius, (int)regions.size());
       for (size_t i = 0; i < regions.size(); i++)
       {
         vtkIdType seedId = regions[i].seedId;
@@ -2653,11 +2700,45 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
       }
       if (numOutside > 0)
       {
-        fprintf(stdout,"    ... %d further thinned points outside these %d regions\n",
-            numOutside, maxRegions);
+        fprintf(stdout,"    ... %d further thinned points in the remaining %d regions\n",
+            numOutside, numRegionsTotal - (int)regions.size());
       }
     }
   }
+
+  // The report above divides the surviving extrusion length by the requested
+  // one, which is not the wall thickness: at a concave junction an outer point
+  // moves toward the inner surface of the vessel it is merging with, so the
+  // wall can be far thinner than the extrusion is long. Measure the wall that
+  // is actually produced, as the clearance from each outer point to the whole
+  // inner surface, so the two can be compared and the gap between them is
+  // visible rather than assumed away.
+  if (TGenUtils_ReportAchievedWallThickness(surface, thicknessArray, baseThickness,
+        "solid wall, outward") != SV_OK)
+  {
+    fprintf(stderr,"Problem reporting the achieved wall thickness\n");
+    return SV_ERROR;
+  }
+
+  // The diagnostic fields (t/R, the concave radii and the achieved thickness
+  // ratio) live on this surface, so writing it once gives the whole picture as
+  // a field that can be viewed, which is the only way to answer whether every
+  // junction is affected or only the few the log has room to list. The write
+  // is a polydata because the surface is one; it happens before the arrays are
+  // stripped for the extrusion.
+  {
+    char wallDiagnosticsFile[] = "wall_diagnostics.vtp";
+    TGenUtils_WriteVTP(wallDiagnosticsFile, surface);
+  }
+
+  // The diagnostic fields have been written out, so drop them here: everything
+  // left on this surface is carried through the extrusion into the wall mesh
+  // and then into the appended volume mesh, and a report has no business
+  // ending up in the mesh that is handed to the solver.
+  surface->GetPointData()->RemoveArray("ThicknessOverRadius");
+  surface->GetPointData()->RemoveArray("ConcaveRadiusTypical");
+  surface->GetPointData()->RemoveArray("ConcaveRadiusSmallest");
+  surface->GetPointData()->RemoveArray("AchievedThicknessRatio");
 
   surface->GetPointData()->RemoveArray("WallThickness");
   surface->GetPointData()->AddArray(thicknessArray);

@@ -34,6 +34,7 @@ Version:   $Revision: 1.7 $
 #include "vtkTriangle.h"
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 #include <utility>
 #include <vector>
 #include "vtkInformation.h"
@@ -344,9 +345,12 @@ int vtkvmtkBoundaryLayerGenerator::RequestData(
     // single worst point: one severe location otherwise hides every other
     // junction, and the count alone cannot say whether the depression sits at
     // one place or at every junction. Greedily take the worst remaining point,
-    // absorb every tilted point within a radius of it, and repeat; only the
-    // first few seeds are wanted, so this costs maxRegions passes over the
-    // tilted points rather than a full clustering.
+    // absorb every tilted point within a radius of it, and repeat. The
+    // clustering runs over every tilted point so the total number of regions
+    // is known - a truncated list cannot distinguish "these few junctions are
+    // affected" from "every junction is affected and only the worst few fit in
+    // the log", which is the question being asked - and only the reported list
+    // is capped. The extra passes walk the tilted points, not the surface.
     if (!tiltedPts.empty())
       {
       std::sort(tiltedPts.begin(),tiltedPts.end());
@@ -362,8 +366,10 @@ int vtkvmtkBoundaryLayerGenerator::RequestData(
       const int maxRegions = 8;
       std::vector<bool> absorbed(tiltedPts.size(),false);
       int numRegions = 0;
-      std::cout << "  tilted regions (separated by " << radius << ", worst first):" << std::endl;
-      for (size_t i=0; i<tiltedPts.size() && numRegions<maxRegions; i++)
+      int numShown = 0;
+      int numRemaining = 0;
+      std::stringstream regionLines;
+      for (size_t i=0; i<tiltedPts.size(); i++)
         {
         if (absorbed[i])
           {
@@ -390,19 +396,27 @@ int vtkvmtkBoundaryLayerGenerator::RequestData(
             }
           }
         numRegions++;
-        std::cout << "    [" << numRegions << "] tilt " << acos(tiltedPts[i].first)*180.0/vtkMath::Pi()
-          << " deg at (" << seed[0] << ", " << seed[1] << ", " << seed[2] << "), "
-          << members << " points" << std::endl;
-        }
-      if (numRegions==maxRegions)
-        {
-        int remaining = 0;
-        for (size_t i=0; i<tiltedPts.size(); i++)
+        if (numShown<maxRegions)
           {
-          if (!absorbed[i]) { remaining++; }
+          numShown++;
+          regionLines << "    [" << numShown << "] tilt " << acos(tiltedPts[i].first)*180.0/vtkMath::Pi()
+            << " deg at (" << seed[0] << ", " << seed[1] << ", " << seed[2] << "), "
+            << members << " points" << std::endl;
           }
-        std::cout << "    ... " << remaining << " further tilted points outside these "
-          << maxRegions << " regions" << std::endl;
+        else
+          {
+          numRemaining += members;
+          }
+        }
+      // The total is what answers whether the depression is local or general,
+      // so it leads; the worst few follow as the detail.
+      std::cout << "  tilted regions: " << numRegions << " in total (separated by "
+        << radius << "), worst " << numShown << " shown:" << std::endl;
+      std::cout << regionLines.str();
+      if (numRemaining>0)
+        {
+        std::cout << "    ... " << numRemaining << " further tilted points in the remaining "
+          << numRegions-numShown << " regions" << std::endl;
         }
       }
   }
