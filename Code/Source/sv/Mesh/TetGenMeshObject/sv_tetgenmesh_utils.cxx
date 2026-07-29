@@ -3640,8 +3640,17 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
  * dip's neighbors sit further out), in proportion to how concave the point is,
  * so convex and flat points and a straight tube are left unchanged. It is then
  * pushed back out so its outward (normal) distance from the inner point is
- * never below the assigned thickness, and capped so a very sharp crotch cannot
- * spike outward without bound. Boundary (cap rim) points are pinned so the
+ * never below the assigned thickness, then pushed off whatever part of the
+ * inner surface is nearer to it than the thickness, and capped so a very sharp
+ * crotch cannot spike outward without bound.
+ *
+ * The second push is what makes the thickness mean the wall rather than the
+ * extrusion. The wall is at least t thick exactly when every outer point is at
+ * least t from every inner point; a distance measured along a point's own
+ * normal cannot see the vessel it is merging with, so without it an outer point
+ * can close up against the opposite side of a junction while still reporting
+ * the full thickness. Away from a junction the nearest inner point is the
+ * point's own and the second push does nothing. Boundary (cap rim) points are pinned so the
  * wall stays flat at the caps. The rounded outer surface is encoded back into
  * the normals (the extrusion direction) and the thickness array (the extrusion
  * magnitude) so the existing extrusion reproduces exactly this surface; the
@@ -3812,6 +3821,20 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
     outer[3*ptId+2] = p[2] + t*n[2];
   }
 
+  // The thickness has to be tested against the whole inner surface, not only
+  // against each point's own inner point, so the surface needs to be
+  // searchable. It is tested against the surface rather than against its
+  // points so the result does not depend on where the vertices happen to fall.
+  // The surface never moves, so this is built once and reused every iteration.
+  auto locator = vtkSmartPointer<vtkCellLocator>::New();
+  locator->SetDataSet(surface);
+  locator->BuildLocator();
+  auto genericCell = vtkSmartPointer<vtkGenericCell>::New();
+
+  int numClearancePushed = 0;
+  double maxClearancePush = 0.0;
+  vtkIdType maxClearancePushId = -1;
+
   std::vector<double> nextOuter(outer);
   for (int iter = 0; iter < iterations; iter++)
   {
@@ -3863,6 +3886,67 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
         moved[2] += push*n[2];
         h = t;
       }
+
+      // The distance above is measured from this point's own inner point, and
+      // that is not the wall thickness. At a junction the outer point of one
+      // vessel moves toward the inner surface of the vessel it is merging
+      // with, so the wall closes up against a part of the surface this point
+      // knows nothing about while its own normal distance still reads the full
+      // thickness. Enforce the thickness against the whole inner surface: the
+      // wall is at least t thick exactly when every outer point is at least t
+      // from every inner point, which is what the outward offset of the solid
+      // satisfies by construction and what a per-point normal distance cannot
+      // express. Away from a junction the closest inner point is this point's
+      // own and the test passes unchanged, so only the junctions move.
+      double closest[3];
+      vtkIdType closestCell = -1;
+      int closestSubId = 0;
+      double closestDistance2 = 0.0;
+      locator->FindClosestPoint(moved, closest, genericCell, closestCell,
+          closestSubId, closestDistance2);
+      double clearance = std::sqrt(closestDistance2);
+      if (clearance < t)
+      {
+        // Move away from whatever is too close, which is the direction that
+        // opens the wall by the most per unit moved. A point sitting on the
+        // surface has no such direction, so it falls back to its own normal.
+        double away[3] = {moved[0]-closest[0], moved[1]-closest[1], moved[2]-closest[2]};
+        if (clearance > 0.0)
+        {
+          for (int k = 0; k < 3; k++)
+          {
+            away[k] /= clearance;
+          }
+        }
+        else
+        {
+          for (int k = 0; k < 3; k++)
+          {
+            away[k] = n[k];
+          }
+        }
+        double push = t - clearance;
+        for (int k = 0; k < 3; k++)
+        {
+          moved[k] += push*away[k];
+        }
+        numClearancePushed++;
+        if (push > maxClearancePush)
+        {
+          maxClearancePush = push;
+          maxClearancePushId = ptId;
+        }
+        // The push is off the normal, so recompute the height the cap uses.
+        for (int k = 0; k < 3; k++)
+        {
+          disp[k] = moved[k]-p[k];
+        }
+        h = disp[0]*n[0] + disp[1]*n[1] + disp[2]*n[2];
+      }
+
+      // The cap is the last word: it bounds how far a very sharp crotch can
+      // spike outward, including the clearance push, so a degenerate corner
+      // cannot send an outer point off to infinity.
       double maxH = maxFilletRatio*t;
       if (h > maxH)
       {
@@ -3927,6 +4011,20 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
   {
     double p[3];
     surface->GetPoint(maxRatioId, p);
+    fprintf(stdout," at (%.5g, %.5g, %.5g)", p[0], p[1], p[2]);
+  }
+  fprintf(stdout,"\n");
+
+  // Report the clearance constraint separately from the fillet. The two answer
+  // different questions: the fillet says how far the rounding reached, and this
+  // says how often the outer surface was closing on a part of the inner surface
+  // that the fillet alone would never have noticed.
+  fprintf(stdout,"  clearance to the whole inner surface enforced at %d point updates; "
+      "largest single correction %.5g", numClearancePushed, maxClearancePush);
+  if (maxClearancePushId >= 0)
+  {
+    double p[3];
+    surface->GetPoint(maxClearancePushId, p);
     fprintf(stdout," at (%.5g, %.5g, %.5g)", p[0], p[1], p[2]);
   }
   fprintf(stdout,"\n");
