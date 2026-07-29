@@ -172,6 +172,14 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyDat
     int inward,
     const char *label);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_BuildWallShellSurface(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    vtkPolyData *shell,
+    int &numBoundaryEdges);
+
+SV_EXPORT_TETGEN_MESH int TGenUtils_FindLumenHolePoint(vtkPolyData *surface,
+    double holePoint[3]);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportAchievedWallThickness(vtkPolyData *surface,
     vtkDoubleArray *array,
     const std::vector<double> &requested,

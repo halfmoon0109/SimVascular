@@ -49,6 +49,8 @@
 #include "vtkDoubleArray.h"
 #include "vtkIntArray.h"
 #include "vtkCellArray.h"
+#include "vtkCellData.h"
+#include "vtkCellType.h"
 #include "vtkThreshold.h"
 #include "vtkXMLPolyDataWriter.h"
 #include "vtkXMLUnstructuredGridWriter.h"
@@ -130,6 +132,7 @@ cvTetGenMeshObject::cvTetGenMeshObject() : cvMeshObject()
   meshoptions_.newregionboundarylayer=0;
   meshoptions_.boundarylayerdirection=1;
   meshoptions_.wallmeshflag=0;
+  meshoptions_.walltetgenshell=0;
   meshoptions_.wallthickness=0.0;
   meshoptions_.numwallsublayers=2;
   meshoptions_.wallthicknesssmoothingiterations=5;
@@ -1039,6 +1042,17 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
     else
     {
       meshoptions_.wallmeshflag=(values[0] != 0.0);
+    }
+  }
+  else if (!strncmp(flags,"WallMeshTetGenShell",19)) {
+    // With no value the option acts as a flag selecting the TetGen shell fill.
+    if (numValues < 1)
+    {
+      meshoptions_.walltetgenshell=1;
+    }
+    else
+    {
+      meshoptions_.walltetgenshell=(values[0] != 0.0);
     }
   }
   else if (!strncmp(flags,"LocalWallThickness",18)) {
@@ -2740,6 +2754,14 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
   surface->GetPointData()->RemoveArray("ConcaveRadiusSmallest");
   surface->GetPointData()->RemoveArray("AchievedThicknessRatio");
 
+  // Fill the wall with unstructured tetrahedra instead of extruding wedges,
+  // when asked. Both fills leave the inner surface points untouched, which is
+  // the only part of the wall the solver constrains, so the choice is free.
+  if (meshoptions_.walltetgenshell)
+  {
+    return FillWallMeshWithTetGen(surface, thicknessArray);
+  }
+
   surface->GetPointData()->RemoveArray("WallThickness");
   surface->GetPointData()->AddArray(thicknessArray);
 
@@ -2777,6 +2799,219 @@ but no centerlines are available; enable centerline (radius) meshing so the cent
   fprintf(stderr,"Cannot generate a wall mesh without VMTK\n");
   return SV_ERROR;
 #endif
+}
+
+//------------------------
+// FillWallMeshWithTetGen
+//------------------------
+/**
+ * @brief Fills the solid wall with tetrahedra generated between the inner
+ * surface and the outer surface, instead of extruding wedge layers from it.
+ * @note The wedge extrusion gives every outer node exactly one inner node. At
+ * a concave junction the outer nodes converge on each other, and with the node
+ * correspondence fixed the only way to keep the extrusion valid is to shorten
+ * it, which is what thins the wall there. Filling the volume between the two
+ * surfaces has no such correspondence, so the mesher is free to put whatever
+ * nodes it needs where the two vessels merge.
+ *
+ * The inner surface is passed through unchanged. It is the fluid/wall
+ * interface, and the solver matches its nodes one to one against the fluid
+ * mesh with a tolerance of a few units in the last place, so nothing may move
+ * them - not the fill, and not the mesher, which is run with boundary
+ * splitting off so it cannot insert a node on the input facets either.
+ *
+ * @param surface The inner surface with its final 'Normals' and thickness.
+ * @param thicknessArray The final extrusion length per point.
+ * @return SV_OK if the wall is filled.
+ */
+
+int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleArray* thicknessArray)
+{
+  auto shell = vtkSmartPointer<vtkPolyData>::New();
+  int numBoundaryEdges = 0;
+  if (TGenUtils_BuildWallShellSurface(surface, thicknessArray, shell, numBoundaryEdges) != SV_OK)
+  {
+    fprintf(stderr,"Problem building the wall shell surface\n");
+    return SV_ERROR;
+  }
+
+  fprintf(stdout,"Filling the wall with TetGen tetrahedra: shell surface has %lld points and %lld triangles, %d boundary edges closed by side walls\n",
+      (long long)shell->GetNumberOfPoints(), (long long)shell->GetNumberOfCells(), numBoundaryEdges);
+
+  auto shellInMesh = new tetgenio;
+  auto shellOutMesh = new tetgenio;
+
+  if (TGenUtils_ConvertSurfaceToTetGen(shellInMesh, shell) != SV_OK)
+  {
+    fprintf(stderr,"Problem converting the wall shell surface to TetGen\n");
+    delete shellInMesh;
+    delete shellOutMesh;
+    return SV_ERROR;
+  }
+
+  // A closed inner surface encloses the lumen as well as the wall, so the
+  // lumen has to be marked as a hole or it would be filled with wall elements.
+  // An inner surface left open at the caps is closed by the side wall strips
+  // and encloses the wall alone, so there is nothing to exclude.
+  if (numBoundaryEdges == 0)
+  {
+    double holePoint[3];
+    if (TGenUtils_FindLumenHolePoint(surface, holePoint) != SV_OK)
+    {
+      fprintf(stderr,"Problem finding a point inside the lumen to exclude it from the wall\n");
+      delete shellInMesh;
+      delete shellOutMesh;
+      return SV_ERROR;
+    }
+    fprintf(stdout,"  the inner surface is closed, so the lumen is marked as a hole at (%.5g, %.5g, %.5g)\n",
+        holePoint[0], holePoint[1], holePoint[2]);
+
+    auto holeList = vtkSmartPointer<vtkPoints>::New();
+    holeList->InsertNextPoint(holePoint);
+    if (TGenUtils_AddHoles(shellInMesh, holeList) != SV_OK)
+    {
+      fprintf(stderr,"Problem marking the lumen as a hole in the wall shell\n");
+      delete shellInMesh;
+      delete shellOutMesh;
+      return SV_ERROR;
+    }
+  }
+
+  auto shellBehavior = new tetgenbehavior;
+  shellBehavior->plc = 1;
+  // The input facets carry the fluid/wall interface nodes, so no node on them
+  // may be added or moved; without this the interface stops matching the fluid
+  // mesh and the solver refuses the case.
+  shellBehavior->nobisect = 1;
+  shellBehavior->quality = 1;
+  shellBehavior->minratio = 1.414;
+  shellBehavior->mindihedral = 10.0;
+
+  fprintf(stdout,"  TetGen wall fill started...\n");
+  try
+  {
+    tetrahedralize(shellBehavior, shellInMesh, shellOutMesh);
+  }
+  catch (int r)
+  {
+    fprintf(stderr,"ERROR: TetGen quit with error code %d while filling the wall. The shell surface\
+ is probably self-intersecting, which happens where the requested thickness exceeds the concave radius\
+ of curvature at a junction; see the t/R report above\n", r);
+    delete shellBehavior;
+    delete shellInMesh;
+    delete shellOutMesh;
+    return SV_ERROR;
+  }
+  fprintf(stdout,"  TetGen wall fill finished\n");
+
+  if (wallmesh_ != nullptr)
+  {
+    wallmesh_->Delete();
+  }
+  wallmesh_ = vtkUnstructuredGrid::New();
+
+  auto wallSurfaceMesh = vtkSmartPointer<vtkPolyData>::New();
+  int totRegions = 0;
+  if (TGenUtils_ConvertToVTK(shellOutMesh, wallmesh_, wallSurfaceMesh, &totRegions, 0) != SV_OK)
+  {
+    fprintf(stderr,"Problem converting the filled wall mesh from TetGen\n");
+    delete shellBehavior;
+    delete shellInMesh;
+    delete shellOutMesh;
+    return SV_ERROR;
+  }
+
+  fprintf(stdout,"  wall filled with %lld tetrahedra on %lld nodes\n",
+      (long long)wallmesh_->GetNumberOfCells(), (long long)wallmesh_->GetNumberOfPoints());
+
+  // The wedge extrusion hands downstream a mesh holding both the volume cells
+  // and the surface cells that bound them, tagged with 'CellEntityIds' and
+  // 'ModelFaceID'; VMTKUtils_CreateBoundaryLayerSurfaceAndCaps splits the two
+  // on the cell type and then reads 'CellEntityIds' without checking that it
+  // exists. A mesh of tetrahedra alone therefore has to be given the same
+  // shape, or that split produces an empty surface and the read dereferences
+  // null. The boundary triangles are exactly the shell surface triangles,
+  // because the mesher was run with boundary splitting off and so preserved
+  // the input facets, and its output keeps the input points at their input
+  // indices, so the shell cells can be inserted unchanged.
+  {
+    vtkIdType numInner = surface->GetNumberOfPoints();
+    vtkIdType numTets = wallmesh_->GetNumberOfCells();
+
+    auto cellEntityIds = vtkSmartPointer<vtkIntArray>::New();
+    cellEntityIds->SetName("CellEntityIds");
+    cellEntityIds->SetNumberOfComponents(1);
+    auto modelFaceIds = vtkSmartPointer<vtkIntArray>::New();
+    modelFaceIds->SetName("ModelFaceID");
+    modelFaceIds->SetNumberOfComponents(1);
+
+    for (vtkIdType cellId = 0; cellId < numTets; cellId++)
+    {
+      cellEntityIds->InsertNextValue(0);
+      modelFaceIds->InsertNextValue(0);
+    }
+
+    // A triangle whose points are all inner points is the fluid/wall
+    // interface, all outer points is the free outer wall, and a mix is a side
+    // wall closing the two at a cap. The ids follow the wedge extrusion: the
+    // interface is the inner surface id and a side wall is 9999.
+    const int innerSurfaceCellId = 1;
+    const int outerSurfaceCellId = 2;
+    const int sidewallCellEntityId = 9999;
+    int numInnerCells = 0, numOuterCells = 0, numSideCells = 0;
+
+    for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      shell->GetCellPoints(cellId, npts, pts);
+      if (npts != 3)
+      {
+        continue;
+      }
+
+      int numInnerPts = 0;
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] < numInner)
+        {
+          numInnerPts++;
+        }
+      }
+
+      int entityId = sidewallCellEntityId;
+      if (numInnerPts == 3)
+      {
+        entityId = innerSurfaceCellId;
+        numInnerCells++;
+      }
+      else if (numInnerPts == 0)
+      {
+        entityId = outerSurfaceCellId;
+        numOuterCells++;
+      }
+      else
+      {
+        numSideCells++;
+      }
+
+      wallmesh_->InsertNextCell(VTK_TRIANGLE, npts, pts);
+      cellEntityIds->InsertNextValue(entityId);
+      modelFaceIds->InsertNextValue(entityId);
+    }
+
+    wallmesh_->GetCellData()->AddArray(cellEntityIds);
+    wallmesh_->GetCellData()->AddArray(modelFaceIds);
+
+    fprintf(stdout,"  wall boundary tagged: %d interface, %d outer, %d side wall triangles\n",
+        numInnerCells, numOuterCells, numSideCells);
+  }
+
+  delete shellBehavior;
+  delete shellInMesh;
+  delete shellOutMesh;
+
+  return SV_OK;
 }
 
 /**

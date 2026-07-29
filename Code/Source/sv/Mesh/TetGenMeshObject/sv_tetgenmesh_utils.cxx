@@ -2784,6 +2784,250 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
   return SV_OK;
 }
 
+// -------------------------------------
+// TGenUtils_BuildWallShellSurface
+// -------------------------------------
+/**
+ * @brief Builds the closed surface bounding the solid wall, so the wall can be
+ * filled with tetrahedra instead of being extruded as wedges.
+ * @note The wedge extrusion ties each outer node to exactly one inner node.
+ * That tie is what forces the wall to be thinned at a junction: the outer nodes
+ * of a concave crotch converge on each other and the only way to keep the
+ * extrusion valid with a fixed node correspondence is to shorten it. Filling
+ * the volume between two surfaces has no such tie, so this builds that volume's
+ * boundary and leaves the filling to a volume mesher.
+ *
+ * The boundary is the inner surface, the outer surface at the extrusion
+ * distance along the normals, and a side wall strip closing the two along every
+ * boundary edge of the inner surface. The boundary edges are found the same way
+ * the rounding pass finds them (an edge used by a single cell), so this makes
+ * no assumption about whether the input is closed or open at the caps: an open
+ * surface is closed by the strips, and a closed one produces no strips and
+ * needs none. The inner triangles are reversed so every facet of the result
+ * faces out of the wall.
+ *
+ * The inner points are the first numPts points of the result, in the input
+ * order and at the input coordinates, so the fluid/wall interface nodes are
+ * carried through unchanged, which is what the solver requires of them.
+ * @param surface The inner surface; must have a 3-component 'Normals' point
+ * array holding the final extrusion directions.
+ * @param array The final extrusion length per point, one tuple per point.
+ * @param shell Set to the closed boundary of the wall.
+ * @param numBoundaryEdges Set to the number of boundary edges closed by a side
+ * wall strip; zero means the inner surface was already closed, in which case
+ * the result encloses the lumen as well and the caller must mark it as a hole.
+ * @return SV_OK if the shell surface is built.
+ */
+
+int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkDoubleArray *array,
+    vtkPolyData *shell, int &numBoundaryEdges)
+{
+  numBoundaryEdges = 0;
+
+  if (surface == nullptr || array == nullptr || shell == nullptr)
+  {
+    fprintf(stderr,"Cannot build the wall shell without a surface, a thickness array and an output\n");
+    return SV_ERROR;
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+
+  auto normals = surface->GetPointData()->GetArray("Normals");
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3 ||
+      normals->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface must have a 3-component 'Normals' point array to build the wall shell\n");
+    return SV_ERROR;
+  }
+
+  // The inner points keep their index so the interface nodes are recognisable
+  // in the result; the outer point of inner point i is at i + numPts.
+  auto points = vtkSmartPointer<vtkPoints>::New();
+  points->SetNumberOfPoints(2*numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double p[3];
+    surface->GetPoint(ptId, p);
+    points->SetPoint(ptId, p);
+
+    double n[3];
+    normals->GetTuple(ptId, n);
+    double len = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+    double thickness = array->GetValue(ptId);
+    double outer[3] = {p[0], p[1], p[2]};
+    if (len > 0.0)
+    {
+      for (int k = 0; k < 3; k++)
+      {
+        outer[k] = p[k] + thickness*n[k]/len;
+      }
+    }
+    points->SetPoint(ptId+numPts, outer);
+  }
+
+  auto cells = vtkSmartPointer<vtkCellArray>::New();
+
+  surface->BuildLinks();
+  auto edgeNeighbors = vtkSmartPointer<vtkIdList>::New();
+
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+
+    // The input normals point out of the lumen, so an inner triangle in its
+    // input winding faces into the wall; reversing it makes it face out.
+    vtkIdType innerTriangle[3] = {pts[2], pts[1], pts[0]};
+    cells->InsertNextCell(3, innerTriangle);
+
+    vtkIdType outerTriangle[3] = {pts[0]+numPts, pts[1]+numPts, pts[2]+numPts};
+    cells->InsertNextCell(3, outerTriangle);
+
+    // A side wall strip on every edge used by this cell alone, which is the
+    // same boundary test the rounding pass uses to pin the cap rims.
+    for (vtkIdType j = 0; j < npts; j++)
+    {
+      vtkIdType a = pts[j];
+      vtkIdType b = pts[(j+1)%npts];
+      surface->GetCellEdgeNeighbors(cellId, a, b, edgeNeighbors);
+      if (edgeNeighbors->GetNumberOfIds() != 0)
+      {
+        continue;
+      }
+      numBoundaryEdges++;
+      vtkIdType strip1[3] = {a, b, b+numPts};
+      vtkIdType strip2[3] = {a, b+numPts, a+numPts};
+      cells->InsertNextCell(3, strip1);
+      cells->InsertNextCell(3, strip2);
+    }
+  }
+
+  shell->Initialize();
+  shell->SetPoints(points);
+  shell->SetPolys(cells);
+  shell->BuildLinks();
+
+  return SV_OK;
+}
+
+// -------------------------------
+// TGenUtils_FindLumenHolePoint
+// -------------------------------
+/**
+ * @brief Finds a point strictly inside the region a closed surface encloses.
+ * @note When the wall shell's inner surface is closed it encloses the lumen as
+ * well as the wall, and the volume mesher has to be told that the lumen is not
+ * part of the wall. That is done with a point inside it, which has to be found
+ * rather than assumed: stepping a fixed distance inward from a surface point
+ * leaves the lumen wherever the vessel is thinner than the step. Instead a ray
+ * is cast inward along the normal and the midpoint of the first chord it cuts
+ * is taken, which is inside the region for any vessel width. The point whose
+ * chord is longest is used, so the result sits in the widest part of the model
+ * and is the least sensitive to a ray that grazes the surface.
+ * @param surface The closed surface; must have a 3-component 'Normals' point
+ * array with the outward point normals.
+ * @param holePoint Set to a point inside the enclosed region.
+ * @return SV_OK if a point is found.
+ */
+
+int TGenUtils_FindLumenHolePoint(vtkPolyData *surface, double holePoint[3])
+{
+  if (surface == nullptr)
+  {
+    fprintf(stderr,"Cannot find a hole point without a surface\n");
+    return SV_ERROR;
+  }
+
+  auto normals = surface->GetPointData()->GetArray("Normals");
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3)
+  {
+    fprintf(stderr,"The surface must have a 3-component 'Normals' point array to find a hole point\n");
+    return SV_ERROR;
+  }
+
+  double bounds[6];
+  surface->GetBounds(bounds);
+  double dx = bounds[1]-bounds[0], dy = bounds[3]-bounds[2], dz = bounds[5]-bounds[4];
+  double diagonal = std::sqrt(dx*dx + dy*dy + dz*dz);
+  if (diagonal <= 0.0)
+  {
+    fprintf(stderr,"The surface is degenerate; cannot find a hole point\n");
+    return SV_ERROR;
+  }
+
+  auto locator = vtkSmartPointer<vtkCellLocator>::New();
+  locator->SetDataSet(surface);
+  locator->BuildLocator();
+
+  // Stepping off the surface before casting keeps the ray from immediately
+  // hitting the triangles at its own origin.
+  const double startOffset = 1.0e-6*diagonal;
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  double bestChord = 0.0;
+  bool found = false;
+
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double n[3];
+    normals->GetTuple(ptId, n);
+    double len = std::sqrt(n[0]*n[0] + n[1]*n[1] + n[2]*n[2]);
+    if (len <= 0.0)
+    {
+      continue;
+    }
+
+    double p[3];
+    surface->GetPoint(ptId, p);
+
+    double start[3], end[3];
+    for (int k = 0; k < 3; k++)
+    {
+      double inward = -n[k]/len;
+      start[k] = p[k] + startOffset*inward;
+      end[k] = p[k] + diagonal*inward;
+    }
+
+    double t = 0.0, hit[3], pcoords[3];
+    int subId = 0;
+    if (locator->IntersectWithLine(start, end, 0.0, t, hit, pcoords, subId) == 0)
+    {
+      continue;
+    }
+
+    double chord[3] = {hit[0]-start[0], hit[1]-start[1], hit[2]-start[2]};
+    double chordLength = std::sqrt(chord[0]*chord[0] + chord[1]*chord[1] + chord[2]*chord[2]);
+    if (chordLength <= bestChord)
+    {
+      continue;
+    }
+    bestChord = chordLength;
+    for (int k = 0; k < 3; k++)
+    {
+      holePoint[k] = 0.5*(start[k] + hit[k]);
+    }
+    found = true;
+  }
+
+  if (!found)
+  {
+    fprintf(stderr,"No inward ray from the surface hit it again; cannot find a hole point\n");
+    return SV_ERROR;
+  }
+
+  return SV_OK;
+}
+
 // -------------------------------------------
 // TGenUtils_ReportAchievedWallThickness
 // -------------------------------------------
