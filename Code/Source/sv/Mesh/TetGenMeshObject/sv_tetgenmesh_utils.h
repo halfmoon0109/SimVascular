@@ -144,7 +144,9 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyDat
     vtkDoubleArray *array,
     int iterations,
     double relaxation,
-    double maxFilletRatio);
+    double maxFilletRatio,
+    double clearanceTolerance,
+    double clearanceRelaxation);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportSurfaceTriangleQuality(vtkPolyData *surface,
     const char *label);

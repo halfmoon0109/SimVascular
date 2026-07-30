@@ -3848,7 +3848,21 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
  * normal cannot see the vessel it is merging with, so without it an outer point
  * can close up against the opposite side of a junction while still reporting
  * the full thickness. Away from a junction the nearest inner point is the
- * point's own and the second push does nothing. Boundary (cap rim) points are pinned so the
+ * point's own and the second push does nothing.
+ *
+ * A flat-sided offset of a concave surface is closer to the surface than the
+ * smooth offset is, by an amount on the order of edge_length^2 / curvature -
+ * a triangulated crotch bulges inward of the true concave arc the way a chord
+ * sits inside its arc. Enforcing the clearance exactly would therefore treat
+ * that triangulation error as a violation everywhere the surface is concave,
+ * which is nearly everywhere the rounding runs at all. clearanceTolerance sets
+ * how much of a shortfall is accepted as this discretization error rather than
+ * acted on, and clearanceRelaxation damps the push into several iterations
+ * instead of one, the way the neighbor-average relaxation above already does -
+ * both matter most exactly where the clearance can never be closed at all
+ * (t/R >= 1), where an undamped, zero-tolerance push has nothing to stop it
+ * from being applied at full strength every iteration.
+ * Boundary (cap rim) points are pinned so the
  * wall stays flat at the caps. The rounded outer surface is encoded back into
  * the normals (the extrusion direction) and the thickness array (the extrusion
  * magnitude) so the existing extrusion reproduces exactly this surface; the
@@ -3868,15 +3882,35 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
  * fully concave point per iteration (between 0 and 1).
  * @param maxFilletRatio The largest multiple of the assigned thickness the
  * outer surface may bulge out to.
+ * @param clearanceTolerance The fraction of the assigned thickness that a
+ * clearance shortfall may fall within without being treated as a violation
+ * (0 disables the tolerance).
+ * @param clearanceRelaxation The fraction of the remaining shortfall corrected
+ * per iteration once the tolerance is exceeded (between 0 and 1; 1 corrects
+ * it fully in one step, matching the original behavior).
  * @return SV_OK if the outer surface is rounded.
  */
 
 int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleArray *array,
-    int iterations, double relaxation, double maxFilletRatio)
+    int iterations, double relaxation, double maxFilletRatio,
+    double clearanceTolerance, double clearanceRelaxation)
 {
   if (iterations <= 0 || relaxation <= 0.0)
   {
     return SV_OK;
+  }
+
+  if (clearanceTolerance < 0.0)
+  {
+    clearanceTolerance = 0.0;
+  }
+  if (clearanceRelaxation <= 0.0)
+  {
+    clearanceRelaxation = 1.0;
+  }
+  if (clearanceRelaxation > 1.0)
+  {
+    clearanceRelaxation = 1.0;
   }
 
   if (surface == nullptr || array == nullptr)
@@ -4103,7 +4137,16 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
       locator->FindClosestPoint(moved, closest, genericCell, closestCell,
           closestSubId, closestDistance2);
       double clearance = std::sqrt(closestDistance2);
-      if (clearance < t)
+      // A flat-sided offset of a concave surface sits inside the true smooth
+      // offset by an amount on the order of edge_length^2/curvature, so a
+      // shortfall of a few percent is triangulation error rather than a real
+      // violation - it shows up at nearly every concave point, not only the
+      // ones actually failing. Only a shortfall beyond the tolerance is acted
+      // on, and only a fraction of it is corrected per iteration, so a point
+      // whose clearance can never be closed (t/R >= 1) is nudged rather than
+      // driven to the full push every iteration with nothing to stop it.
+      double toleratedClearance = (1.0 - clearanceTolerance)*t;
+      if (clearance < toleratedClearance)
       {
         // Move away from whatever is too close, which is the direction that
         // opens the wall by the most per unit moved. A point sitting on the
@@ -4123,7 +4166,7 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
             away[k] = n[k];
           }
         }
-        double push = t - clearance;
+        double push = clearanceRelaxation*(t - clearance);
         for (int k = 0; k < 3; k++)
         {
           moved[k] += push*away[k];
