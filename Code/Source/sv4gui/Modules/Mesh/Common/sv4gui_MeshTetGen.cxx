@@ -405,6 +405,21 @@ bool sv4guiMeshTetGen::ParseCommand(std::string cmd, std::string& flag, double v
           values[0]=std::stod(params[1]);
           option=true;
         }
+        // Removed feature, kept parseable only so a project saved before its
+        // removal still replays: the GUI used to emit this option every time
+        // wall meshing ran, so it is in the command history of every such
+        // project, not only ones that changed it from its default of zero.
+        // Without this, ParseCommand hits "Unknown command" on that line and
+        // the whole history replay fails, disabling the Mesh page. The core
+        // no longer has a case for this flag either; unlike this parser, it
+        // treats an unrecognized flag as a harmless no-op (a warning, not an
+        // error), so forwarding the value there is safe.
+        else if(paramSize==2 && params[0]=="wallthicknessradiusfactor")
+        {
+          flag="WallThicknessRadiusFactor";
+          values[0]=std::stod(params[1]);
+          option=true;
+        }
         else if(paramSize==1 && params[0]=="wallmeshtetgenshell")
         {
           flag="WallMeshTetGenShell";
