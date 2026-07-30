@@ -68,6 +68,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <deque>
 #include <functional>
 #include <limits>
 #include <utility>
@@ -2780,6 +2781,203 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
     fprintf(stdout,"    ... %d further points with t/R >= 1 in the remaining %d regions\n",
         numOutside, numRegionsTotal - (int)regions.size());
   }
+
+  return SV_OK;
+}
+
+// ------------------------------------
+// TGenUtils_LimitThicknessGradation
+// ------------------------------------
+/**
+ * @brief Limits how fast the wall thickness may change from point to point, by
+ * lowering the thickness wherever it stands too far above a neighbor.
+ * @note Every pass that reduces the thickness does so at the points that need
+ * it and leaves their neighbors alone, which turns a local reduction into a
+ * cliff in the thickness field. That cliff is itself destructive: the fold
+ * prevention pass notes that an imbalance between the three points of a
+ * triangle folds it on its own, so a reduction meant to remove a fold creates
+ * the conditions for new ones. The curvature clamp dropping a point from its
+ * requested thickness to the local concave radius in one step, and the fold
+ * prevention pass levelling a triangle to its smallest thickness, are both this
+ * same act at different doses; measured, the clamp alone took the worst element
+ * aspect ratio from 1603 to 150779 while gaining nothing.
+ *
+ * The cure is to bound the gradient of the thickness field, the way a mesh
+ * sizing field is gradation-limited before it is used (MMG reports its own
+ * GRADATION for exactly this reason). This enforces
+ *
+ *     t_i <= t_j + maxSlope * |P_i - P_j|
+ *
+ * over every edge, by lowering t_i. Two properties matter and both come from
+ * only ever lowering: the pass cannot raise a thickness back above a ceiling
+ * another pass established, so it composes with the clamp and the fold
+ * prevention pass without a re-clamp afterwards; and since the values decrease
+ * monotonically and are bounded below, the relaxation terminates. This replaces
+ * the role the Laplacian thickness smoothing was meant to play - that one
+ * averages, so it raises a clamped point back above its ceiling and needs the
+ * clamp applied again, which restores the very cliff it was there to remove.
+ *
+ * A bounded gradient does not by itself guarantee a fold-free extrusion: a fold
+ * is driven by the thickness against the concave radius of curvature, which
+ * this pass does not change. It removes the cliffs, not the infeasibility.
+ * @param surface The surface the thickness belongs to.
+ * @param array The thickness point array, modified in place. Values are only
+ * ever lowered.
+ * @param maxSlope The largest allowed change in thickness per unit distance.
+ * Zero or negative disables the pass. A value of one lets the thickness change
+ * by the edge length over one edge, which is a 45 degree taper of the outer
+ * surface relative to the inner one.
+ * @param label Names the field being limited, for the log.
+ * @return SV_OK if the thickness is limited.
+ */
+
+int TGenUtils_LimitThicknessGradation(vtkPolyData *surface, vtkDoubleArray *array,
+    double maxSlope, const char *label)
+{
+  if (maxSlope <= 0.0)
+  {
+    return SV_OK;
+  }
+
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot limit the thickness gradation without a surface and an array\n");
+    return SV_ERROR;
+  }
+
+  if (label == nullptr)
+  {
+    label = "wall thickness";
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+
+  surface->BuildLinks();
+
+  // One-ring neighbors with the edge lengths, built once. The lengths are kept
+  // alongside so the relaxation below does not re-read the coordinates.
+  std::vector<std::vector<std::pair<vtkIdType,double> > > neighbors(numPts);
+  auto cellIds = vtkSmartPointer<vtkIdList>::New();
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double p[3];
+    surface->GetPoint(ptId, p);
+    auto& ptNeighbors = neighbors[ptId];
+    surface->GetPointCells(ptId, cellIds);
+    for (vtkIdType i = 0; i < cellIds->GetNumberOfIds(); i++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellIds->GetId(i), npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] == ptId)
+        {
+          continue;
+        }
+        bool seen = false;
+        for (auto& existing : ptNeighbors)
+        {
+          if (existing.first == pts[j])
+          {
+            seen = true;
+            break;
+          }
+        }
+        if (seen)
+        {
+          continue;
+        }
+        double q[3];
+        surface->GetPoint(pts[j], q);
+        double offset[3] = {q[0]-p[0], q[1]-p[1], q[2]-p[2]};
+        double distance = std::sqrt(offset[0]*offset[0] + offset[1]*offset[1] +
+            offset[2]*offset[2]);
+        ptNeighbors.push_back(std::make_pair(pts[j], distance));
+      }
+    }
+  }
+
+  std::vector<double> original(numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    original[ptId] = array->GetValue(ptId);
+  }
+
+  // A point whose thickness has just been lowered can put its own neighbors
+  // over the limit, so the lowered points are revisited rather than the whole
+  // surface being swept a fixed number of times. Every point starts queued
+  // because any of them may be the one others have to come down to.
+  std::deque<vtkIdType> queue;
+  std::vector<char> queued(numPts, 1);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    queue.push_back(ptId);
+  }
+
+  // Relative, so the guard is meaningful whatever the model units are. Without
+  // it a chain of reductions each smaller than the floating point resolution
+  // could keep requeueing points.
+  const double relativeTolerance = 1.0e-9;
+
+  while (!queue.empty())
+  {
+    vtkIdType ptId = queue.front();
+    queue.pop_front();
+    queued[ptId] = 0;
+
+    double thickness = array->GetValue(ptId);
+    for (auto& neighbor : neighbors[ptId])
+    {
+      double limit = thickness + maxSlope*neighbor.second;
+      double neighborThickness = array->GetValue(neighbor.first);
+      if (neighborThickness <= limit + relativeTolerance*std::fabs(limit))
+      {
+        continue;
+      }
+      array->SetValue(neighbor.first, limit);
+      if (!queued[neighbor.first])
+      {
+        queued[neighbor.first] = 1;
+        queue.push_back(neighbor.first);
+      }
+    }
+  }
+
+  int numLowered = 0;
+  double maxReduction = 0.0;
+  vtkIdType maxReductionId = -1;
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double reduction = original[ptId] - array->GetValue(ptId);
+    if (reduction <= 0.0)
+    {
+      continue;
+    }
+    numLowered++;
+    if (reduction > maxReduction)
+    {
+      maxReduction = reduction;
+      maxReductionId = ptId;
+    }
+  }
+
+  fprintf(stdout,"Thickness gradation limit (max change %g per unit distance) [%s]: "
+      "lowered %d of %lld points; largest reduction %.5g",
+      maxSlope, label, numLowered, (long long)numPts, maxReduction);
+  if (maxReductionId >= 0)
+  {
+    double p[3];
+    surface->GetPoint(maxReductionId, p);
+    fprintf(stdout," at (%.5g, %.5g, %.5g) (%.5g -> %.5g)", p[0], p[1], p[2],
+        original[maxReductionId], array->GetValue(maxReductionId));
+  }
+  fprintf(stdout,"\n");
 
   return SV_OK;
 }

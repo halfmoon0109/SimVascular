@@ -2459,6 +2459,15 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
     return SV_ERROR;
   }
 
+  // The largest change in wall thickness allowed per unit distance along the
+  // surface. The outer surface then tilts at most atan(slope) away from the
+  // inner one where the thickness varies, so 0.5 is a 26.6 degree taper - on
+  // the same order as the extrusion tilt that the depression diagnostic
+  // already treats as suspicious above 15 degrees, and well under the cliffs
+  // the thickness passes produce on their own (the curvature clamp was
+  // measured dropping a thickness by 2.3 times across a single edge).
+  const double wallThicknessMaxSlope = 0.5;
+
   // Clamp the thickness values in concave regions (such as the crotch
   // where two vessels merge) where a thickness larger than the concave
   // radius of curvature would make the outward extruded outer wall fold
@@ -2499,6 +2508,26 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
     }
   }
 
+  // The reclamp above restores the curvature limit at the clamped points and
+  // with it the step in the thickness the smoothing had just removed, because
+  // averaging cannot both respect a ceiling and remove a step at the point the
+  // ceiling applies to. Bound the gradient of the thickness field instead: a
+  // point standing too far above a neighbor is brought down to within the
+  // allowed slope. Because this only ever lowers, it keeps the curvature limit
+  // and every local thickness as ceilings, and no further reclamp is needed.
+  //
+  // A step in the thickness is not cosmetic. The fold prevention pass below
+  // levels a folded triangle to its smallest thickness, so a step feeds it
+  // points to level and each levelling makes the next step; measured, that
+  // turned 15 infeasible junction regions into 37 thinned ones. Bounding the
+  // gradient removes the fuel rather than the fire.
+  if (TGenUtils_LimitThicknessGradation(surface, thicknessArray,
+        wallThicknessMaxSlope, "requested wall thickness") != SV_OK)
+  {
+    fprintf(stderr,"Problem limiting the wall thickness gradation\n");
+    return SV_ERROR;
+  }
+
   // Preserve the assigned thickness at concave junctions by rounding the outer
   // wall outward into a smooth convex fillet instead of letting the fold
   // prevention pass thin it there (which reaches less far outward and so caves
@@ -2537,6 +2566,22 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   if (TGenUtils_LimitThicknessToPreventFold(surface, thicknessArray, 30) != SV_OK)
   {
     fprintf(stderr,"Problem limiting the wall thickness array to prevent the outer wall folding over\n");
+    return SV_ERROR;
+  }
+
+  // The fold prevention pass leaves the same kind of cliff behind: it levels a
+  // folded triangle to its smallest thickness and steps that value down, so a
+  // point pulled far down sits next to neighbors it never touched. Bound the
+  // gradient once more on the final field. It can only lower the thickness, and
+  // lowering it in a concave region reduces rather than creates folding, so
+  // this cannot undo the pass above. What it does undo is the crater: the
+  // levelling propagates one ring per iteration for up to thirty iterations,
+  // and a bounded gradient makes the transition it leaves a taper instead of a
+  // step that the next extrusion has to absorb.
+  if (TGenUtils_LimitThicknessGradation(surface, thicknessArray,
+        wallThicknessMaxSlope, "final wall extrusion length") != SV_OK)
+  {
+    fprintf(stderr,"Problem limiting the final wall thickness gradation\n");
     return SV_ERROR;
   }
 
