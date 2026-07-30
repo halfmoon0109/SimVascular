@@ -209,10 +209,6 @@ GenerateRadiusMeshingArray(PyUtilApiFunction& api, cvTetGenMeshObject* mesher, P
       }
   }
 
-  // Keep the centerlines so a radius-adaptive wall thickness
-  // (WallThicknessRadiusFactor) can be computed from them in GenerateWallMesh.
-  mesher->SetCenterlines(centerlines);
-
   // Compute the distance of nodes on the solid model surface to the centerlines.
   //
   // This returns a new vtkPolyData with the solid model surface geometry and

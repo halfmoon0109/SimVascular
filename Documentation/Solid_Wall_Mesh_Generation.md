@@ -88,7 +88,6 @@ option WallThickness <value>
 option NumberOfWallLayers <value>
 option WallThicknessSmoothingIterations <value>
 option WallThicknessCurvatureFactor <value>
-option WallThicknessRadiusFactor <value>
 localWallThickness <face-name> <value>
 ```
 
@@ -105,7 +104,6 @@ Python API는 `MeshingTetGenOptions_PyClass.cxx`의 다음 속성을 같은 코�
 | `number_of_wall_layers` | `NumberOfWallLayers` |
 | `wall_thickness_smoothing_iterations` | `WallThicknessSmoothingIterations` |
 | `wall_thickness_curvature_factor` | `WallThicknessCurvatureFactor` |
-| `wall_thickness_radius_factor` | `WallThicknessRadiusFactor` |
 | `local_wall_thickness` | `LocalWallThickness` |
 | `local_wall_thickness_on` | (Python 전용 boolean; `local_wall_thickness` 목록의 적용 여부) |
 
@@ -164,7 +162,6 @@ volume mesh, 유체 boundary layer가 모두 필요하다.
 | `NumberOfWallLayers` | `numwallsublayers` | `2` | 벽 두께 방향 layer 수 |
 | `WallThicknessSmoothingIterations` | `wallthicknesssmoothingiterations` | `5` | normal 및 두께 스무딩 반복 수 |
 | `WallThicknessCurvatureFactor` | `wallthicknesscurvaturefactor` | `0.8` | 오목 곡률 반경 대비 허용 두께 비율 |
-| `WallThicknessRadiusFactor` | `wallthicknessradiusfactor` | `0.0` | 국소 반경 대비 두께 비율 |
 | `LocalWallThickness` | `localWallThickness_` | 비어 있음 | `face ID → 두께` override |
 | `BoundaryLayerDirection` | `boundarylayerdirection` | `1` | 유체 boundary layer를 안쪽으로 압출 |
 
@@ -280,7 +277,6 @@ VMTK가 반환한 가장 안쪽 표면은 local 변수 `innerSurface`에 있고,
 
 ```text
 global/local 요청 두께
-  → 선택적 반경 적응 두께
   → 곡률 제한
   → Laplacian 두께 스무딩
   → 곡률 재제한
@@ -316,30 +312,6 @@ t_req(i) = ------------- × Σ t_face(f)
 
 예를 들어 두 face의 요청 두께가 `0.5`와 `1.0`이고 한 point에서 만난다면 그
 point의 초기 요청 두께는 `0.75`다. 어느 face에 triangle이 더 많은지는 무관하다.
-
-### 7.2 반경 적응 두께
-
-`wallthicknessradiusfactor = α > 0`이면 centerline까지의 거리로 국소 반경
-`R_i`를 근사한다.
-
-```text
-R_i = DistanceToCenterlines(i)
-t_radius(i) = α × R_i
-t_base(i) = clamp(t_radius(i), 0.05 × t_req(i), t_req(i))
-```
-
-`sys_geom_distancetocenterlines()`가 `DistanceToCenterlines`를 계산한다.
-centerline은 `GenerateWallMesh()`가 만들지 않으며, radius meshing 경로가
-계산한 것을 `SetCenterlines()`로 미리 전달해야 한다. radius factor가 켜졌는데
-centerline이 없거나 point 수가 맞지 않으면 벽 생성을 중단한다.
-
-상한을 global 값이 아닌 해당 point의 `t_req(i)`로 두므로 local override를
-존중한다. 5% 하한은 잘못된 반경 추정이나 작은 혈관에서 0에 가까운 두께가 생기는
-것을 막는다. radius factor가 0이면 `t_base(i) = t_req(i)`다.
-
-분지 crotch에서는 가장 가까운 centerline이 옆 branch의 centerline일 수 있으므로
-`R_i`는 근사값이다. 이 단계는 혈관 구경에 따른 두께 분배를 위한 것이며 접합부
-fold를 직접 해결하는 단계는 아니다.
 
 ## 8. 오목 영역 warp vector(normal) 스무딩
 
@@ -865,15 +837,13 @@ Linux Docker 실행 환경에서 최소한 다음을 확인한다.
 5. aspect ratio가 나쁜 상위 요소가 분지 crotch와 sliver 주변에 집중되는가.
 6. outer wall에 국소 fold 또는 떨어진 branch 사이 전역 자기 교차가 없는가.
 7. local 두께 face 경계에서 outer wall이 계단처럼 급변하지 않는가.
-8. 반경 적응 사용 시 `DistanceToCenterlines`가 branch별 실제 반경을 합리적으로
-   나타내는가.
-9. VMTK warp tilt가 큰 위치와 시각적으로 움푹 들어간 위치가 일치하는가.
-10. `t/R >= 1`인 point 수가 접합부 규모인가(형상이 요청 두께를 감당 못 함), 아니면
+8. VMTK warp tilt가 큰 위치와 시각적으로 움푹 들어간 위치가 일치하는가.
+9. `t/R >= 1`인 point 수가 접합부 규모인가(형상이 요청 두께를 감당 못 함), 아니면
     거의 없는데도 `thinned regions`가 여러 개인가(두께 패스가 원인). 구역별
     `R_typical`과 `R_smallest`가 함께 작은지(날카로운 형상), `R_smallest`만
     작은지(퇴화 삼각형 아티팩트)도 함께 본다.
-11. wall layer 수를 바꿔도 총 두께가 유지되고 두께 방향 해상도만 변하는가.
-12. cap 및 sidewall의 `ModelFaceID`가 입력 face와 일치하는가.
+10. wall layer 수를 바꿔도 총 두께가 유지되고 두께 방향 해상도만 변하는가.
+11. cap 및 sidewall의 `ModelFaceID`가 입력 face와 일치하는가.
 13. mesh-complete 출력 후에도 region, face, node, element ID가 보존되는가.
 
 Mac 개발 환경에서는 실제 SimVascular/VMTK/TetGen 빌드와 실행 성공을 단정하지

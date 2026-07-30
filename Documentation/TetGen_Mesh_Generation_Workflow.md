@@ -140,7 +140,6 @@ option WallThickness 0.5
 option NumberOfWallLayers 2
 option WallThicknessSmoothingIterations 5
 option WallThicknessCurvatureFactor 0.8
-option WallThicknessRadiusFactor 0.0
 localWallThickness wall_aorta 0.8
 generateMesh
 writeMesh
@@ -173,12 +172,6 @@ options.wall_thickness = 0.5
 options.number_of_wall_layers = 2
 options.wall_thickness_smoothing_iterations = 5
 options.wall_thickness_curvature_factor = 0.8
-# 반경 적응 두께(선택): centerline이 계산되어 있어야 한다.
-# radius_meshing_compute_centerlines 기본값은 False이므로 명시적으로 켜거나
-# radius_meshing_centerlines로 centerline을 직접 제공해야 한다.
-# options.radius_meshing_on = True
-# options.radius_meshing_compute_centerlines = True
-# options.wall_thickness_radius_factor = 0.15
 
 mesher.generate_mesh(options)
 ```
@@ -305,43 +298,9 @@ tetrahedron 변환 및 유체–고체 병합의 상세 내용은
 2. 여러 face가 만나는 point는 연결된 고유 `ModelFaceID`별 두께를 평균한다.
    local override가 없는 face는 global 두께를 쓴다.
 3. 같은 face의 triangle 수는 평균 가중치에 영향을 주지 않아야 한다.
-4. `WallThicknessRadiusFactor`가 활성화되면 반경 기반 값으로 요청 두께를
-   **조정**한다(9.2 참고). 요청 두께를 대체하지 않고 그 범위 안에서만
-   낮추므로, local 두께를 준 face는 그 값이 상한으로 유지된다.
 
 예를 들어 두 face의 두께가 각각 `0.5`, `1.0`이면 공유점의 초기 두께는
 두 face의 triangle 밀도와 관계없이 `0.75`가 되어야 한다.
-
-### 9.2 반경 적응 두께
-
-`WallThicknessRadiusFactor`가 `0`보다 크면 각 벽 node의 두께를 단일
-상수가 아니라 **국소 혈관 반경 × factor**로 설정한다. 소구경 혈관(예: PCoA)은
-자동으로 얇아지고 대구경 혈관(예: ICA)은 두꺼워져, 서로 다른 구경의 혈관이
-만나는 접합부 두께가 기하에 따라 전이된다. 하나의 face 안에서도 혈관이
-가늘어지는 만큼 두께가 변하므로, face당 상수인 local 두께로는 표현할 수 없는
-테이퍼를 처리한다.
-
-- 국소 반경은 `sys_geom_distancetocenterlines()`로 계산한 각 벽 표면 node의
-  **centerline까지의 거리**(`DistanceToCenterlines`)를 사용한다.
-- centerline은 mesher가 직접 계산하지 않는다. radius(centerline) 메싱 경로가
-  계산한 centerline을 `cvTetGenMeshObject::SetCenterlines()`로 전달받아
-  재사용한다. 따라서 이 옵션을 쓰려면 centerline이 계산되어 있어야 한다.
-  Python에서는 `radius_meshing_on`과 `radius_meshing_compute_centerlines`를
-  함께 켜거나(`radius_meshing_compute_centerlines` 기본값은 False),
-  `radius_meshing_centerlines`로 centerline을 직접 제공한다. GUI에서는
-  centerline(radius) 메싱을 켠다. centerline이 없으면 명확한 에러로 종료한다.
-- 두께는 **그 point의 요청 두께**(local 두께가 있으면 그 값, 없으면 global
-  `WallThickness`)를 상한, 그 5%를 하한으로 클램프해 반경 추정이 튀거나
-  극소혈관에서 두께가 0에 수렴하는 것을 막는다. 상한이 global이 아니라 요청
-  두께이므로 local 두께 지정과 반경 적응이 서로를 덮어쓰지 않는다. 하한이
-  5%인 것은 대동맥~뇌동맥처럼 혈관 구경이 20배 이상 차이 나는 모델에서
-  하한 자체가 반경 적응을 무력화하지 않게 하기 위한 것이다.
-- 반경 추정(`DistanceToCenterlines`)은 분지 crotch에서 가장 가까운 centerline이
-  옆 가지의 것일 수 있어 접합부에서 가장 부정확하다. 접합부 겹침(fold-over)의
-  처방으로는 쓰지 말고(9.8 참고), 혈관 구경차가 큰 모델의 두께 배분 용도로만
-  사용한다.
-- 유효 범위는 0.0~1.0이며 `0.0`이면 상수 `WallThickness`를 그대로 쓴다.
-- 표면 point 좌표(fluid/wall interface)는 이동하지 않는다.
 
 ### 9.3 오목 영역 warp vector(normal) 스무딩
 
@@ -400,7 +359,7 @@ aspect ratio, 표면 교차)은 별도로 확인해야 한다.
 
 ### 9.6 두께 스무딩
 
-local wall thickness가 존재하거나 곡률 기반 두께 제한 또는 반경 적응 두께가
+local wall thickness가 존재하거나 곡률 기반 두께 제한이
 활성화된 경우 `TGenUtils_SmoothPointArray()`가 `WallThickness` 배열을 반복
 Laplacian averaging으로 스무딩한다.
 

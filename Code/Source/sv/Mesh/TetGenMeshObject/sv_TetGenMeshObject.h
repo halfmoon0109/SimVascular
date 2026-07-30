@@ -95,7 +95,6 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
     int numwallsublayers;
     int wallthicknesssmoothingiterations;
     double wallthicknesscurvaturefactor;
-    double wallthicknessradiusfactor;
     int refinement;
     double refinedsize;
     double sphereradius;
@@ -146,12 +145,6 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
   //Set curve sizes and other mesh options
   int SetMeshOptions(char *flags,int numValues, double *values);
   void ClearLocalWallThickness();
-
-  // Store the centerlines (with a 'MaximumInscribedSphereRadius' array)
-  // used to compute a radius-adaptive wall thickness. The mesher does not
-  // compute centerlines itself; the radius meshing path (GUI or Python)
-  // computes them and passes them in with this setter.
-  void SetCenterlines(vtkPolyData* centerlines);
 
   //Set boundary layer and/or specify wall faces
   int SetBoundaryLayer(int type, int id, int side, int nL, double* H);
@@ -233,10 +226,6 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
   vtkUnstructuredGrid *boundarylayermesh_;
   vtkUnstructuredGrid *innerblmesh_;
   vtkUnstructuredGrid *wallmesh_;
-
-  // Centerlines used to compute a radius-adaptive wall thickness; set by
-  // SetCenterlines() from the radius meshing path, null if not computed.
-  vtkPolyData *centerlines_;
 
   std::set<int> wallFaceIDs_;
 
