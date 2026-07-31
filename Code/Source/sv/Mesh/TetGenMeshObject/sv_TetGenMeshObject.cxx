@@ -2825,8 +2825,15 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   catch (int r)
   {
     fprintf(stderr,"ERROR: TetGen quit with error code %d while filling the wall. The shell surface\
- is probably self-intersecting, which happens where the requested thickness exceeds the concave radius\
- of curvature at a junction; see the t/R report above\n", r);
+ self-intersects somewhere; TetGen prints the coordinates of the intersection above, so look them up in\
+ the two reports above to see which of the two causes it is. If the point is in a region listed with\
+ t/R >= 1, the requested thickness exceeds the concave radius of curvature there and the model needs a\
+ blend at that junction. If it is not, the wall has run into another vessel that happens to pass close\
+ by, and the local wall thickness on those faces has to come below half the gap - look for it in the\
+ achieved thickness report, where such a point reads far below its requested thickness while its\
+ extrusion length reads full. Note that the wedge extrusion does not reject this input, it produces\
+ self-intersecting elements from it silently, so reaching this error means the wall was already\
+ invalid there\n", r);
     delete shellBehavior;
     delete shellInMesh;
     delete shellOutMesh;
