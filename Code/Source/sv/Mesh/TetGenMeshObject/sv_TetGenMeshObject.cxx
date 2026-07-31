@@ -2544,22 +2544,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // the safety net for a degenerate input sliver that no rounding can carry.
   const double outerRoundingRelaxation = 0.5;
   const double maxFilletRatio = 3.0;
-  // A triangulated concave surface sits inside its smooth offset by roughly
-  // edge_length^2/curvature (see TGenUtils_RoundOuterWallToPreserveThickness),
-  // which read as a clearance shortfall of a few percent at nearly every
-  // concave point in practice - measured enforcing the raw clearance at 96.5%
-  // of all concave-point iterations, most of it this discretization error
-  // rather than a real violation. 10% clears that margin while still catching
-  // a wall thinned by tens of percent. Correcting only half the shortfall per
-  // iteration keeps a point whose clearance can never be closed (t/R >= 1)
-  // from being pushed at full strength every one of the iterations below,
-  // which measured as the outer surface being driven far enough to raise the
-  // worst element aspect ratio from 592 to 1603.
-  const double clearanceTolerance = 0.10;
-  const double clearanceRelaxation = 0.5;
   if (TGenUtils_RoundOuterWallToPreserveThickness(surface, thicknessArray,
-        meshoptions_.wallthicknesssmoothingiterations, outerRoundingRelaxation, maxFilletRatio,
-        clearanceTolerance, clearanceRelaxation) != SV_OK)
+        meshoptions_.wallthicknesssmoothingiterations, outerRoundingRelaxation, maxFilletRatio) != SV_OK)
   {
     fprintf(stderr,"Problem rounding the outer wall to preserve the junction thickness\n");
     return SV_ERROR;

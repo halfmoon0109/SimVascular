@@ -3838,30 +3838,24 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
  * dip's neighbors sit further out), in proportion to how concave the point is,
  * so convex and flat points and a straight tube are left unchanged. It is then
  * pushed back out so its outward (normal) distance from the inner point is
- * never below the assigned thickness, then pushed off whatever part of the
- * inner surface is nearer to it than the thickness, and capped so a very sharp
- * crotch cannot spike outward without bound.
+ * never below the assigned thickness, and capped so a very sharp crotch cannot
+ * spike outward without bound.
  *
- * The second push is what makes the thickness mean the wall rather than the
- * extrusion. The wall is at least t thick exactly when every outer point is at
- * least t from every inner point; a distance measured along a point's own
- * normal cannot see the vessel it is merging with, so without it an outer point
- * can close up against the opposite side of a junction while still reporting
- * the full thickness. Away from a junction the nearest inner point is the
- * point's own and the second push does nothing.
- *
- * A flat-sided offset of a concave surface is closer to the surface than the
- * smooth offset is, by an amount on the order of edge_length^2 / curvature -
- * a triangulated crotch bulges inward of the true concave arc the way a chord
- * sits inside its arc. Enforcing the clearance exactly would therefore treat
- * that triangulation error as a violation everywhere the surface is concave,
- * which is nearly everywhere the rounding runs at all. clearanceTolerance sets
- * how much of a shortfall is accepted as this discretization error rather than
- * acted on, and clearanceRelaxation damps the push into several iterations
- * instead of one, the way the neighbor-average relaxation above already does -
- * both matter most exactly where the clearance can never be closed at all
- * (t/R >= 1), where an undamped, zero-tolerance push has nothing to stop it
- * from being applied at full strength every iteration.
+ * This distance is measured from each point's own inner point, so it is the
+ * extrusion length and not the thickness of the wall: at a junction the outer
+ * point of one vessel can close up against the inner surface of the vessel it
+ * is merging with while its own normal distance still reads full. Enforcing
+ * the thickness against the whole inner surface was tried and removed. It is
+ * the right invariant but it cannot be reached from this representation: with
+ * one outer node tied to each inner node, no placement satisfies it wherever
+ * the thickness exceeds the concave radius of curvature, so the pass pushes
+ * points off their normals every iteration without ever converging and skews
+ * the elements instead. Measured over four variants it bought about 35% of the
+ * thickness deficit and cost an order of magnitude on the worst element aspect
+ * ratio. TGenUtils_ReportAchievedWallThickness still measures the real
+ * thickness, so the deficit stays visible; closing it needs the node
+ * correspondence dropped (a shell filled with tetrahedra, or layers terminated
+ * locally rather than thinned), not a stronger constraint here.
  * Boundary (cap rim) points are pinned so the
  * wall stays flat at the caps. The rounded outer surface is encoded back into
  * the normals (the extrusion direction) and the thickness array (the extrusion
@@ -3882,37 +3876,15 @@ int TGenUtils_LimitThicknessToPreventFold(vtkPolyData *surface, vtkDoubleArray *
  * fully concave point per iteration (between 0 and 1).
  * @param maxFilletRatio The largest multiple of the assigned thickness the
  * outer surface may bulge out to.
- * @param clearanceTolerance The fraction of the clearance target that a
- * shortfall may fall within without being treated as a violation (0 disables
- * the tolerance). The target is the assigned thickness capped by the local
- * concave radius of curvature, since no outer position can clear more than
- * that radius at a concave point.
- * @param clearanceRelaxation The fraction of the remaining shortfall corrected
- * per iteration once the tolerance is exceeded (between 0 and 1; 1 corrects
- * it fully in one step, matching the original behavior).
  * @return SV_OK if the outer surface is rounded.
  */
 
 int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleArray *array,
-    int iterations, double relaxation, double maxFilletRatio,
-    double clearanceTolerance, double clearanceRelaxation)
+    int iterations, double relaxation, double maxFilletRatio)
 {
   if (iterations <= 0 || relaxation <= 0.0)
   {
     return SV_OK;
-  }
-
-  if (clearanceTolerance < 0.0)
-  {
-    clearanceTolerance = 0.0;
-  }
-  if (clearanceRelaxation <= 0.0)
-  {
-    clearanceRelaxation = 1.0;
-  }
-  if (clearanceRelaxation > 1.0)
-  {
-    clearanceRelaxation = 1.0;
   }
 
   if (surface == nullptr || array == nullptr)
@@ -4002,28 +3974,8 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
   // neighbors above the tangent plane), zero on convex and flat points, so only
   // concave junctions are rounded. The assigned thickness is captured now
   // because the array is overwritten with the achieved distance at the end.
-  //
-  // The local concave radius of curvature is collected in the same pass. A
-  // concave point cannot be offset further than that radius whatever the
-  // extrusion does - at the radius the offset surface has collapsed onto the
-  // centre of curvature - so it is the ceiling on the clearance that can be
-  // asked for there. Demanding the full assigned thickness past that ceiling
-  // is what drives the clearance push sideways without ever satisfying it, and
-  // that sideways motion is what skews the elements: measured, the worst
-  // element aspect ratio at one such junction (t 0.615 against a radius of
-  // 0.400) reached 10504 while the wall thickness there was fine.
-  //
-  // The estimate is the median over the one-ring of 2*height/distance^2,
-  // counting a neighbor at or below the tangent plane as flat. The median is
-  // used rather than the maximum for the reason the t/R diagnostic documents:
-  // the maximum has distance^2 in the denominator and so is thrown off by a
-  // single badly shaped triangle, while the median describes the shape of the
-  // junction. A point whose one-ring is less than half concave gets no
-  // ceiling, which is correct - it is not a concave point.
   std::vector<double> weight(numPts, 0.0);
   std::vector<double> assignedThickness(numPts, 0.0);
-  std::vector<double> concaveRadius(numPts, std::numeric_limits<double>::max());
-  std::vector<double> curvatures;
   for (vtkIdType ptId = 0; ptId < numPts; ptId++)
   {
     assignedThickness[ptId] = array->GetValue(ptId);
@@ -4036,20 +3988,17 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
     surface->GetPoint(ptId, p);
     double concavitySum = 0.0;
     int concaveCount = 0;
-    curvatures.clear();
     for (auto neighborId : neighbors[ptId])
     {
       double q[3];
       surface->GetPoint(neighborId, q);
       double offset[3] = {q[0]-p[0], q[1]-p[1], q[2]-p[2]};
-      double distanceSquared = offset[0]*offset[0] + offset[1]*offset[1] + offset[2]*offset[2];
-      if (distanceSquared <= 0.0)
+      double distance = std::sqrt(offset[0]*offset[0] + offset[1]*offset[1] + offset[2]*offset[2]);
+      if (distance <= 0.0)
       {
         continue;
       }
-      double distance = std::sqrt(distanceSquared);
       double height = offset[0]*n[0] + offset[1]*n[1] + offset[2]*n[2];
-      curvatures.push_back((height <= 0.0) ? 0.0 : 2.0*height/distanceSquared);
       if (height <= 0.0)
       {
         continue;
@@ -4060,17 +4009,6 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
     if (concaveCount > 0)
     {
       weight[ptId] = concavitySum/concaveCount;
-    }
-    if (!curvatures.empty())
-    {
-      std::sort(curvatures.begin(), curvatures.end());
-      size_t middle = curvatures.size()/2;
-      double medianCurvature = (curvatures.size() % 2 == 1) ? curvatures[middle] :
-          0.5*(curvatures[middle-1] + curvatures[middle]);
-      if (medianCurvature > 0.0)
-      {
-        concaveRadius[ptId] = 1.0/medianCurvature;
-      }
     }
   }
 
@@ -4088,21 +4026,6 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
     outer[3*ptId+1] = p[1] + t*n[1];
     outer[3*ptId+2] = p[2] + t*n[2];
   }
-
-  // The thickness has to be tested against the whole inner surface, not only
-  // against each point's own inner point, so the surface needs to be
-  // searchable. It is tested against the surface rather than against its
-  // points so the result does not depend on where the vertices happen to fall.
-  // The surface never moves, so this is built once and reused every iteration.
-  auto locator = vtkSmartPointer<vtkCellLocator>::New();
-  locator->SetDataSet(surface);
-  locator->BuildLocator();
-  auto genericCell = vtkSmartPointer<vtkGenericCell>::New();
-
-  int numClearancePushed = 0;
-  int numClearanceCapped = 0;
-  double maxClearancePush = 0.0;
-  vtkIdType maxClearancePushId = -1;
 
   std::vector<double> nextOuter(outer);
   for (int iter = 0; iter < iterations; iter++)
@@ -4156,86 +4079,8 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
         h = t;
       }
 
-      // The distance above is measured from this point's own inner point, and
-      // that is not the wall thickness. At a junction the outer point of one
-      // vessel moves toward the inner surface of the vessel it is merging
-      // with, so the wall closes up against a part of the surface this point
-      // knows nothing about while its own normal distance still reads the full
-      // thickness. Enforce the thickness against the whole inner surface: the
-      // wall is at least t thick exactly when every outer point is at least t
-      // from every inner point, which is what the outward offset of the solid
-      // satisfies by construction and what a per-point normal distance cannot
-      // express. Away from a junction the closest inner point is this point's
-      // own and the test passes unchanged, so only the junctions move.
-      double closest[3];
-      vtkIdType closestCell = -1;
-      int closestSubId = 0;
-      double closestDistance2 = 0.0;
-      locator->FindClosestPoint(moved, closest, genericCell, closestCell,
-          closestSubId, closestDistance2);
-      double clearance = std::sqrt(closestDistance2);
-      // A flat-sided offset of a concave surface sits inside the true smooth
-      // offset by an amount on the order of edge_length^2/curvature, so a
-      // shortfall of a few percent is triangulation error rather than a real
-      // violation - it shows up at nearly every concave point, not only the
-      // ones actually failing. Only a shortfall beyond the tolerance is acted
-      // on, and only a fraction of it is corrected per iteration, so a point
-      // whose clearance can never be closed (t/R >= 1) is nudged rather than
-      // driven to the full push every iteration with nothing to stop it.
-      // Ask only for what the local shape can carry. Past the concave radius
-      // there is no position for the outer point that satisfies the clearance,
-      // so aiming at the full thickness there does not produce a thicker wall,
-      // it just keeps pushing the point sideways every iteration and skews the
-      // element it belongs to.
-      double clearanceTarget = t;
-      if (concaveRadius[ptId] < clearanceTarget)
-      {
-        clearanceTarget = concaveRadius[ptId];
-        numClearanceCapped++;
-      }
-      double toleratedClearance = (1.0 - clearanceTolerance)*clearanceTarget;
-      if (clearance < toleratedClearance)
-      {
-        // Move away from whatever is too close, which is the direction that
-        // opens the wall by the most per unit moved. A point sitting on the
-        // surface has no such direction, so it falls back to its own normal.
-        double away[3] = {moved[0]-closest[0], moved[1]-closest[1], moved[2]-closest[2]};
-        if (clearance > 0.0)
-        {
-          for (int k = 0; k < 3; k++)
-          {
-            away[k] /= clearance;
-          }
-        }
-        else
-        {
-          for (int k = 0; k < 3; k++)
-          {
-            away[k] = n[k];
-          }
-        }
-        double push = clearanceRelaxation*(clearanceTarget - clearance);
-        for (int k = 0; k < 3; k++)
-        {
-          moved[k] += push*away[k];
-        }
-        numClearancePushed++;
-        if (push > maxClearancePush)
-        {
-          maxClearancePush = push;
-          maxClearancePushId = ptId;
-        }
-        // The push is off the normal, so recompute the height the cap uses.
-        for (int k = 0; k < 3; k++)
-        {
-          disp[k] = moved[k]-p[k];
-        }
-        h = disp[0]*n[0] + disp[1]*n[1] + disp[2]*n[2];
-      }
-
-      // The cap is the last word: it bounds how far a very sharp crotch can
-      // spike outward, including the clearance push, so a degenerate corner
-      // cannot send an outer point off to infinity.
+      // The fillet is capped so a very sharp crotch cannot spike outward
+      // without bound.
       double maxH = maxFilletRatio*t;
       if (h > maxH)
       {
@@ -4303,26 +4148,6 @@ int TGenUtils_RoundOuterWallToPreserveThickness(vtkPolyData *surface, vtkDoubleA
     fprintf(stdout," at (%.5g, %.5g, %.5g)", p[0], p[1], p[2]);
   }
   fprintf(stdout,"\n");
-
-  // Report the clearance constraint separately from the fillet. The two answer
-  // different questions: the fillet says how far the rounding reached, and this
-  // says how often the outer surface was closing on a part of the inner surface
-  // that the fillet alone would never have noticed.
-  fprintf(stdout,"  clearance to the whole inner surface enforced at %d point updates; "
-      "largest single correction %.5g", numClearancePushed, maxClearancePush);
-  if (maxClearancePushId >= 0)
-  {
-    double p[3];
-    surface->GetPoint(maxClearancePushId, p);
-    fprintf(stdout," at (%.5g, %.5g, %.5g)", p[0], p[1], p[2]);
-  }
-  fprintf(stdout,"\n");
-  // How often the shape, not the requested thickness, decided the target. A
-  // large count here with a small count above means the junctions are being
-  // asked for what they can carry instead of being pushed at something
-  // unreachable, which is the difference between a thin wall and a skewed one.
-  fprintf(stdout,"  clearance target capped by the local concave radius at %d point updates\n",
-      numClearanceCapped);
 
   return SV_OK;
 }
