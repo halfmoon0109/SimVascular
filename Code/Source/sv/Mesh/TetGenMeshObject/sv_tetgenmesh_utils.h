@@ -210,6 +210,7 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface
     vtkDoubleArray *array,
     double targetEdgeSize,
     vtkIdType maxVoxels,
+    double maxThicknessSlope,
     vtkPolyData *outer);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildWallShellSurface(vtkPolyData *surface,

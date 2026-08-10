@@ -78,6 +78,21 @@
 #include <vector>
 #include <math.h>
 
+// The largest change in wall thickness allowed per unit distance along the
+// surface. The outer surface then tilts at most atan(slope) away from the inner
+// one where the thickness varies, so 0.5 is a 26.6 degree taper - on the same
+// order as the extrusion tilt the depression diagnostic already treats as
+// suspicious above 15 degrees, and well under the cliffs the thickness passes
+// produce on their own.
+//
+// It lives here rather than beside its first use because two paths depend on
+// it and only one of them enforces it. The wedge path applies it as a limit;
+// the shell path sizes the band around its distance field from it, and that
+// size is derived for this value and no other. Changing it in one place and not
+// the other leaves the band too thin, which the band's own check would catch
+// but only after a mesh had been run.
+static const double gWallThicknessMaxSlope = 0.5;
+
 // -----------
 // cvTetGenMeshObject for python
 // -----------
@@ -2465,14 +2480,10 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
     return SV_ERROR;
   }
 
-  // The largest change in wall thickness allowed per unit distance along the
-  // surface. The outer surface then tilts at most atan(slope) away from the
-  // inner one where the thickness varies, so 0.5 is a 26.6 degree taper - on
-  // the same order as the extrusion tilt that the depression diagnostic
-  // already treats as suspicious above 15 degrees, and well under the cliffs
-  // the thickness passes produce on their own (the curvature clamp was
-  // measured dropping a thickness by 2.3 times across a single edge).
-  const double wallThicknessMaxSlope = 0.5;
+  // Bounded once, at file scope, because the shell path's band is sized from
+  // the same number (the curvature clamp was measured dropping a thickness by
+  // 2.3 times across a single edge, which is what this exists to stop).
+  const double wallThicknessMaxSlope = gWallThicknessMaxSlope;
 
   // Clamp the thickness values in concave regions (such as the crotch
   // where two vessels merge) where a thickness larger than the concave
@@ -2797,7 +2808,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   const vtkIdType maxOffsetVoxels = 160000000;
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   if (TGenUtils_BuildOffsetOuterSurface(surface, thicknessArray,
-        meshoptions_.maxedgesize, maxOffsetVoxels, offsetOuter) != SV_OK)
+        meshoptions_.maxedgesize, maxOffsetVoxels, gWallThicknessMaxSlope, offsetOuter) != SV_OK)
   {
     fprintf(stderr,"Problem building the offset outer wall surface\n");
     return SV_ERROR;

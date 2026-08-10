@@ -3140,13 +3140,23 @@ int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
  * Used with the thickness to choose the grid spacing.
  * @param maxVoxels The largest grid to build; the spacing is coarsened until
  * the grid fits and the outcome is reported.
+ * @param maxThicknessSlope The bound the caller has already imposed on how fast
+ * the thickness may change along the surface. The band is sized from it, so a
+ * caller that does not enforce it will see the band's own check fire.
  * @param outer Set to the contoured offset surface.
  * @return SV_OK if the offset surface is built.
  */
 
 int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
-    double targetEdgeSize, vtkIdType maxVoxels, vtkPolyData *outer)
+    double targetEdgeSize, vtkIdType maxVoxels, double maxThicknessSlope, vtkPolyData *outer)
 {
+  if (maxThicknessSlope < 0.0 || maxThicknessSlope >= 1.0)
+  {
+    fprintf(stderr,"The wall thickness slope bound is %.5g; the band around the distance field is only finite for a bound below one\n",
+        maxThicknessSlope);
+    return SV_ERROR;
+  }
+
   if (surface == nullptr || array == nullptr || outer == nullptr)
   {
     fprintf(stderr,"Cannot build the offset outer surface without a surface, a thickness array and an output\n");
@@ -3294,7 +3304,8 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   {
     // Two cells wider than the widest band a triangle can mark, so a row of the
     // grid always starts outside the band and the sign it starts with is known.
-    margin = 2.0*thicknessMax + maxEdgeLength + 6.0*spacing;
+    margin = (thicknessMax + maxThicknessSlope*maxEdgeLength + 2.0*spacing)/(1.0 - maxThicknessSlope)
+        + 2.0*spacing;
     double total = 1.0;
     for (int k = 0; k < 3; k++)
     {
@@ -3394,13 +3405,16 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
     //
     //   r >= t + s(r + e) + 2h   ->   r >= (t + s*e + 2h) / (1 - s)
     //
-    // which at s = 0.5 is r >= 2t + e + 4h. Sizing the band that way makes the
-    // escape below impossible for a thickness field that varies only along the
-    // surface. It can still escape where two parts of the surface pass close to
-    // each other carrying very different thicknesses, since the limiter bounds
-    // the slope along the surface and not across the gap, which is why the
-    // check stays.
-    radius = 2.0*radius + longestEdge + 4.0*spacing;
+    // Sizing the band that way makes the escape below impossible for a
+    // thickness field that varies only along the surface. It can still escape
+    // where two parts of the surface pass close to each other carrying very
+    // different thicknesses, since the limiter bounds the slope along the
+    // surface and not across the gap, which is why the check stays.
+    //
+    // The slope is taken from the caller rather than written in here, because
+    // the caller is what enforces it and a band derived from a different number
+    // than the one enforced is a band that is quietly too thin.
+    radius = (radius + maxThicknessSlope*longestEdge + 2.0*spacing)/(1.0 - maxThicknessSlope);
 
     int begin[3], end[3];
     for (int k = 0; k < 3; k++)
