@@ -77,6 +77,7 @@
 #include "sv_vtk_utils.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <deque>
 #include <functional>
@@ -3258,6 +3259,27 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   double bounds[6];
   closed->GetBounds(bounds);
 
+  // The band a triangle marks reaches past its own edges, so the grid has to
+  // clear the model by more than the band or a row would start inside it.
+  double maxEdgeLength = 0.0;
+  for (vtkIdType cellId = 0; cellId < closed->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    closed->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+    for (vtkIdType j = 0; j < npts; j++)
+    {
+      double a[3], b[3];
+      closedPoints->GetPoint(pts[j], a);
+      closedPoints->GetPoint(pts[(j+1)%npts], b);
+      maxEdgeLength = std::max(maxEdgeLength, std::sqrt(vtkMath::Distance2BetweenPoints(a, b)));
+    }
+  }
+
   double resolution = thicknessMin;
   if (targetEdgeSize > 0.0 && targetEdgeSize < resolution)
   {
@@ -3270,9 +3292,9 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   double margin = 0.0;
   for (int attempt = 0; attempt < 64; attempt++)
   {
-    // Two cells wider than the widest band a triangle can mark, so the grid
-    // corners the outside flood starts from are never part of the band.
-    margin = 1.25*thicknessMax + 5.0*spacing;
+    // Two cells wider than the widest band a triangle can mark, so a row of the
+    // grid always starts outside the band and the sign it starts with is known.
+    margin = 2.0*thicknessMax + maxEdgeLength + 6.0*spacing;
     double total = 1.0;
     for (int k = 0; k < 3; k++)
     {
@@ -3320,7 +3342,13 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   // they are idempotent writes, and what the band buys is that the distance is
   // only evaluated where it can matter.
   std::vector<unsigned char> state(numVoxels, 0);
-  const unsigned char kUnknown = 0, kBand = 1, kOutside = 2;
+  const unsigned char kBand = 1;
+
+  // This pass and the distance evaluation after it are the two that scale with
+  // the grid, and how long they take decides whether the offset is affordable
+  // on a larger model than the one it was written against. Timing them costs
+  // nothing and answers that from the log rather than from a guess.
+  auto markStart = std::chrono::steady_clock::now();
 
   for (vtkIdType cellId = 0; cellId < closed->GetNumberOfCells(); cellId++)
   {
@@ -3334,6 +3362,7 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
 
     double lo[3] = {0.0, 0.0, 0.0}, hi[3] = {0.0, 0.0, 0.0};
     double radius = 0.0;
+    double corners[3][3];
     for (vtkIdType j = 0; j < npts; j++)
     {
       double p[3];
@@ -3342,15 +3371,36 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
       {
         if (j == 0 || p[k] < lo[k]) { lo[k] = p[k]; }
         if (j == 0 || p[k] > hi[k]) { hi[k] = p[k]; }
+        corners[j][k] = p[k];
       }
       radius = std::max(radius, closedThickness[(size_t)pts[j]]);
     }
 
-    // The band has to reach past the level set on both sides, and the value at
-    // a voxel uses the thickness of its nearest point, which need not be one of
-    // this triangle's. The quarter of slack absorbs that difference where the
-    // thickness varies; the fill below checks that it was in fact enough.
-    radius = 1.25*radius + 3.0*spacing;
+    double longestEdge = 0.0;
+    for (int j = 0; j < 3; j++)
+    {
+      longestEdge = std::max(longestEdge,
+          std::sqrt(vtkMath::Distance2BetweenPoints(corners[j], corners[(j+1)%3])));
+    }
+
+    // How far the band has to reach is not the thickness on this triangle. A
+    // voxel takes its thickness from whichever surface point is nearest, which
+    // need not be one of these three, and the level set sits at that thickness.
+    //
+    // The gradation limiter has already bounded how fast the thickness can
+    // change along the surface, at slope s. A point the band can reach is
+    // within r + e of this triangle, so the thickness there is at most
+    // t + s(r + e), and the band has to hold that plus a cell on each side:
+    //
+    //   r >= t + s(r + e) + 2h   ->   r >= (t + s*e + 2h) / (1 - s)
+    //
+    // which at s = 0.5 is r >= 2t + e + 4h. Sizing the band that way makes the
+    // escape below impossible for a thickness field that varies only along the
+    // surface. It can still escape where two parts of the surface pass close to
+    // each other carrying very different thicknesses, since the limiter bounds
+    // the slope along the surface and not across the gap, which is why the
+    // check stays.
+    radius = 2.0*radius + longestEdge + 4.0*spacing;
 
     int begin[3], end[3];
     for (int k = 0; k < 3; k++)
@@ -3373,6 +3423,8 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
       }
     }
   }
+
+  double markSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - markStart).count();
 
   auto implicit = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
   implicit->SetInput(closed);
@@ -3412,6 +3464,7 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
 
   double farValue = thicknessMax + (bounds[1]-bounds[0]) + (bounds[3]-bounds[2]) + (bounds[5]-bounds[4]);
   size_t numBandVoxels = 0;
+  auto evaluateStart = std::chrono::steady_clock::now();
 
   for (int k = 0; k < dims[2]; k++)
   {
@@ -3437,79 +3490,52 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
 
   // Everything the band does not cover is either well outside the offset or
   // inside the lumen, and the two need opposite signs or the contour would find
-  // a sheet between them. The band is at least two cells thick and closed
-  // around the model, so a flood that starts outside cannot leak through it.
-  std::deque<size_t> queue;
-  const int cornerIndex[8][3] = {{0,0,0}, {1,0,0}, {0,1,0}, {1,1,0},
-                                 {0,0,1}, {1,0,1}, {0,1,1}, {1,1,1}};
-  for (int c = 0; c < 8; c++)
-  {
-    size_t i = (size_t)(cornerIndex[c][0] ? dims[0]-1 : 0);
-    size_t j = (size_t)(cornerIndex[c][1] ? dims[1]-1 : 0);
-    size_t k = (size_t)(cornerIndex[c][2] ? dims[2]-1 : 0);
-    size_t index = i + (size_t)dims[0]*(j + (size_t)dims[1]*k);
-    if (state[index] == kUnknown)
-    {
-      state[index] = kOutside;
-      queue.push_back(index);
-    }
-  }
-
-  if (queue.empty())
-  {
-    fprintf(stderr,"Every corner of the distance grid is inside the evaluated band, so there is nowhere to start the outside flood from and the lumen cannot be told from the exterior\n");
-    return SV_ERROR;
-  }
-
-  while (!queue.empty())
-  {
-    size_t index = queue.front();
-    queue.pop_front();
-
-    int i = (int)(index % (size_t)dims[0]);
-    int j = (int)((index / (size_t)dims[0]) % (size_t)dims[1]);
-    int k = (int)(index / ((size_t)dims[0]*(size_t)dims[1]));
-
-    const int step[6][3] = {{-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1}};
-    for (int s = 0; s < 6; s++)
-    {
-      int ni = i + step[s][0], nj = j + step[s][1], nk = k + step[s][2];
-      if (ni < 0 || ni >= dims[0] || nj < 0 || nj >= dims[1] || nk < 0 || nk >= dims[2])
-      {
-        continue;
-      }
-      size_t neighbor = (size_t)ni + (size_t)dims[0]*((size_t)nj + (size_t)dims[1]*(size_t)nk);
-      if (state[neighbor] != kUnknown)
-      {
-        continue;
-      }
-      state[neighbor] = kOutside;
-      queue.push_back(neighbor);
-    }
-  }
-
+  // a sheet between them. Which one a voxel is follows from the last band voxel
+  // the row passed through: the band is closed around the model and at least
+  // two cells thick, so a row cannot get from one side to the other without
+  // crossing it, and the sign it crossed on is the sign it carries until it
+  // crosses again. Each row starts outside, because the margin clears the model
+  // by more than the band.
+  //
+  // Sweeping the rows this way rather than flooding the grid from a corner
+  // costs one sequential pass instead of a breadth-first walk over a hundred
+  // million voxels, and it removes the question of whether a seed corner was
+  // available to start from.
   size_t numInside = 0;
-  for (size_t index = 0; index < numVoxels; index++)
+  for (int k = 0; k < dims[2]; k++)
   {
-    if (state[index] == kBand)
+    for (int j = 0; j < dims[1]; j++)
     {
-      continue;
-    }
-    if (state[index] == kOutside)
-    {
-      values->SetValue((vtkIdType)index, (float)farValue);
-    }
-    else
-    {
-      values->SetValue((vtkIdType)index, (float)(-farValue));
-      numInside++;
+      size_t index = (size_t)dims[0]*((size_t)j + (size_t)dims[1]*(size_t)k);
+      bool inside = false;
+      for (int i = 0; i < dims[0]; i++, index++)
+      {
+        if (state[index] == kBand)
+        {
+          inside = (values->GetValue((vtkIdType)index) < 0.0);
+          continue;
+        }
+        if (inside)
+        {
+          values->SetValue((vtkIdType)index, (float)(-farValue));
+          numInside++;
+        }
+        else
+        {
+          values->SetValue((vtkIdType)index, (float)farValue);
+        }
+      }
     }
   }
+
+  double evaluateSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - evaluateStart).count();
 
   fprintf(stdout,"  distance evaluated at %zu band voxels; %zu enclosed and %zu outside voxels filled by sign\n",
       numBandVoxels, numInside, numVoxels - numBandVoxels - numInside);
+  fprintf(stdout,"  %.1f s marking the band, %.1f s evaluating and filling it\n",
+      markSeconds, evaluateSeconds);
 
-  // The signs the fill wrote are only right if the level set stayed inside the
+  // The signs the sweep wrote are only right if the level set stayed inside the
   // band. Where it did not, a band voxel sits against a filled one of the
   // opposite sign and the contour would follow the edge of the band instead of
   // the offset. That is a wrong surface rather than a rough one, so it is
@@ -3541,8 +3567,7 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
           {
             continue;
           }
-          double filled = (state[neighbor] == kOutside) ? farValue : -farValue;
-          if ((value < 0.0) != (filled < 0.0))
+          if ((value < 0.0) != (values->GetValue((vtkIdType)neighbor) < 0.0))
           {
             numStraddling++;
             break;
@@ -3554,7 +3579,7 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
 
   if (numStraddling > 0)
   {
-    fprintf(stderr,"The offset level set leaves the evaluated band at %zu voxels, so the band around the surface is too thin to hold it. This happens when the wall thickness varies faster than the band allows for; contouring it would follow the edge of the band rather than the offset.\n",
+    fprintf(stderr,"The offset level set leaves the evaluated band at %zu voxels, so the band around the surface is too thin to hold it. The band is sized so that a thickness varying along the surface within the gradation limit cannot do this, which leaves the case it cannot cover: two parts of the surface passing within a wall of each other while carrying very different thicknesses. Evening out the local wall thickness between those faces is what fixes it.\n",
         numStraddling);
     return SV_ERROR;
   }
@@ -3565,6 +3590,8 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   image->SetSpacing(spacing, spacing, spacing);
   image->GetPointData()->SetScalars(values);
 
+  auto contourStart = std::chrono::steady_clock::now();
+
   auto contour = vtkSmartPointer<vtkFlyingEdges3D>::New();
   contour->SetInputData(image);
   contour->SetValue(0, 0.0);
@@ -3572,6 +3599,9 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   contour->ComputeGradientsOff();
   contour->ComputeScalarsOff();
   contour->Update();
+
+  fprintf(stdout,"  %.1f s contouring\n",
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - contourStart).count());
 
   if (contour->GetOutput()->GetNumberOfCells() == 0)
   {
