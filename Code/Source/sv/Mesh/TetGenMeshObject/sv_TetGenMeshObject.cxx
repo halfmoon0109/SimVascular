@@ -2842,6 +2842,27 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     return SV_ERROR;
   }
 
+  // Measure the wall the offset actually makes, now that it has been remeshed
+  // and trimmed and is the surface the fill will use. Both directions are
+  // reported because they answer different questions: outward checks that the
+  // construction kept the thickness through the grid and the remesh, inward is
+  // the wall standing over the interface.
+  if (TGenUtils_ReportOffsetWallThickness(surface, thicknessArray, offsetOuter,
+        "solid wall, offset") != SV_OK)
+  {
+    fprintf(stderr,"Problem reporting the offset wall thickness\n");
+    return SV_ERROR;
+  }
+
+  // The ratio is a field over the interface, and the log has room for eight
+  // regions of it. Writing it out is the only way to see whether a shortfall is
+  // one junction or all of them.
+  {
+    char offsetDiagnosticsFile[] = "wall_offset_diagnostics.vtp";
+    TGenUtils_WriteVTP(offsetDiagnosticsFile, surface);
+  }
+  surface->GetPointData()->RemoveArray("OffsetThicknessRatio");
+
   auto shell = vtkSmartPointer<vtkPolyData>::New();
   int numDegenerate = 0;
   if (TGenUtils_BuildWallShellSurface(surface, offsetOuter, caps, shell, numDegenerate) != SV_OK)
@@ -2915,16 +2936,18 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   }
   catch (int r)
   {
-    fprintf(stderr,"ERROR: TetGen quit with error code %d while filling the wall. The shell surface\
- self-intersects somewhere; TetGen prints the coordinates of the intersection above, so look them up in\
- the two reports above to see which of the two causes it is. If the point is in a region listed with\
- t/R >= 1, the requested thickness exceeds the concave radius of curvature there and the model needs a\
- blend at that junction. If it is not, the wall has run into another vessel that happens to pass close\
- by, and the local wall thickness on those faces has to come below half the gap - look for it in the\
- achieved thickness report, where such a point reads far below its requested thickness while its\
- extrusion length reads full. Note that the wedge extrusion does not reject this input, it produces\
- self-intersecting elements from it silently, so reaching this error means the wall was already\
- invalid there\n", r);
+    fprintf(stderr,"ERROR: TetGen quit with error code %d while filling the wall. The shell it was\
+ given is the inner surface, the offset surface, and the annulus closing the two at each vessel end;\
+ TetGen prints the coordinates of the intersection above, so look them up to see which of the three it\
+ is in. It is not the junction problem the extrusion had: the offset surface is a level set and cannot\
+ fold onto itself, and where two walls would run into each other it merges them rather than crossing\
+ them. Check the annulus first. It is the only part not built by the offset, it is triangulated by\
+ angle about the cap axis, and that ordering only exists for a rim that winds once about its own\
+ centre; a rim that got past that check but is close to failing it shows up as the zero-area end\
+ triangles counted above. Otherwise the inner surface is self-intersecting and the wall has inherited\
+ it - see the interface triangle quality report. Note that two vessels closer together than twice the\
+ wall thickness do not fail here at all, they fuse into one solid, which reads in the offset thickness\
+ report as an interface region carrying far more wall than was asked for\n", r);
     delete shellBehavior;
     delete shellInMesh;
     delete shellOutMesh;

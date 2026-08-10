@@ -4596,6 +4596,239 @@ int TGenUtils_ReportAchievedWallThickness(vtkPolyData *surface, vtkDoubleArray *
 }
 
 // -----------------------------------------
+// TGenUtils_ReportOffsetWallThickness
+// -----------------------------------------
+/**
+ * @brief Reports the wall the offset surface actually produces, from both
+ * sides.
+ * @note The extrusion's report divides the clearance of each extruded point by
+ * what was asked for, which needs every outer point to belong to one inner
+ * point. The offset surface has no such relation, so the wall it makes has to
+ * be measured as the distance between two surfaces, and the two directions of
+ * that distance answer different questions.
+ *
+ * Outward, every point of the offset is at the requested distance from the
+ * inner surface by construction, so measuring it checks the construction rather
+ * than the wall: the grid the level set was contoured on has a spacing, and the
+ * remesh that followed moved the points again. A shortfall here is that error,
+ * and it is the one thing that can quietly eat the thickness this whole
+ * approach exists to keep.
+ *
+ * Inward, the nearest offset point to an inner point is the wall over it. This
+ * is the thickness in the sense that matters, and it is not the same number: at
+ * a concave junction the offset creases outward, so the wall there comes out
+ * thicker than requested, the way the outside of a welded joint fills with
+ * material. A ratio below one on this side means wall is missing.
+ * @param surface The inner surface.
+ * @param array The requested thickness per inner surface point.
+ * @param outer The trimmed offset surface.
+ * @param label Names the wall in the report.
+ * @return SV_OK if both directions were measured.
+ */
+
+int TGenUtils_ReportOffsetWallThickness(vtkPolyData *surface, vtkDoubleArray *array,
+    vtkPolyData *outer, const char *label)
+{
+  if (surface == nullptr || array == nullptr || outer == nullptr)
+  {
+    fprintf(stderr,"Cannot report the offset wall thickness without both surfaces and a thickness array\n");
+    return SV_ERROR;
+  }
+
+  if (label == nullptr)
+  {
+    label = "wall";
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per inner surface point\n");
+    return SV_ERROR;
+  }
+
+  auto innerCells = vtkSmartPointer<vtkCellLocator>::New();
+  innerCells->SetDataSet(surface);
+  innerCells->BuildLocator();
+
+  auto outerCells = vtkSmartPointer<vtkCellLocator>::New();
+  outerCells->SetDataSet(outer);
+  outerCells->BuildLocator();
+
+  auto innerPoints = vtkSmartPointer<vtkStaticPointLocator>::New();
+  innerPoints->SetDataSet(surface);
+  innerPoints->BuildLocator();
+
+  auto genericCell = vtkSmartPointer<vtkGenericCell>::New();
+
+  fprintf(stdout,"Offset wall thickness [%s]:\n", label);
+
+  // Outward: how far each offset point ended up from the inner surface against
+  // the thickness asked for where it sits.
+  {
+    vtkIdType numOuterPts = outer->GetNumberOfPoints();
+    std::vector<double> ratio((size_t)numOuterPts, 1.0);
+    std::vector<std::pair<double,vtkIdType> > flagged;
+    int numBelow90 = 0, numBelow50 = 0, numBelow25 = 0, numMeasured = 0;
+    double worst = 0.0;
+
+    for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
+    {
+      double x[3];
+      outer->GetPoint(ptId, x);
+
+      vtkIdType nearest = innerPoints->FindClosestPoint(x);
+      if (nearest < 0)
+      {
+        continue;
+      }
+      double want = array->GetValue(nearest);
+      if (want <= 0.0)
+      {
+        continue;
+      }
+
+      double closest[3];
+      vtkIdType cellId = -1;
+      int subId = 0;
+      double distanceSquared = 0.0;
+      innerCells->FindClosestPoint(x, closest, genericCell, cellId, subId, distanceSquared);
+
+      double value = std::sqrt(distanceSquared)/want;
+      ratio[(size_t)ptId] = value;
+      numMeasured++;
+      if (numMeasured == 1 || value < worst)
+      {
+        worst = value;
+      }
+      if (value < 0.90) { numBelow90++; flagged.push_back(std::make_pair(value, ptId)); }
+      if (value < 0.50) { numBelow50++; }
+      if (value < 0.25) { numBelow25++; }
+    }
+
+    fprintf(stdout,"  offset surface to inner surface, over %d of its points: below 90%%/50%%/25%% of the requested thickness at %d/%d/%d, worst %.3f\n",
+        numMeasured, numBelow90, numBelow50, numBelow25, worst);
+    fprintf(stdout,"    this is the construction, not the shape: the level set puts every one of these points at the requested distance, so a shortfall is the grid spacing or the remesh giving it back\n");
+
+    if (!flagged.empty())
+    {
+      const int maxRegions = 8;
+      const double radiusFraction = 0.02;
+      std::vector<TGenUtilsPointRegion> regions;
+      double regionRadius = 0.0;
+      int numOutside = 0, numRegionsTotal = 0;
+      if (TGenUtils_ClusterPointsIntoRegions(outer, flagged, maxRegions, radiusFraction,
+            regions, regionRadius, numOutside, numRegionsTotal) != SV_OK)
+      {
+        fprintf(stderr,"Problem clustering the offset points that fell short of the requested thickness\n");
+        return SV_ERROR;
+      }
+      fprintf(stdout,"    regions below 90%%: %d in total (separated by %.4g), worst %d shown:\n",
+          numRegionsTotal, regionRadius, (int)regions.size());
+      for (size_t i = 0; i < regions.size(); i++)
+      {
+        double seed[3];
+        outer->GetPoint(regions[i].seedId, seed);
+        fprintf(stdout,"      [%d] ratio %.3f at (%.5g, %.5g, %.5g), %d points\n",
+            (int)(i+1), ratio[(size_t)regions[i].seedId], seed[0], seed[1], seed[2],
+            regions[i].numPoints);
+      }
+      if (numOutside > 0)
+      {
+        fprintf(stdout,"      ... %d further points in the remaining %d regions\n",
+            numOutside, numRegionsTotal - (int)regions.size());
+      }
+    }
+  }
+
+  // Inward: the wall standing over each point of the fluid/wall interface.
+  {
+    std::vector<double> ratio((size_t)numPts, 1.0);
+    std::vector<std::pair<double,vtkIdType> > flagged;
+    int numBelow90 = 0, numBelow50 = 0, numBelow25 = 0, numMeasured = 0;
+    double worst = 0.0, thickest = 0.0;
+
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      double want = array->GetValue(ptId);
+      if (want <= 0.0)
+      {
+        continue;
+      }
+
+      double p[3];
+      surface->GetPoint(ptId, p);
+
+      double closest[3];
+      vtkIdType cellId = -1;
+      int subId = 0;
+      double distanceSquared = 0.0;
+      outerCells->FindClosestPoint(p, closest, genericCell, cellId, subId, distanceSquared);
+
+      double value = std::sqrt(distanceSquared)/want;
+      ratio[(size_t)ptId] = value;
+      numMeasured++;
+      if (numMeasured == 1 || value < worst) { worst = value; }
+      if (value > thickest) { thickest = value; }
+      if (value < 0.90) { numBelow90++; flagged.push_back(std::make_pair(value, ptId)); }
+      if (value < 0.50) { numBelow50++; }
+      if (value < 0.25) { numBelow25++; }
+    }
+
+    fprintf(stdout,"  inner surface to offset surface, over %d of its points: below 90%%/50%%/25%% at %d/%d/%d, worst %.3f, thickest %.2fx requested\n",
+        numMeasured, numBelow90, numBelow50, numBelow25, worst, thickest);
+    fprintf(stdout,"    this is the wall over the interface. Above one at a junction is the crease filling it, which is intended; below one is wall that is missing\n");
+
+    auto ratioArray = vtkSmartPointer<vtkDoubleArray>::New();
+    ratioArray->SetName("OffsetThicknessRatio");
+    ratioArray->SetNumberOfComponents(1);
+    ratioArray->SetNumberOfTuples(numPts);
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      ratioArray->SetValue(ptId, ratio[(size_t)ptId]);
+    }
+    surface->GetPointData()->RemoveArray("OffsetThicknessRatio");
+    surface->GetPointData()->AddArray(ratioArray);
+
+    if (flagged.empty())
+    {
+      fprintf(stdout,"    every interface point carries at least 90%% of its requested wall\n");
+      return SV_OK;
+    }
+
+    const int maxRegions = 8;
+    const double radiusFraction = 0.02;
+    std::vector<TGenUtilsPointRegion> regions;
+    double regionRadius = 0.0;
+    int numOutside = 0, numRegionsTotal = 0;
+    if (TGenUtils_ClusterPointsIntoRegions(surface, flagged, maxRegions, radiusFraction,
+          regions, regionRadius, numOutside, numRegionsTotal) != SV_OK)
+    {
+      fprintf(stderr,"Problem clustering the interface points whose wall fell short\n");
+      return SV_ERROR;
+    }
+    fprintf(stdout,"    regions below 90%%: %d in total (separated by %.4g), worst %d shown:\n",
+        numRegionsTotal, regionRadius, (int)regions.size());
+    for (size_t i = 0; i < regions.size(); i++)
+    {
+      vtkIdType seedId = regions[i].seedId;
+      double seed[3];
+      surface->GetPoint(seedId, seed);
+      fprintf(stdout,"      [%d] ratio %.3f (requested %.5g) at (%.5g, %.5g, %.5g), %d points\n",
+          (int)(i+1), ratio[(size_t)seedId], array->GetValue(seedId),
+          seed[0], seed[1], seed[2], regions[i].numPoints);
+    }
+    if (numOutside > 0)
+    {
+      fprintf(stdout,"      ... %d further points in the remaining %d regions\n",
+          numOutside, numRegionsTotal - (int)regions.size());
+    }
+  }
+
+  return SV_OK;
+}
+
+// -----------------------------------------
 // TGenUtils_LimitThicknessToPreventFold
 // -----------------------------------------
 /**

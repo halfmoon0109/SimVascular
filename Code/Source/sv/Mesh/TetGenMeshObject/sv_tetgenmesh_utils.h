@@ -225,4 +225,9 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_ReportAchievedWallThickness(vtkPolyData *sur
     const std::vector<double> &requested,
     const char *label);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_ReportOffsetWallThickness(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    vtkPolyData *outer,
+    const char *label);
+
 #endif //__CV_TETGENMESH_UTILS_H
