@@ -4756,7 +4756,9 @@ int TGenUtils_ReportOffsetWallThickness(vtkPolyData *surface, vtkDoubleArray *ar
   {
     std::vector<double> ratio((size_t)numPts, 1.0);
     std::vector<std::pair<double,vtkIdType> > flagged;
+    std::vector<std::pair<double,vtkIdType> > flaggedThick;
     int numBelow90 = 0, numBelow50 = 0, numBelow25 = 0, numMeasured = 0;
+    int numAbove2 = 0;
     double worst = 0.0, thickest = 0.0;
 
     for (vtkIdType ptId = 0; ptId < numPts; ptId++)
@@ -4784,11 +4786,52 @@ int TGenUtils_ReportOffsetWallThickness(vtkPolyData *surface, vtkDoubleArray *ar
       if (value < 0.90) { numBelow90++; flagged.push_back(std::make_pair(value, ptId)); }
       if (value < 0.50) { numBelow50++; }
       if (value < 0.25) { numBelow25++; }
+
+      // The high tail is the only signal there is for two walls having merged.
+      // A level set does not cross itself, so vessels closer together than
+      // twice the wall never produce an error - the space between them simply
+      // fills in and the mesh that comes out is valid and wrong. It reads here
+      // as an interface carrying several times the wall it asked for, which a
+      // junction crease also does, so the two are reported together by
+      // location for the eye to separate.
+      if (value > 2.0) { numAbove2++; flaggedThick.push_back(std::make_pair(-value, ptId)); }
     }
 
     fprintf(stdout,"  inner surface to offset surface, over %d of its points: below 90%%/50%%/25%% at %d/%d/%d, worst %.3f, thickest %.2fx requested\n",
         numMeasured, numBelow90, numBelow50, numBelow25, worst, thickest);
     fprintf(stdout,"    this is the wall over the interface. Above one at a junction is the crease filling it, which is intended; below one is wall that is missing\n");
+
+    if (!flaggedThick.empty())
+    {
+      const int maxThickRegions = 8;
+      const double thickRadiusFraction = 0.02;
+      std::vector<TGenUtilsPointRegion> thickRegions;
+      double thickRadius = 0.0;
+      int numThickOutside = 0, numThickTotal = 0;
+      if (TGenUtils_ClusterPointsIntoRegions(surface, flaggedThick, maxThickRegions,
+            thickRadiusFraction, thickRegions, thickRadius, numThickOutside, numThickTotal) != SV_OK)
+      {
+        fprintf(stderr,"Problem clustering the interface points carrying more wall than requested\n");
+        return SV_ERROR;
+      }
+      fprintf(stdout,"    %d points carry more than twice the wall asked for, in %d regions (separated by %.4g), thickest %d shown:\n",
+          numAbove2, numThickTotal, thickRadius, (int)thickRegions.size());
+      for (size_t i = 0; i < thickRegions.size(); i++)
+      {
+        vtkIdType seedId = thickRegions[i].seedId;
+        double seed[3];
+        surface->GetPoint(seedId, seed);
+        fprintf(stdout,"      [%d] ratio %.2f (requested %.5g) at (%.5g, %.5g, %.5g), %d points\n",
+            (int)(i+1), ratio[(size_t)seedId], array->GetValue(seedId),
+            seed[0], seed[1], seed[2], thickRegions[i].numPoints);
+      }
+      if (numThickOutside > 0)
+      {
+        fprintf(stdout,"      ... %d further points in the remaining %d regions\n",
+            numThickOutside, numThickTotal - (int)thickRegions.size());
+      }
+      fprintf(stdout,"      a region at a branch crotch is the crease and is expected; a region on the plain side of a vessel means the wall has reached another vessel passing close by, and the local wall thickness on those faces has to come below half the gap\n");
+    }
 
     auto ratioArray = vtkSmartPointer<vtkDoubleArray>::New();
     ratioArray->SetName("OffsetThicknessRatio");
