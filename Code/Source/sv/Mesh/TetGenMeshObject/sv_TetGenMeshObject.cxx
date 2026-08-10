@@ -2885,6 +2885,28 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       fprintf(stderr,"The remesh of the offset outer wall surface produced nothing\n");
       return SV_ERROR;
     }
+
+    // The remesher hands back a surface whose points have been split at every
+    // edge sharper than thirty degrees, because it computes normals with
+    // splitting on. The duplicates sit exactly on top of each other, so nothing
+    // has moved, but the surface is no longer joined along those edges: every
+    // one of them reads as a boundary when the cap rims are walked, and every
+    // duplicate reads as a repeated vertex to the volume mesher, which
+    // renumbers its input when it finds them and would take the ordering the
+    // wall tagging depends on with it. Merging them back costs nothing here.
+    auto splitMerger = vtkSmartPointer<vtkCleanPolyData>::New();
+    splitMerger->SetInputData(offsetOuter);
+    splitMerger->Update();
+
+    vtkIdType numSplitPoints = offsetOuter->GetNumberOfPoints();
+    auto merged = vtkSmartPointer<vtkPolyData>::New();
+    merged->SetPoints(splitMerger->GetOutput()->GetPoints());
+    merged->SetPolys(splitMerger->GetOutput()->GetPolys());
+    offsetOuter->DeepCopy(merged);
+
+    fprintf(stdout,"  the remesh returned %lld points split along its sharp edges, merged back to %lld\n",
+        (long long)numSplitPoints, (long long)offsetOuter->GetNumberOfPoints());
+
     TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "offset outer wall, after remesh");
   }
 #else

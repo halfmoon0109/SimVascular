@@ -3573,14 +3573,42 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   contour->ComputeScalarsOff();
   contour->Update();
 
-  outer->Initialize();
-  outer->DeepCopy(contour->GetOutput());
-
-  if (outer->GetNumberOfCells() == 0)
+  if (contour->GetOutput()->GetNumberOfCells() == 0)
   {
     fprintf(stderr,"The offset level set is empty, so no outer wall surface was produced\n");
     return SV_ERROR;
   }
+
+  // Marching cubes puts each vertex where the level set crosses a grid edge, so
+  // wherever the level set passes close to a grid corner the vertices coming
+  // off the edges that meet there arrive on top of each other and the triangle
+  // between them has almost no area. On a surface of this size that is not a
+  // possibility but a certainty, and the triangles are the kind a remesher
+  // rejects rather than repairs. Collapsing anything closer together than a
+  // hundredth of a cell removes them; the surface does not move, because the
+  // points being merged were already at the same place to that tolerance, and
+  // no hole is left behind, because a triangle whose vertices merge is an edge
+  // collapse rather than a deletion.
+  auto degenerateCleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+  degenerateCleaner->SetInputData(contour->GetOutput());
+  degenerateCleaner->ToleranceIsAbsoluteOn();
+  degenerateCleaner->SetAbsoluteTolerance(0.01*spacing);
+  degenerateCleaner->Update();
+
+  vtkIdType numContourCells = contour->GetOutput()->GetNumberOfCells();
+
+  outer->Initialize();
+  outer->SetPoints(degenerateCleaner->GetOutput()->GetPoints());
+  outer->SetPolys(degenerateCleaner->GetOutput()->GetPolys());
+
+  if (outer->GetNumberOfCells() == 0)
+  {
+    fprintf(stderr,"Removing the degenerate contour triangles left no outer wall surface\n");
+    return SV_ERROR;
+  }
+
+  fprintf(stdout,"  %lld of the %lld contour triangles were degenerate and collapsed\n",
+      (long long)(numContourCells - outer->GetNumberOfCells()), (long long)numContourCells);
 
   // More than one shell means the offset is not simply the outside of the wall:
   // a thickness large enough to close a lumen leaves a sheet inside it, and a
