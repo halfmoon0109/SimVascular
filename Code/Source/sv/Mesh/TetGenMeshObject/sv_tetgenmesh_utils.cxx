@@ -59,6 +59,12 @@
 #include "vtkConnectivityFilter.h"
 #include "vtkDataSetSurfaceFilter.h"
 #include "vtkMeshQuality.h"
+#include "vtkFloatArray.h"
+#include "vtkImageData.h"
+#include "vtkImplicitPolyDataDistance.h"
+#include "vtkFlyingEdges3D.h"
+#include "vtkStaticPointLocator.h"
+#include "vtkPolyDataConnectivityFilter.h"
 
 #include "simvascular_tetgen.h"
 
@@ -71,6 +77,8 @@
 #include <deque>
 #include <functional>
 #include <limits>
+#include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -2978,6 +2986,606 @@ int TGenUtils_LimitThicknessGradation(vtkPolyData *surface, vtkDoubleArray *arra
         original[maxReductionId], array->GetValue(maxReductionId));
   }
   fprintf(stdout,"\n");
+
+  return SV_OK;
+}
+
+// -------------------------------------
+// TGenUtils_ExtractBoundaryLoops
+// -------------------------------------
+/**
+ * @brief Collects the boundary edges of a surface into ordered closed loops.
+ * @note The passes that only need to know whether a point sits on the boundary
+ * test one edge at a time. Closing the surface needs more than that: the cap
+ * has to be filled against the rim in the rim's own order, so the loop has to
+ * be walked. A boundary edge is an edge used by a single cell, the same test
+ * used elsewhere, and it is recorded in the winding order of that cell. Each
+ * boundary point then starts exactly one boundary edge, so following that map
+ * from any point returns to it and traverses its loop once.
+ *
+ * The loop order is the order of the cells that own it, so the edge
+ * loop[m] -> loop[m+1] is directed as the wall triangle traverses it. A facet
+ * closing the loop has to traverse the same edge the other way round, which is
+ * what keeps the closed surface consistently oriented.
+ * @param surface The surface; its cells must be triangles.
+ * @param loops Set to the boundary loops, each a list of point ids in order.
+ * @return SV_OK if every boundary edge belongs to a simple closed loop.
+ */
+
+int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
+    std::vector<std::vector<vtkIdType> > &loops)
+{
+  loops.clear();
+
+  if (surface == nullptr)
+  {
+    fprintf(stderr,"Cannot extract the boundary loops without a surface\n");
+    return SV_ERROR;
+  }
+
+  surface->BuildLinks();
+  auto edgeNeighbors = vtkSmartPointer<vtkIdList>::New();
+
+  std::map<vtkIdType,vtkIdType> nextPoint;
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+
+    for (vtkIdType j = 0; j < npts; j++)
+    {
+      vtkIdType a = pts[j];
+      vtkIdType b = pts[(j+1)%npts];
+      surface->GetCellEdgeNeighbors(cellId, a, b, edgeNeighbors);
+      if (edgeNeighbors->GetNumberOfIds() != 0)
+      {
+        continue;
+      }
+      if (nextPoint.find(a) != nextPoint.end())
+      {
+        fprintf(stderr,"Point %lld starts more than one boundary edge, so the surface boundary is not a set of simple loops and cannot be capped\n",
+            (long long)a);
+        return SV_ERROR;
+      }
+      nextPoint[a] = b;
+    }
+  }
+
+  std::set<vtkIdType> visited;
+  for (std::map<vtkIdType,vtkIdType>::const_iterator it = nextPoint.begin();
+       it != nextPoint.end(); ++it)
+  {
+    vtkIdType start = it->first;
+    if (visited.find(start) != visited.end())
+    {
+      continue;
+    }
+
+    std::vector<vtkIdType> loop;
+    vtkIdType current = start;
+    while (visited.find(current) == visited.end())
+    {
+      visited.insert(current);
+      loop.push_back(current);
+
+      std::map<vtkIdType,vtkIdType>::const_iterator step = nextPoint.find(current);
+      if (step == nextPoint.end())
+      {
+        fprintf(stderr,"The boundary edge chain from point %lld ends at point %lld instead of closing\n",
+            (long long)start, (long long)current);
+        return SV_ERROR;
+      }
+      current = step->second;
+    }
+
+    if (current != start)
+    {
+      fprintf(stderr,"A boundary edge chain closed onto point %lld rather than onto its start %lld\n",
+          (long long)current, (long long)start);
+      return SV_ERROR;
+    }
+
+    if (loop.size() >= 3)
+    {
+      loops.push_back(loop);
+    }
+  }
+
+  return SV_OK;
+}
+
+// -------------------------------------
+// TGenUtils_BuildOffsetOuterSurface
+// -------------------------------------
+/**
+ * @brief Builds the outer wall surface as the true offset of the inner surface
+ * at the requested thickness, by contouring a signed distance field.
+ * @note Moving each point out along its own normal gives every outer point one
+ * inner point, and that correspondence is what cannot represent the answer at a
+ * junction. Dilating a solid by t rounds its convex features to radius t, but
+ * at a concave crotch the two offset sheets run into each other: the correct
+ * outer surface is their intersection curve, a crease, and the parts of both
+ * sheets beyond it are not on the boundary at all. The inner points whose
+ * offset lands in the discarded part simply have no outer point. Every pass
+ * that kept the correspondence had to pay for that with thickness, which is why
+ * the wall thinned exactly where the geometry is concave.
+ *
+ * Contouring the distance field has no correspondence to keep. The level set
+ * d(x) = t is the dilated boundary by construction, so the crease and the
+ * rounding come out of it rather than being aimed at, and every point of the
+ * result is at least t from the inner surface - the invariant the clearance
+ * constraint tried and failed to impose on a fixed triangulation.
+ *
+ * The distance has to be signed to tell the wall side from the lumen, which
+ * needs a closed surface, so the cap rims are filled with a fan first. The
+ * result therefore also covers the caps with a t-thick dome, which the caller
+ * trims back to the cap planes.
+ *
+ * The field is only evaluated in a band around the surface, since that is where
+ * the level set is; the rest of the grid is flooded from outside so that the
+ * lumen keeps a negative sign and no spurious sheet is contoured in it.
+ * @param surface The inner surface, open at the caps.
+ * @param array The requested thickness per point; one tuple per surface point.
+ * @param targetEdgeSize The mesh edge size, or a non-positive value if unknown.
+ * Used with the thickness to choose the grid spacing.
+ * @param maxVoxels The largest grid to build; the spacing is coarsened until
+ * the grid fits and the outcome is reported.
+ * @param outer Set to the contoured offset surface.
+ * @return SV_OK if the offset surface is built.
+ */
+
+int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
+    double targetEdgeSize, vtkIdType maxVoxels, vtkPolyData *outer)
+{
+  if (surface == nullptr || array == nullptr || outer == nullptr)
+  {
+    fprintf(stderr,"Cannot build the offset outer surface without a surface, a thickness array and an output\n");
+    return SV_ERROR;
+  }
+
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+
+  double thicknessMin = std::numeric_limits<double>::max();
+  double thicknessMax = 0.0;
+  int numPositive = 0;
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double t = array->GetValue(ptId);
+    if (t <= 0.0)
+    {
+      continue;
+    }
+    thicknessMin = std::min(thicknessMin, t);
+    thicknessMax = std::max(thicknessMax, t);
+    numPositive++;
+  }
+  if (numPositive == 0)
+  {
+    fprintf(stderr,"Every wall thickness is zero or negative, so there is no wall to offset\n");
+    return SV_ERROR;
+  }
+
+  // Close the cap openings so the distance can be signed. The fan traverses
+  // each rim edge opposite to the wall triangle that owns it, which is what
+  // makes the closed surface consistently oriented and therefore what decides
+  // the sign; it is checked against a grid corner below rather than assumed.
+  std::vector<std::vector<vtkIdType> > loops;
+  if (TGenUtils_ExtractBoundaryLoops(surface, loops) != SV_OK)
+  {
+    fprintf(stderr,"Problem extracting the cap rims of the wall surface\n");
+    return SV_ERROR;
+  }
+
+  auto closedPoints = vtkSmartPointer<vtkPoints>::New();
+  closedPoints->DeepCopy(surface->GetPoints());
+
+  std::vector<double> closedThickness((size_t)numPts, 0.0);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    closedThickness[(size_t)ptId] = std::max(array->GetValue(ptId), 0.0);
+  }
+
+  auto closedCells = vtkSmartPointer<vtkCellArray>::New();
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+    vtkIdType triangle[3] = {pts[0], pts[1], pts[2]};
+    closedCells->InsertNextCell(3, triangle);
+  }
+
+  for (size_t i = 0; i < loops.size(); i++)
+  {
+    const std::vector<vtkIdType> &loop = loops[i];
+    double centroid[3] = {0.0, 0.0, 0.0};
+    double meanThickness = 0.0;
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      double p[3];
+      closedPoints->GetPoint(loop[m], p);
+      for (int k = 0; k < 3; k++)
+      {
+        centroid[k] += p[k];
+      }
+      meanThickness += closedThickness[(size_t)loop[m]];
+    }
+    for (int k = 0; k < 3; k++)
+    {
+      centroid[k] /= (double)loop.size();
+    }
+    meanThickness /= (double)loop.size();
+
+    vtkIdType centroidId = closedPoints->InsertNextPoint(centroid);
+    closedThickness.push_back(meanThickness);
+
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      vtkIdType a = loop[m];
+      vtkIdType b = loop[(m+1)%loop.size()];
+      vtkIdType fan[3] = {b, a, centroidId};
+      closedCells->InsertNextCell(3, fan);
+    }
+  }
+
+  auto closed = vtkSmartPointer<vtkPolyData>::New();
+  closed->SetPoints(closedPoints);
+  closed->SetPolys(closedCells);
+  closed->BuildLinks();
+
+  // The grid has to hold the whole offset surface, so it covers the model plus
+  // the largest thickness, and a few cells beyond that so the band around the
+  // surface never touches the grid face and the outside flood always has a
+  // corner to start from.
+  double bounds[6];
+  closed->GetBounds(bounds);
+
+  double resolution = thicknessMin;
+  if (targetEdgeSize > 0.0 && targetEdgeSize < resolution)
+  {
+    resolution = targetEdgeSize;
+  }
+  double requestedSpacing = 0.5*resolution;
+  double spacing = requestedSpacing;
+
+  int dims[3] = {0, 0, 0};
+  double margin = 0.0;
+  for (int attempt = 0; attempt < 64; attempt++)
+  {
+    // Two cells wider than the widest band a triangle can mark, so the grid
+    // corners the outside flood starts from are never part of the band.
+    margin = 1.25*thicknessMax + 5.0*spacing;
+    double total = 1.0;
+    for (int k = 0; k < 3; k++)
+    {
+      double extent = bounds[2*k+1] - bounds[2*k] + 2.0*margin;
+      dims[k] = (int)std::ceil(extent/spacing) + 1;
+      if (dims[k] < 2)
+      {
+        dims[k] = 2;
+      }
+      total *= (double)dims[k];
+    }
+    if (total <= (double)maxVoxels)
+    {
+      break;
+    }
+    spacing *= 1.25;
+  }
+
+  double origin[3];
+  for (int k = 0; k < 3; k++)
+  {
+    origin[k] = bounds[2*k] - margin;
+  }
+
+  size_t numVoxels = (size_t)dims[0]*(size_t)dims[1]*(size_t)dims[2];
+
+  fprintf(stdout,"Wall outer surface by distance field offset:\n");
+  fprintf(stdout,"  thickness %.5g to %.5g, %zu cap rims closed with a fan\n",
+      thicknessMin, thicknessMax, loops.size());
+  fprintf(stdout,"  grid %d x %d x %d = %zu voxels at spacing %.5g\n",
+      dims[0], dims[1], dims[2], numVoxels, spacing);
+  if (spacing > requestedSpacing*1.001)
+  {
+    fprintf(stdout,"  the spacing was coarsened from %.5g to fit the %lld voxel budget, so the offset resolves features down to %.5g rather than half the smallest thickness\n",
+        requestedSpacing, (long long)maxVoxels, spacing);
+  }
+
+  // Mark the band the level set can pass through: every voxel within the local
+  // thickness of the surface, plus two cells so the contour has values on both
+  // sides of it everywhere. Marking is per triangle and the marks overlap, but
+  // they are idempotent writes, and what the band buys is that the distance is
+  // only evaluated where it can matter.
+  std::vector<unsigned char> state(numVoxels, 0);
+  const unsigned char kUnknown = 0, kBand = 1, kOutside = 2;
+
+  for (vtkIdType cellId = 0; cellId < closed->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    closed->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+
+    double lo[3] = {0.0, 0.0, 0.0}, hi[3] = {0.0, 0.0, 0.0};
+    double radius = 0.0;
+    for (vtkIdType j = 0; j < npts; j++)
+    {
+      double p[3];
+      closedPoints->GetPoint(pts[j], p);
+      for (int k = 0; k < 3; k++)
+      {
+        if (j == 0 || p[k] < lo[k]) { lo[k] = p[k]; }
+        if (j == 0 || p[k] > hi[k]) { hi[k] = p[k]; }
+      }
+      radius = std::max(radius, closedThickness[(size_t)pts[j]]);
+    }
+
+    // The band has to reach past the level set on both sides, and the value at
+    // a voxel uses the thickness of its nearest point, which need not be one of
+    // this triangle's. The quarter of slack absorbs that difference where the
+    // thickness varies; the fill below checks that it was in fact enough.
+    radius = 1.25*radius + 3.0*spacing;
+
+    int begin[3], end[3];
+    for (int k = 0; k < 3; k++)
+    {
+      begin[k] = (int)std::floor((lo[k] - radius - origin[k])/spacing);
+      end[k] = (int)std::ceil((hi[k] + radius - origin[k])/spacing);
+      begin[k] = std::max(begin[k], 0);
+      end[k] = std::min(end[k], dims[k]-1);
+    }
+
+    for (int k = begin[2]; k <= end[2]; k++)
+    {
+      for (int j = begin[1]; j <= end[1]; j++)
+      {
+        size_t row = (size_t)begin[0] + (size_t)dims[0]*((size_t)j + (size_t)dims[1]*(size_t)k);
+        for (int i = begin[0]; i <= end[0]; i++, row++)
+        {
+          state[row] = kBand;
+        }
+      }
+    }
+  }
+
+  auto implicit = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
+  implicit->SetInput(closed);
+
+  // Which side of the surface counts as negative is a convention, and the
+  // offset has to be built outward whichever way round it is. The grid corner
+  // sits outside the model by at least the margin in every direction, so the
+  // sign there is the sign of the outside and everything else follows from it.
+  // Its magnitude is checked as well: a corner that is not that far from the
+  // surface means the grid or the margin is not what this assumes, which would
+  // make the reading meaningless rather than merely backwards.
+  double corner[3] = {origin[0], origin[1], origin[2]};
+  double cornerDistance = implicit->EvaluateFunction(corner);
+  if (std::abs(cornerDistance) < 0.9*margin)
+  {
+    fprintf(stderr,"The signed distance at the grid corner is %.5g but the corner lies at least %.5g from the model, so the distance field is not measuring what the offset needs\n",
+        cornerDistance, margin);
+    return SV_ERROR;
+  }
+  double outwardSign = (cornerDistance > 0.0) ? 1.0 : -1.0;
+  if (outwardSign < 0.0)
+  {
+    fprintf(stdout,"  the distance field is negative outside the model, so its sign is used inverted\n");
+  }
+
+  // The thickness is looked up on the inner surface rather than on the closed
+  // one, so the fan centres never contribute a thickness of their own; a voxel
+  // over a cap takes the thickness of the nearest rim point.
+  auto thicknessLocator = vtkSmartPointer<vtkStaticPointLocator>::New();
+  thicknessLocator->SetDataSet(surface);
+  thicknessLocator->BuildLocator();
+
+  auto values = vtkSmartPointer<vtkFloatArray>::New();
+  values->SetName("WallOffsetLevel");
+  values->SetNumberOfComponents(1);
+  values->SetNumberOfTuples((vtkIdType)numVoxels);
+
+  double farValue = thicknessMax + (bounds[1]-bounds[0]) + (bounds[3]-bounds[2]) + (bounds[5]-bounds[4]);
+  size_t numBandVoxels = 0;
+
+  for (int k = 0; k < dims[2]; k++)
+  {
+    for (int j = 0; j < dims[1]; j++)
+    {
+      size_t index = (size_t)dims[0]*((size_t)j + (size_t)dims[1]*(size_t)k);
+      for (int i = 0; i < dims[0]; i++, index++)
+      {
+        if (state[index] != kBand)
+        {
+          continue;
+        }
+        numBandVoxels++;
+
+        double x[3] = {origin[0] + spacing*i, origin[1] + spacing*j, origin[2] + spacing*k};
+        double distance = outwardSign*implicit->EvaluateFunction(x);
+        vtkIdType nearest = thicknessLocator->FindClosestPoint(x);
+        double thickness = (nearest >= 0) ? std::max(array->GetValue(nearest), 0.0) : 0.0;
+        values->SetValue((vtkIdType)index, (float)(distance - thickness));
+      }
+    }
+  }
+
+  // Everything the band does not cover is either well outside the offset or
+  // inside the lumen, and the two need opposite signs or the contour would find
+  // a sheet between them. The band is at least two cells thick and closed
+  // around the model, so a flood that starts outside cannot leak through it.
+  std::deque<size_t> queue;
+  const int cornerIndex[8][3] = {{0,0,0}, {1,0,0}, {0,1,0}, {1,1,0},
+                                 {0,0,1}, {1,0,1}, {0,1,1}, {1,1,1}};
+  for (int c = 0; c < 8; c++)
+  {
+    size_t i = (size_t)(cornerIndex[c][0] ? dims[0]-1 : 0);
+    size_t j = (size_t)(cornerIndex[c][1] ? dims[1]-1 : 0);
+    size_t k = (size_t)(cornerIndex[c][2] ? dims[2]-1 : 0);
+    size_t index = i + (size_t)dims[0]*(j + (size_t)dims[1]*k);
+    if (state[index] == kUnknown)
+    {
+      state[index] = kOutside;
+      queue.push_back(index);
+    }
+  }
+
+  if (queue.empty())
+  {
+    fprintf(stderr,"Every corner of the distance grid is inside the evaluated band, so there is nowhere to start the outside flood from and the lumen cannot be told from the exterior\n");
+    return SV_ERROR;
+  }
+
+  while (!queue.empty())
+  {
+    size_t index = queue.front();
+    queue.pop_front();
+
+    int i = (int)(index % (size_t)dims[0]);
+    int j = (int)((index / (size_t)dims[0]) % (size_t)dims[1]);
+    int k = (int)(index / ((size_t)dims[0]*(size_t)dims[1]));
+
+    const int step[6][3] = {{-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1}};
+    for (int s = 0; s < 6; s++)
+    {
+      int ni = i + step[s][0], nj = j + step[s][1], nk = k + step[s][2];
+      if (ni < 0 || ni >= dims[0] || nj < 0 || nj >= dims[1] || nk < 0 || nk >= dims[2])
+      {
+        continue;
+      }
+      size_t neighbor = (size_t)ni + (size_t)dims[0]*((size_t)nj + (size_t)dims[1]*(size_t)nk);
+      if (state[neighbor] != kUnknown)
+      {
+        continue;
+      }
+      state[neighbor] = kOutside;
+      queue.push_back(neighbor);
+    }
+  }
+
+  size_t numInside = 0;
+  for (size_t index = 0; index < numVoxels; index++)
+  {
+    if (state[index] == kBand)
+    {
+      continue;
+    }
+    if (state[index] == kOutside)
+    {
+      values->SetValue((vtkIdType)index, (float)farValue);
+    }
+    else
+    {
+      values->SetValue((vtkIdType)index, (float)(-farValue));
+      numInside++;
+    }
+  }
+
+  fprintf(stdout,"  distance evaluated at %zu band voxels; %zu enclosed and %zu outside voxels filled by sign\n",
+      numBandVoxels, numInside, numVoxels - numBandVoxels - numInside);
+
+  // The signs the fill wrote are only right if the level set stayed inside the
+  // band. Where it did not, a band voxel sits against a filled one of the
+  // opposite sign and the contour would follow the edge of the band instead of
+  // the offset. That is a wrong surface rather than a rough one, so it is
+  // reported as an error rather than contoured.
+  size_t numStraddling = 0;
+  for (int k = 0; k < dims[2]; k++)
+  {
+    for (int j = 0; j < dims[1]; j++)
+    {
+      size_t index = (size_t)dims[0]*((size_t)j + (size_t)dims[1]*(size_t)k);
+      for (int i = 0; i < dims[0]; i++, index++)
+      {
+        if (state[index] != kBand)
+        {
+          continue;
+        }
+        double value = values->GetValue((vtkIdType)index);
+
+        const int step[6][3] = {{-1,0,0}, {1,0,0}, {0,-1,0}, {0,1,0}, {0,0,-1}, {0,0,1}};
+        for (int s = 0; s < 6; s++)
+        {
+          int ni = i + step[s][0], nj = j + step[s][1], nk = k + step[s][2];
+          if (ni < 0 || ni >= dims[0] || nj < 0 || nj >= dims[1] || nk < 0 || nk >= dims[2])
+          {
+            continue;
+          }
+          size_t neighbor = (size_t)ni + (size_t)dims[0]*((size_t)nj + (size_t)dims[1]*(size_t)nk);
+          if (state[neighbor] == kBand)
+          {
+            continue;
+          }
+          double filled = (state[neighbor] == kOutside) ? farValue : -farValue;
+          if ((value < 0.0) != (filled < 0.0))
+          {
+            numStraddling++;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (numStraddling > 0)
+  {
+    fprintf(stderr,"The offset level set leaves the evaluated band at %zu voxels, so the band around the surface is too thin to hold it. This happens when the wall thickness varies faster than the band allows for; contouring it would follow the edge of the band rather than the offset.\n",
+        numStraddling);
+    return SV_ERROR;
+  }
+
+  auto image = vtkSmartPointer<vtkImageData>::New();
+  image->SetDimensions(dims[0], dims[1], dims[2]);
+  image->SetOrigin(origin[0], origin[1], origin[2]);
+  image->SetSpacing(spacing, spacing, spacing);
+  image->GetPointData()->SetScalars(values);
+
+  auto contour = vtkSmartPointer<vtkFlyingEdges3D>::New();
+  contour->SetInputData(image);
+  contour->SetValue(0, 0.0);
+  contour->ComputeNormalsOff();
+  contour->ComputeGradientsOff();
+  contour->ComputeScalarsOff();
+  contour->Update();
+
+  outer->Initialize();
+  outer->DeepCopy(contour->GetOutput());
+
+  if (outer->GetNumberOfCells() == 0)
+  {
+    fprintf(stderr,"The offset level set is empty, so no outer wall surface was produced\n");
+    return SV_ERROR;
+  }
+
+  // More than one shell means the offset is not simply the outside of the wall:
+  // a thickness large enough to close a lumen leaves a sheet inside it, and a
+  // model with detached vessels offsets into one shell per vessel. Neither is
+  // an error here, but both change what the fill will be asked to do.
+  auto connectivity = vtkSmartPointer<vtkPolyDataConnectivityFilter>::New();
+  connectivity->SetInputData(outer);
+  connectivity->SetExtractionModeToAllRegions();
+  connectivity->Update();
+
+  fprintf(stdout,"  offset surface has %lld points and %lld triangles in %d connected shells\n",
+      (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells(),
+      connectivity->GetNumberOfExtractedRegions());
 
   return SV_OK;
 }

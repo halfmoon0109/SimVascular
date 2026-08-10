@@ -177,6 +177,15 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_LimitThicknessGradation(vtkPolyData *surface
     double maxSlope,
     const char *label);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
+    std::vector<std::vector<vtkIdType> > &loops);
+
+SV_EXPORT_TETGEN_MESH int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    double targetEdgeSize,
+    vtkIdType maxVoxels,
+    vtkPolyData *outer);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildWallShellSurface(vtkPolyData *surface,
     vtkDoubleArray *array,
     vtkPolyData *shell,
