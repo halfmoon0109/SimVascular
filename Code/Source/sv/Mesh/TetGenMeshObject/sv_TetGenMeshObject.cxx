@@ -2792,20 +2792,27 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // the points whose offset lands there have no outer point, which is why every
   // pass that insisted on giving them one had to pay in thickness.
   //
-  // The ceiling on the distance field: a float per voxel and a byte of
-  // bookkeeping, so 160 million is about 800 MB, paid once per mesh.
+  // What bounds the distance field is memory, so that is what the budget says;
+  // the voxel count follows from how a voxel is stored and moves with it.
   //
-  // It has to be this large because a vascular bounding box is mostly empty. A
-  // model a few tens of units across and a few hundred long needs a few hundred
-  // cells on its long axis before the spacing even reaches the wall thickness,
-  // and almost all of those cells are air. The builder coarsens the spacing to
-  // fit the budget and reports how many voxels are left per wall thickness; the
-  // smooth part of the offset survives a coarse grid, but the crease at a
-  // junction is rounded over about half a cell, so a count near one means the
-  // grid is eating the very thing the offset is for. If that happens on a model
-  // this budget cannot hold, the fix is to contour in slabs rather than to
-  // spend more memory.
-  const vtkIdType maxOffsetVoxels = 160000000;
+  // The figure itself is a judgement rather than a derivation. It is what an
+  // aortic model a few tens of units across and a few hundred long needs to
+  // reach a spacing of half its wall thickness, which is the coarsest grid that
+  // still resolves the crease at a junction: such a model runs to roughly a
+  // hundred and forty million voxels, and this leaves a little over that. A
+  // vascular bounding box is mostly air, so almost all of it is spent on empty
+  // space - that is the cost of contouring over one dense grid, and it is the
+  // reason the number is this large rather than this small.
+  //
+  // A model that does not fit is not refused. The builder coarsens the spacing
+  // and reports how many cells are left per wall thickness, and the smooth part
+  // of the offset survives a coarse grid; it is the crease that does not,
+  // rounded over about half a cell. So a count near one is the signal, and the
+  // answer to it is to contour in slabs, which drops the memory to one slab at
+  // a time, rather than to raise this and hope.
+  const double maxOffsetFieldBytes = 800.0e6;
+  const vtkIdType maxOffsetVoxels =
+      (vtkIdType)(maxOffsetFieldBytes/(double)(sizeof(float) + sizeof(unsigned char)));
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   if (TGenUtils_BuildOffsetOuterSurface(surface, thicknessArray,
         meshoptions_.maxedgesize, maxOffsetVoxels, gWallThicknessMaxSlope, offsetOuter) != SV_OK)

@@ -3339,8 +3339,9 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
       dims[0], dims[1], dims[2], numVoxels, spacing, thicknessMin/spacing);
   if (spacing > requestedSpacing*1.001)
   {
-    fprintf(stdout,"  the spacing was coarsened from %.5g to fit the %lld voxel budget\n",
-        requestedSpacing, (long long)maxVoxels);
+    fprintf(stdout,"  the spacing was coarsened from %.5g to fit the %lld voxel budget (%.0f MB of field)\n",
+        requestedSpacing, (long long)maxVoxels,
+        (double)maxVoxels*(sizeof(float) + sizeof(unsigned char))/1.0e6);
   }
   if (thicknessMin/spacing < 1.5)
   {
