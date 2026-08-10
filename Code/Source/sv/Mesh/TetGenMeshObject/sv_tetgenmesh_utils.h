@@ -52,6 +52,8 @@
 #include "vtkPolyData.h"
 #include "vtkUnstructuredGrid.h"
 #include "vtkDoubleArray.h"
+#include "vtkPoints.h"
+#include "vtkCellArray.h"
 
 #include "simvascular_tetgen.h"
 
@@ -179,6 +181,29 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_LimitThicknessGradation(vtkPolyData *surface
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
     std::vector<std::vector<vtkIdType> > &loops);
+
+// One vessel end, as the pair of rims the wall has to be closed between: the
+// cap rim of the inner surface and the rim the offset surface was trimmed back
+// to. The two are on the same plane but have no point in common and not even
+// the same number of points, which is why they are carried together.
+struct TGenUtilsCapRim
+{
+  std::vector<vtkIdType> innerLoop;
+  std::vector<vtkIdType> outerLoop;
+  double origin[3];
+  double outward[3];
+};
+
+SV_EXPORT_TETGEN_MESH int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface,
+    vtkPolyData *outer,
+    std::vector<TGenUtilsCapRim> &caps);
+
+SV_EXPORT_TETGEN_MESH int TGenUtils_StitchCapAnnulus(vtkPoints *points,
+    const std::vector<vtkIdType> &innerLoop,
+    const std::vector<vtkIdType> &outerLoop,
+    const double outward[3],
+    vtkCellArray *cells,
+    int &numDegenerate);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,

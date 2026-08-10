@@ -65,6 +65,10 @@
 #include "vtkFlyingEdges3D.h"
 #include "vtkStaticPointLocator.h"
 #include "vtkPolyDataConnectivityFilter.h"
+#include "vtkClipPolyData.h"
+#include "vtkTriangleFilter.h"
+#include "vtkCleanPolyData.h"
+#include "vtkMath.h"
 
 #include "simvascular_tetgen.h"
 
@@ -3586,6 +3590,484 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   fprintf(stdout,"  offset surface has %lld points and %lld triangles in %d connected shells\n",
       (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells(),
       connectivity->GetNumberOfExtractedRegions());
+
+  return SV_OK;
+}
+
+// -------------------------------------
+// TGenUtils_TrimOffsetSurfaceAtCaps
+// -------------------------------------
+/**
+ * @brief Trims the offset outer surface back to the cap planes of the inner
+ * surface, and reports the rim it was trimmed to alongside the inner rim.
+ * @note The offset is built from a surface whose cap openings were filled, so
+ * it covers each vessel end with a dome a thickness deep. The wall does not
+ * extend over the end - the lumen opens there - so the dome comes off and the
+ * two rims left behind are closed to each other instead.
+ *
+ * The cut is the cap plane, but only near the cap. An infinite plane would also
+ * cut whatever else of the model happens to lie on its far side, which for a
+ * vessel that curves back on itself is real wall; keeping the cut inside a
+ * sphere around the rim bounds what it can reach to the end it belongs to.
+ *
+ * The plane is oriented from the rim itself rather than from the point normals,
+ * which the capping pass has already laid into the cap plane. The rim is
+ * traversed in the winding of the wall triangles that own it, and that winding
+ * runs clockwise about the outward direction, so the outward direction is the
+ * reverse of the rim's own normal.
+ * @param surface The inner surface, open at the caps.
+ * @param outer The offset surface; trimmed in place.
+ * @param caps Set to one entry per vessel end, holding both rims and the plane.
+ * @return SV_OK if every cap was trimmed and its two rims paired.
+ */
+
+int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
+    std::vector<TGenUtilsCapRim> &caps)
+{
+  caps.clear();
+
+  if (surface == nullptr || outer == nullptr)
+  {
+    fprintf(stderr,"Cannot trim the offset surface without an inner surface and an offset surface\n");
+    return SV_ERROR;
+  }
+
+  std::vector<std::vector<vtkIdType> > innerLoops;
+  if (TGenUtils_ExtractBoundaryLoops(surface, innerLoops) != SV_OK)
+  {
+    fprintf(stderr,"Problem extracting the cap rims of the wall surface\n");
+    return SV_ERROR;
+  }
+
+  if (innerLoops.empty())
+  {
+    fprintf(stdout,"  the inner surface is closed, so the offset surface needs no trimming\n");
+    return SV_OK;
+  }
+
+  std::vector<double> capRadius(innerLoops.size(), 0.0);
+  caps.resize(innerLoops.size());
+
+  for (size_t c = 0; c < innerLoops.size(); c++)
+  {
+    const std::vector<vtkIdType> &loop = innerLoops[c];
+    TGenUtilsCapRim &cap = caps[c];
+    cap.innerLoop = loop;
+
+    for (int k = 0; k < 3; k++)
+    {
+      cap.origin[k] = 0.0;
+    }
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      double p[3];
+      surface->GetPoint(loop[m], p);
+      for (int k = 0; k < 3; k++)
+      {
+        cap.origin[k] += p[k];
+      }
+    }
+    for (int k = 0; k < 3; k++)
+    {
+      cap.origin[k] /= (double)loop.size();
+    }
+
+    // Newell's normal, which is the rim's own normal for the order it is
+    // stored in; the outward direction is its reverse.
+    double normal[3] = {0.0, 0.0, 0.0};
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      double p[3], q[3];
+      surface->GetPoint(loop[m], p);
+      surface->GetPoint(loop[(m+1)%loop.size()], q);
+      normal[0] += (p[1]-q[1])*(p[2]+q[2]);
+      normal[1] += (p[2]-q[2])*(p[0]+q[0]);
+      normal[2] += (p[0]-q[0])*(p[1]+q[1]);
+    }
+    if (vtkMath::Normalize(normal) <= 0.0)
+    {
+      fprintf(stderr,"A cap rim of %zu points at (%.5g, %.5g, %.5g) encloses no area, so its plane cannot be found\n",
+          loop.size(), cap.origin[0], cap.origin[1], cap.origin[2]);
+      return SV_ERROR;
+    }
+    for (int k = 0; k < 3; k++)
+    {
+      cap.outward[k] = -normal[k];
+    }
+
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      double p[3];
+      surface->GetPoint(loop[m], p);
+      capRadius[c] = std::max(capRadius[c], std::sqrt(vtkMath::Distance2BetweenPoints(p, cap.origin)));
+    }
+    if (capRadius[c] <= 0.0)
+    {
+      fprintf(stderr,"A cap rim at (%.5g, %.5g, %.5g) has zero radius\n",
+          cap.origin[0], cap.origin[1], cap.origin[2]);
+      return SV_ERROR;
+    }
+  }
+
+  // Clip once per cap. The scalar is positive on everything that is kept: below
+  // the plane, or far enough from this rim that the plane has no business
+  // reaching it. The dome is the only place both are negative. A window of
+  // twice the rim radius holds a dome that stands one thickness proud of a rim
+  // of that radius, for any wall thinner than the vessel it is on.
+  for (size_t c = 0; c < caps.size(); c++)
+  {
+    const TGenUtilsCapRim &cap = caps[c];
+    double window = 2.0*capRadius[c];
+
+    auto level = vtkSmartPointer<vtkDoubleArray>::New();
+    level->SetName("CapTrimLevel");
+    level->SetNumberOfComponents(1);
+    level->SetNumberOfTuples(outer->GetNumberOfPoints());
+    for (vtkIdType ptId = 0; ptId < outer->GetNumberOfPoints(); ptId++)
+    {
+      double x[3];
+      outer->GetPoint(ptId, x);
+      double offset[3];
+      vtkMath::Subtract(cap.origin, x, offset);
+      double below = vtkMath::Dot(offset, cap.outward);
+      double away = std::sqrt(vtkMath::Distance2BetweenPoints(x, cap.origin)) - window;
+      level->SetValue(ptId, std::max(below, away));
+    }
+    outer->GetPointData()->SetScalars(level);
+
+    auto clipper = vtkSmartPointer<vtkClipPolyData>::New();
+    clipper->SetInputData(outer);
+    clipper->GenerateClipScalarsOff();
+    clipper->GenerateClippedOutputOff();
+    clipper->InsideOutOff();
+    clipper->SetValue(0.0);
+
+    auto triangles = vtkSmartPointer<vtkTriangleFilter>::New();
+    triangles->SetInputConnection(clipper->GetOutputPort());
+    triangles->PassLinesOff();
+    triangles->PassVertsOff();
+
+    // Clipping leaves a pair of coincident points on every cut edge, and the
+    // rim cannot be walked until they are one point.
+    auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+    cleaner->SetInputConnection(triangles->GetOutputPort());
+    cleaner->Update();
+
+    // Only the triangles are carried on. Cleaning can turn a collapsed one into
+    // a line, and a line sharing an edge with a triangle would make that edge
+    // look interior when the rim is walked.
+    auto trimmed = vtkSmartPointer<vtkPolyData>::New();
+    trimmed->SetPoints(cleaner->GetOutput()->GetPoints());
+    trimmed->SetPolys(cleaner->GetOutput()->GetPolys());
+    outer->DeepCopy(trimmed);
+
+    if (outer->GetNumberOfCells() == 0)
+    {
+      fprintf(stderr,"Trimming the offset surface at the cap at (%.5g, %.5g, %.5g) removed all of it\n",
+          cap.origin[0], cap.origin[1], cap.origin[2]);
+      return SV_ERROR;
+    }
+  }
+
+  std::vector<std::vector<vtkIdType> > outerLoops;
+  if (TGenUtils_ExtractBoundaryLoops(outer, outerLoops) != SV_OK)
+  {
+    fprintf(stderr,"Problem extracting the trimmed rims of the offset surface\n");
+    return SV_ERROR;
+  }
+
+  if (outerLoops.size() != caps.size())
+  {
+    fprintf(stderr,"The trimmed offset surface has %zu rims but the wall has %zu cap openings. A cut has taken more than the dome off its end, which happens when a vessel curves back within a rim radius of another vessel's cap.\n",
+        outerLoops.size(), caps.size());
+    return SV_ERROR;
+  }
+
+  // Pair each trimmed rim with the cap whose plane it lies on. Being on the
+  // plane is the test that matters, since two caps can be near each other but
+  // only one cut produced this rim.
+  std::vector<bool> used(outerLoops.size(), false);
+  for (size_t c = 0; c < caps.size(); c++)
+  {
+    TGenUtilsCapRim &cap = caps[c];
+    size_t best = outerLoops.size();
+    double bestDeviation = 0.0;
+
+    for (size_t l = 0; l < outerLoops.size(); l++)
+    {
+      if (used[l])
+      {
+        continue;
+      }
+      double deviation = 0.0;
+      for (size_t m = 0; m < outerLoops[l].size(); m++)
+      {
+        double x[3];
+        outer->GetPoint(outerLoops[l][m], x);
+        double offset[3];
+        vtkMath::Subtract(x, cap.origin, offset);
+        deviation = std::max(deviation, std::abs(vtkMath::Dot(offset, cap.outward)));
+      }
+      if (best == outerLoops.size() || deviation < bestDeviation)
+      {
+        best = l;
+        bestDeviation = deviation;
+      }
+    }
+
+    if (best == outerLoops.size() || bestDeviation > 0.05*capRadius[c])
+    {
+      fprintf(stderr,"No trimmed rim lies on the cap plane at (%.5g, %.5g, %.5g); the closest is off it by %.5g against a rim radius of %.5g\n",
+          cap.origin[0], cap.origin[1], cap.origin[2], bestDeviation, capRadius[c]);
+      return SV_ERROR;
+    }
+
+    used[best] = true;
+    cap.outerLoop = outerLoops[best];
+  }
+
+  fprintf(stdout,"  trimmed the offset surface at %zu cap planes, leaving %lld points and %lld triangles\n",
+      caps.size(), (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells());
+  for (size_t c = 0; c < caps.size(); c++)
+  {
+    fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): inner rim %zu points, trimmed rim %zu points\n",
+        caps[c].origin[0], caps[c].origin[1], caps[c].origin[2],
+        caps[c].innerLoop.size(), caps[c].outerLoop.size());
+  }
+
+  return SV_OK;
+}
+
+// -------------------------------------
+// TGenUtils_StitchCapAnnulus
+// -------------------------------------
+/**
+ * @brief Closes the wall at a vessel end by triangulating between the inner cap
+ * rim and the trimmed outer rim.
+ * @note The extrusion could close its ends with one quad per rim edge, because
+ * every outer point was one inner point offset. The offset surface is contoured
+ * from a grid, so its rim has neither the same points nor the same number of
+ * them, and the two have to be triangulated against each other instead.
+ *
+ * Both rims run around the same vessel end, so the angle about the cap axis
+ * orders them both and the two can be merged on it, taking whichever rim is
+ * behind at each step. This holds while each rim winds once around the axis,
+ * which is checked rather than assumed - a rim that doubles back has no such
+ * order and would be triangulated into overlapping facets.
+ *
+ * Neither rim is moved. The inner rim in particular is part of the fluid/wall
+ * interface, and the solver matches it against the fluid mesh.
+ * @param points The points both rims index into.
+ * @param innerLoop The inner cap rim, in order.
+ * @param outerLoop The trimmed outer rim, in order.
+ * @param outward The direction out of the vessel end.
+ * @param cells The annulus triangles are appended here, facing outward.
+ * @param numDegenerate Set to the number of zero-area triangles produced.
+ * @return SV_OK if the annulus is built.
+ */
+
+int TGenUtils_StitchCapAnnulus(vtkPoints *points,
+    const std::vector<vtkIdType> &innerLoop,
+    const std::vector<vtkIdType> &outerLoop,
+    const double outward[3],
+    vtkCellArray *cells,
+    int &numDegenerate)
+{
+  numDegenerate = 0;
+
+  if (points == nullptr || cells == nullptr)
+  {
+    fprintf(stderr,"Cannot stitch a cap annulus without points and an output cell array\n");
+    return SV_ERROR;
+  }
+  if (innerLoop.size() < 3 || outerLoop.size() < 3)
+  {
+    fprintf(stderr,"Cannot stitch a cap annulus between rims of %zu and %zu points\n",
+        innerLoop.size(), outerLoop.size());
+    return SV_ERROR;
+  }
+
+  double center[3] = {0.0, 0.0, 0.0};
+  for (size_t m = 0; m < innerLoop.size(); m++)
+  {
+    double p[3];
+    points->GetPoint(innerLoop[m], p);
+    for (int k = 0; k < 3; k++)
+    {
+      center[k] += p[k];
+    }
+  }
+  for (int k = 0; k < 3; k++)
+  {
+    center[k] /= (double)innerLoop.size();
+  }
+
+  // A frame on the cap plane in which the angle increases counterclockwise
+  // about the outward direction. Crossing with the axis the outward direction
+  // leans on least keeps the first vector well away from degenerate.
+  double axis[3] = {0.0, 0.0, 0.0};
+  int smallest = 0;
+  for (int k = 1; k < 3; k++)
+  {
+    if (std::abs(outward[k]) < std::abs(outward[smallest]))
+    {
+      smallest = k;
+    }
+  }
+  axis[smallest] = 1.0;
+
+  double u[3], v[3];
+  vtkMath::Cross(axis, outward, u);
+  if (vtkMath::Normalize(u) <= 0.0)
+  {
+    fprintf(stderr,"The cap outward direction is not a usable axis for stitching the annulus\n");
+    return SV_ERROR;
+  }
+  vtkMath::Cross(outward, u, v);
+  if (vtkMath::Normalize(v) <= 0.0)
+  {
+    fprintf(stderr,"The cap outward direction is not a usable axis for stitching the annulus\n");
+    return SV_ERROR;
+  }
+
+  auto angleOf = [&](vtkIdType ptId)
+  {
+    double p[3], offset[3];
+    points->GetPoint(ptId, p);
+    vtkMath::Subtract(p, center, offset);
+    return std::atan2(vtkMath::Dot(offset, v), vtkMath::Dot(offset, u));
+  };
+
+  auto wrap = [](double d)
+  {
+    while (d > vtkMath::Pi()) { d -= 2.0*vtkMath::Pi(); }
+    while (d <= -vtkMath::Pi()) { d += 2.0*vtkMath::Pi(); }
+    return d;
+  };
+
+  std::vector<vtkIdType> inner = innerLoop;
+  std::vector<vtkIdType> outerRim = outerLoop;
+
+  // Both rims have to run the same way round before they can be merged, and
+  // each has to run round exactly once for the angle to order it at all.
+  for (int side = 0; side < 2; side++)
+  {
+    std::vector<vtkIdType> &loop = (side == 0) ? inner : outerRim;
+    double turning = 0.0;
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      turning += wrap(angleOf(loop[(m+1)%loop.size()]) - angleOf(loop[m]));
+    }
+    if (std::abs(std::abs(turning) - 2.0*vtkMath::Pi()) > 0.5)
+    {
+      fprintf(stderr,"A cap rim of %zu points turns %.4g radians about the cap axis instead of one full turn, so it does not wind once around the vessel end and cannot be stitched by angle\n",
+          loop.size(), turning);
+      return SV_ERROR;
+    }
+    if (turning < 0.0)
+    {
+      std::reverse(loop.begin(), loop.end());
+    }
+  }
+
+  size_t n = inner.size();
+  size_t m = outerRim.size();
+
+  // Start the outer rim at the point nearest in angle to where the inner rim
+  // starts, so the first triangle is not a sliver spanning most of the cap.
+  size_t startOuter = 0;
+  double startAngle = angleOf(inner[0]);
+  double bestGap = 0.0;
+  for (size_t j = 0; j < m; j++)
+  {
+    double gap = std::abs(wrap(angleOf(outerRim[j]) - startAngle));
+    if (j == 0 || gap < bestGap)
+    {
+      bestGap = gap;
+      startOuter = j;
+    }
+  }
+
+  // The angle swept from each rim's start, rescaled so both end at a full turn.
+  // Rescaling matters because the two rims start a little apart in angle;
+  // without it the merge would run one rim out before the other.
+  std::vector<double> innerSweep(n+1, 0.0), outerSweep(m+1, 0.0);
+  for (size_t k = 0; k < n; k++)
+  {
+    innerSweep[k+1] = innerSweep[k] + wrap(angleOf(inner[(k+1)%n]) - angleOf(inner[k]));
+  }
+  for (size_t k = 0; k < m; k++)
+  {
+    outerSweep[k+1] = outerSweep[k] +
+        wrap(angleOf(outerRim[(startOuter+k+1)%m]) - angleOf(outerRim[(startOuter+k)%m]));
+  }
+  for (size_t k = 0; k <= n; k++)
+  {
+    innerSweep[k] /= innerSweep[n];
+  }
+  for (size_t k = 0; k <= m; k++)
+  {
+    outerSweep[k] /= outerSweep[m];
+  }
+
+  size_t i = 0, j = 0;
+  while (i < n || j < m)
+  {
+    bool advanceInner;
+    if (i >= n)
+    {
+      advanceInner = false;
+    }
+    else if (j >= m)
+    {
+      advanceInner = true;
+    }
+    else
+    {
+      advanceInner = (innerSweep[i+1] <= outerSweep[j+1]);
+    }
+
+    vtkIdType triangle[3];
+    if (advanceInner)
+    {
+      triangle[0] = inner[i%n];
+      triangle[1] = inner[(i+1)%n];
+      triangle[2] = outerRim[(startOuter+j)%m];
+      i++;
+    }
+    else
+    {
+      triangle[0] = outerRim[(startOuter+j)%m];
+      triangle[1] = outerRim[(startOuter+j+1)%m];
+      triangle[2] = inner[i%n];
+      j++;
+    }
+
+    // The annulus is the end face of the wall, so it faces out of the vessel
+    // end. Which of the two orders gives that depends on which rim was
+    // advanced, so it is measured rather than worked out per case.
+    double p0[3], p1[3], p2[3], e1[3], e2[3], normal[3];
+    points->GetPoint(triangle[0], p0);
+    points->GetPoint(triangle[1], p1);
+    points->GetPoint(triangle[2], p2);
+    vtkMath::Subtract(p1, p0, e1);
+    vtkMath::Subtract(p2, p0, e2);
+    vtkMath::Cross(e1, e2, normal);
+
+    if (vtkMath::Norm(normal) <= 0.0)
+    {
+      // Dropping it would leave a hole in the wall's end face, which is worse
+      // than a facet the volume mesher will complain about, so it is kept and
+      // counted for the caller to report.
+      numDegenerate++;
+    }
+    else if (vtkMath::Dot(normal, outward) < 0.0)
+    {
+      std::swap(triangle[1], triangle[2]);
+    }
+
+    cells->InsertNextCell(3, triangle);
+  }
 
   return SV_OK;
 }
