@@ -42,6 +42,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 - point별 요청 두께와 최종 두께를 계산하는 알고리즘
 - 분지 접합부에서 normal, 곡률, 두께, fold를 처리하는 방식
 - 접합부 thinning의 원인이 형상인지 두께 패스인지 가르는 `t/R` 진단
+- 바깥 면을 거리장 레벨셋으로 오프셋하고 벽을 TetGen으로 채우는 경로와, 그 경로가
+  두께 축소 패스를 건너뛰는 이유
 - VMTK가 표면을 여러 layer의 wedge로 압출하는 방식
 - wedge를 tetrahedron으로 변환하는 방식
 - TetGen 유체 코어, 유체 경계층, 고체벽을 병합하는 방식
@@ -66,9 +68,13 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
    │     = fluid/wall interface
    │     = 고체벽 압출의 시작 표면
    │
-   ├─ VMTK 고체벽 tetrahedron
+   ├─ 고체벽 요소
+   │     = VMTK wedge 압출을 tet으로 변환(기본)
+   │     = 또는 TetGen이 두 면 사이를 채운 tet(`WallMeshTetGenShell`, 12절)
    │
-   └─ 압출된 outer wall 표면
+   └─ outer wall 표면
+         = 안쪽 면을 normal 따라 압출한 면(기본)
+         = 또는 거리장 오프셋 면(12절)
 ```
 
 핵심 불변조건은 원래 모델 벽 표면의 point 좌표를 움직이지 않는 것이다. 유체
@@ -130,11 +136,18 @@ cvTetGenMeshObject::GenerateMesh()
         │             ├─ point별 WallThickness 계산
         │             ├─ 오목 영역 warp vector(normal) 스무딩
         │             ├─ t/R 진단(보고만, 수정 없음)
-        │             ├─ 곡률 기반 두께 제한
-        │             ├─ 두께 Laplacian 스무딩 + 곡률 재제한
-        │             ├─ 바깥벽 라운딩(볼록 fillet)
-        │             ├─ fold-over 방지
-        │             └─ 고체벽 바깥쪽 압출
+        │             ├─ 곡률 기반 두께 제한          ┐
+        │             ├─ 두께 Laplacian 스무딩 + 재제한 │ wedge 경로 전용
+        │             ├─ 두께 gradation 제한          │ (재제한/라운딩/fold)
+        │             ├─ 바깥벽 라운딩(볼록 fillet)    │
+        │             ├─ fold-over 방지               ┘
+        │             │
+        │             ├─ [wedge]  고체벽 바깥쪽 압출
+        │             └─ [shell]  FillWallMeshWithTetGen()
+        │                            ├─ 거리장 오프셋 바깥면
+        │                            ├─ MMG 리메시
+        │                            ├─ cap 평면 트리밍 + rim 스티칭
+        │                            └─ TetGen shell 채움
         │
         ├─ GenerateAndMeshCaps()
         ├─ TetGen 내부 유체 tetrahedralization
@@ -163,7 +176,13 @@ volume mesh, 유체 boundary layer가 모두 필요하다.
 | `WallThicknessSmoothingIterations` | `wallthicknesssmoothingiterations` | `5` | normal 및 두께 스무딩 반복 수 |
 | `WallThicknessCurvatureFactor` | `wallthicknesscurvaturefactor` | `0.8` | 오목 곡률 반경 대비 허용 두께 비율 |
 | `LocalWallThickness` | `localWallThickness_` | 비어 있음 | `face ID → 두께` override |
+| `WallMeshTetGenShell` | `walltetgenshell` | `0` | 벽을 wedge 압출 대신 TetGen tetrahedron으로 채움(12절) |
 | `BoundaryLayerDirection` | `boundarylayerdirection` | `1` | 유체 boundary layer를 안쪽으로 압출 |
+
+`WallMeshTetGenShell`은 벽의 **바깥 면을 만드는 방식**을 바꾼다. 꺼져 있으면
+9~11절과 13절의 wedge 압출 경로, 켜져 있으면 12절의 거리장 오프셋 경로다. 두
+경로 모두 안쪽 면(fluid/wall interface)의 좌표는 건드리지 않으므로 선택은
+자유롭다.
 
 `SetMeshOptions()`는 공통 진입점에서 값을 검증한다.
 
@@ -255,14 +274,6 @@ capNormal_i = normalize(boundaryPoint_i - loopCenter)
 - 꺼지면 point별 `MeshSizingFunction × blthicknessfactor`를 쓴다.
 - `numsublayers`와 `sublayerratio`가 두께 방향 분할을 정한다.
 
-> **알려진 부작용(코드 정리 대상)**: `GenerateBoundaryLayerMesh()`는 유체 boundary
-> layer 압출 전후로 `boundarylayermesh_normals.vtu`, `boundarylayermesh.vtu`,
-> `innerSurface.vtu` 세 파일을 **조건 없이 현재 작업 디렉터리에 기록한다**
-> (`sv_TetGenMeshObject.cxx`의 `TGenUtils_WriteVTU` 호출 3개). 프로토타입 커밋
-> `674275a0`의 잔재이며 알고리즘에는 관여하지 않지만, 메시 생성마다 전체 메시를
-> 디스크에 쓰므로 큰 모델에서는 비용이 있고 작업 디렉터리를 오염시킨다. 제거하는
-> 것이 맞으나 별도 커밋으로 다룬다.
-
 VMTK가 반환한 가장 안쪽 표면은 local 변수 `innerSurface`에 있고, 이 표면이
 `polydatasolid_`로 전달되어 cap 생성과 TetGen 유체 코어의 경계가 된다.
 `innerblmesh_`는 압출 전 surface의 보관본이며 최종 inner surface 자체는 아니다.
@@ -276,13 +287,16 @@ VMTK가 반환한 가장 안쪽 표면은 local 변수 `innerSurface`에 있고,
 `vtkDoubleArray WallThickness`를 만든다. 이후 두께는 다음 순서로 변한다.
 
 ```text
-global/local 요청 두께
-  → 곡률 제한
-  → Laplacian 두께 스무딩
-  → 곡률 재제한
-  → 바깥벽 라운딩(두께 유지, 값은 달성 outer 거리로 갱신)
-  → fold 방지 축소
-  = 최종 WallThickness
+                       wedge 압출 경로              TetGen shell 경로
+global/local 요청 두께        │                            │
+  → 곡률 제한                 ●                            ─ (건너뜀)
+  → Laplacian 두께 스무딩      ●                            ●
+  → 곡률 재제한               ●                            ─ (건너뜀)
+  → gradation 제한            ●                            ●
+  → 바깥벽 라운딩             ●                            ─ (건너뜀)
+  → fold 방지 축소            ●                            ─ (건너뜀)
+  → 최종 gradation 제한       ●                            ─ (건너뜀)
+                          = 최종 WallThickness          = 요청 두께 그대로
 ```
 
 이와 별개로 오목 영역 warp vector(normal) 스무딩(8절)이 두께 계산 직후·곡률 제한
@@ -291,6 +305,17 @@ global/local 요청 두께
 개입하지 않는다. 바깥벽
 라운딩(11.1절)은 두께를 유지하면서 바깥면을 밀어내고 그 달성 거리를 `WallThickness`
 값과 normal에 다시 인코딩하므로, 이후 fold 방지가 처리할 잔여 fold만 남긴다.
+
+**건너뛰는 패스들의 공통점**은 하나다. 전부 1:1 바깥쪽 압출을 유효하게 만들려고
+존재하며, 그 대가를 두께로 치른다. shell 경로는 압출하지 않으므로 막을 것이 없다.
+남는 gradation 제한만이 압출의 유효성이 아니라 두께장 자체의 성질(급변 제거)을
+다루기 때문에 양쪽 모두에서 실행된다. 자세한 근거는 12.2절.
+
+`gradation 제한`(`TGenUtils_LimitThicknessGradation`)은 두께의 기울기를
+`maxSlope = 0.5`(약 26.6도 taper)로 제한한다. 값을 낮추기만 하므로 곡률 상한과
+local 두께를 천장으로 유지하며, 재클램프가 필요 없다. 이것이 필요한 이유는
+fold 방지가 접힌 삼각형을 그 최솟값으로 평준화해서 절벽 하나가 다음 절벽을
+만들기 때문이다 — 실측으로 감당 불가 접합부 15곳이 얇아진 구역 37곳이 되었다.
 
 ### 7.1 global/local 요청 두께
 
@@ -444,6 +469,9 @@ Jacobi 방식이다. 따라서 local face 경계의 계단과 곡률 제한 부�
 
 ## 11. 바깥벽 라운딩과 fold-over 방지
 
+> 이 절 전체는 **wedge 압출 경로 전용**이다. `WallMeshTetGenShell`이 켜져 있으면
+> 두 단계 모두 실행되지 않는다(12.2절).
+
 두께가 최종 확정된 뒤, VMTK 압출 전에 두 단계가 순서대로 실행된다. 먼저 라운딩이
 접합부 두께를 유지하면서 바깥면을 밀어 함몰을 메우고(11.1), 그다음 fold 방지가
 어떤 방향으로도 벽을 실을 수 없는 퇴화 입력에 대해서만 안전망으로 두께를 깎는다
@@ -535,7 +563,146 @@ t_min(i) = min(0.05 × t_start(i), 0.5 × a_min(i))
 이 검사는 한 triangle의 winding만 보는 국소 검사다. 떨어진 두 표면 구간이
 압출 후 서로 충돌하는 전역 자기 교차는 검출하지 못한다.
 
-## 12. VMTK 고체벽 압출
+## 12. 거리장 오프셋 바깥면과 TetGen shell 채움
+
+`WallMeshTetGenShell`이 켜지면 고체벽은 wedge 압출이 아니라 안쪽 면과 바깥 면
+사이를 TetGen tetrahedron으로 채워 만든다. 이 경로는 8~10절의 두께 계산과
+gradation 제한까지만 공유하고, 11절(라운딩, fold 방지)과 13절(VMTK 압출)을
+대체한다.
+
+### 12.1 왜 대응을 버리는가
+
+wedge 압출은 바깥 절점 하나를 안쪽 절점 하나에 묶는다. 고체를 두께 `t`만큼
+팽창시킨 경계(Minkowski dilation)를 생각하면 이 묶음이 왜 표현력이 부족한지가
+나온다.
+
+- 볼록한 곳에서 바깥 면은 반경 `t`로 둥글어진다.
+- 오목한 crotch에서는 두 오프셋 시트가 서로를 파고들고, 그 **교차선(crease)**이
+  경계다. 교차선 너머의 시트는 경계가 아니다.
+
+즉 오프셋이 잘려나가는 쪽에 놓이는 안쪽 점들은 **대응하는 바깥 점이 아예 없는
+것이 정답**이다. 1:1 대응을 유지한 채로는 이 배치가 존재하지 않는다. 라운딩에
+클리어런스 구속을 넣었던 시도가 수렴하지 못한 것은 튜닝 문제가 아니라 고정된
+삼각분할 위에서 존재하지 않는 답을 찾았기 때문이며, 그래서 되돌렸다.
+
+`d(x) = t` 레벨셋에는 지켜야 할 대응이 없다. crease와 라운딩은 겨냥하는 것이
+아니라 구성에서 나오고, 결과의 모든 점은 안쪽 면에서 최소 `t` 떨어져 있다.
+
+### 12.2 두께 축소 패스를 건너뛴다
+
+`GenerateWallMesh()`의 지역 플래그 `extrudeWedges = !walltetgenshell`가 다음
+패스를 shell 경로에서 끈다.
+
+| 패스 | shell 경로 | 이유 |
+| --- | --- | --- |
+| 곡률 클램프(9.1)와 재클램프 | 건너뜀 | 오프셋은 `t > R`에서도 자기교차하지 않는다 |
+| 바깥벽 라운딩(11.1) | 건너뜀 | 오프셋이 이미 crease/fillet을 만든다 |
+| fold 방지(11.2) | 건너뜀 | 막을 fold가 없다 |
+| 최종 gradation 제한 | 건너뜀 | 위 패스가 만드는 절벽이 없다 |
+| `TGenUtils_ReportAchievedWallThickness` | 건너뜀 | 만들어지지 않는 면을 측정한다 |
+
+유지하는 것은 요청 두께 계산(7절), warp vector 스무딩(8절), `t/R` 진단(9.2절),
+두께 Laplacian 스무딩(10절), 그리고 요청 두께에 대한 gradation 제한이다.
+gradation 제한만 남는 이유는 그것이 압출의 유효성이 아니라 두께장 자체의
+성질이기 때문이다.
+
+### 12.3 오프셋 바깥면 생성
+
+`TGenUtils_BuildOffsetOuterSurface()`가 다음 순서로 만든다.
+
+1. **cap을 닫는다.** 부호 있는 거리를 정의하려면 닫힌 면이 필요하다.
+   `TGenUtils_ExtractBoundaryLoops()`가 경계 edge(셀 하나만 쓰는 edge)를 소유 셀의
+   winding 순서로 걸어 rim 루프를 만들고, 각 루프를 중심점으로의 삼각형 팬으로
+   닫는다. 팬은 rim edge를 벽 삼각형과 반대 방향으로 traverse하므로 닫힌 면의
+   방향이 일관된다.
+2. **격자.** 간격은 `min(최소 두께, maxedgesize) / 2`이고, voxel 예산
+   (`FillWallMeshWithTetGen`이 6400만을 넘긴다)을 넘으면 맞을 때까지 거칠어진다.
+   거칠어졌으면 그 사실과 실제 해상도를 로그에 출력한다. 격자는 모델 경계상자를
+   `1.25 × 최대두께 + 5 × 간격`만큼 넓힌 범위를 덮는다.
+3. **밴드.** 각 삼각형의 경계상자를 `1.25 × 국소두께 + 3 × 간격`만큼 부풀린
+   범위의 voxel만 표시한다. 거리는 이 밴드에서만 평가한다.
+4. **값.** 밴드 voxel마다 `vtkImplicitPolyDataDistance`의 부호 거리 `d(x)`와,
+   `vtkStaticPointLocator`로 찾은 **안쪽 면**(팬 중심점 제외) 최근접 점의 두께
+   `t`를 써서 `d(x) - t`를 넣는다. 부호 규약은 단정하지 않고 격자 모서리에서
+   실측해 정한다. 모서리 거리의 크기까지 확인해 "뒤집힌 것"과 "격자 가정이
+   깨진 것"을 구분한다.
+5. **밴드 밖.** 격자 모서리에서 flood fill한 voxel은 `+LARGE`, 도달하지 못한
+   voxel은 lumen 안쪽이므로 `-LARGE`.
+6. **검증.** 밴드 voxel이 반대 부호의 채워진 voxel과 맞닿아 있으면 레벨셋이
+   밴드를 벗어난 것이므로 오류로 보고한다. 그대로 컨투어하면 오프셋이 아니라
+   밴드 가장자리를 따라가는 잘못된 면이 나온다.
+7. **컨투어.** `vtkFlyingEdges3D`로 `0`을 컨투어한다. 연결된 shell 개수를
+   보고한다(2개 이상이면 lumen을 막았거나 모델이 분리되어 있다는 뜻).
+
+### 12.4 리메시, 트리밍, 스티칭
+
+컨투어는 격자 해상도이고 marching cubes 특유의 sliver가 많으므로, `MMG`로
+`maxedgesize`에 맞춰 리메시한다(각도 임계 45도가 접합부 crease를 ridge로
+보존한다). MMG 없이 빌드된 경우 리메시를 건너뛰고 그 사실을 로그에 남긴다.
+
+**리메시가 트리밍보다 먼저다.** 반대로 하면 리메시가 trimmed rim을 cap 평면 밖으로
+옮겨 안쪽 rim과의 연결이 깨진다.
+
+`TGenUtils_TrimOffsetSurfaceAtCaps()`가 cap 위의 돔을 잘라낸다.
+
+- 자르는 면은 cap 평면이되 **그 cap 근처에서만** 자른다. 무한 평면은 반대편에
+  우연히 놓인 다른 부위까지 자르며, 되꺾이는 혈관에서는 그것이 실제 벽이다.
+  유지 조건을 점 스칼라 `max(평면 아래, rim 반경 2배 밖)`로 만들어
+  `vtkClipPolyData`에 넘긴다.
+- 평면 방향은 point normal이 아니라 rim 자체에서 구한다. `SetCapBoundaryNormals()`가
+  이미 normal을 cap 평면 안에 눕혀 놓았기 때문이다. rim은 벽 삼각형의 winding으로
+  걸리고 그 순서는 바깥 방향에 대해 시계방향이므로, **바깥 방향은 rim의 Newell
+  법선의 반대**다.
+- 트리밍 후 rim 개수가 cap 개수와 다르면 오류다. 잘림이 돔 이상을 가져간
+  경우이며, 조용히 넘어가면 벽에 구멍이 남는다.
+
+`TGenUtils_StitchCapAnnulus()`가 각 혈관 끝에서 두 rim 사이를 삼각분할한다. 두
+rim은 점도 점 개수도 다르므로 1:1 스트립을 쓸 수 없다. 두 rim 모두 같은 끝을
+감으므로 cap 축에 대한 각도가 둘 다를 정렬하고, 각 단계에서 뒤처진 rim을
+전진시키며 병합한다. 각 rim이 축을 정확히 한 바퀴 감는지 검사하고 아니면 오류다
+(되꺾이는 rim에는 이 순서가 없어 겹친 facet이 된다). 삼각형 방향은 경우별로
+따지지 않고 바깥 방향과의 내적으로 측정해 맞춘다. 면적 0 삼각형은 버리지 않고
+세어서 보고한다 — 끝면에 구멍을 남기는 쪽이 더 나쁘다.
+
+### 12.5 shell 구성과 TetGen 채움
+
+`TGenUtils_BuildWallShellSurface()`가 다음을 합쳐 닫힌 면을 만든다.
+
+- 안쪽 면 삼각형(뒤집어 벽 바깥을 향하게), point index `0 .. numPts-1`
+- 트리밍된 오프셋 면 삼각형, point index `numPts ..`
+- 각 cap의 annulus
+
+컨투어 삼각형의 방향은 필터의 성질이지 이 벽의 성질이 아니므로, 표본 삼각형의
+법선이 최근접 안쪽 점에서 바깥으로 향하는지 측정해 정한다. 표본의 90% 미만이
+다수와 어긋나면 오류다(일관되게 감기지 않은 면은 어느 쪽으로 채워도 틀린다).
+
+`FillWallMeshWithTetGen()`이 이 shell을 `plc=1`, `nobisect=1`, `quality=1`,
+`minratio=1.414`, `mindihedral=10`으로 채운다. `nobisect=1`이 입력 facet에 절점을
+추가하지 못하게 하므로 fluid/wall interface 절점이 그대로 보존된다. 안쪽 면이
+닫혀 있어 cap이 없는 입력에서는 shell이 lumen까지 감싸므로
+`TGenUtils_FindLumenHolePoint()`로 hole을 지정한다.
+
+TetGen 출력에는 체적 tetrahedron만 있으므로, 하위
+`VMTKUtils_CreateBoundaryLayerSurfaceAndCaps()`가 기대하는 모양에 맞춰 shell
+삼각형을 `CellEntityIds`/`ModelFaceID`와 함께 다시 넣는다. 삼각형의 세 점이 모두
+`numPts` 미만이면 interface(`1`), 모두 이상이면 outer wall(`2`), 섞여 있으면
+혈관 끝(`9999`)이다.
+
+### 12.6 이 경로가 보장하는 것과 실패하는 방식
+
+레벨셋은 자기교차하지 않는다. 두 벽이 만나면 교차가 아니라 **융합**한다. 따라서
+간격이 두께의 2배 미만인 두 혈관은 오류 없이 하나의 고체로 합쳐지며, 이는
+오프셋 진단(18절)에서 "요청보다 훨씬 두꺼운 구역"으로 읽힌다. 물리적으로 원치
+않으면 해당 face의 local wall thickness를 간격 절반 아래로 내리거나 모델을
+블렌드해야 한다.
+
+TetGen이 shell에서 자기교차를 보고한다면 원인은 접합부가 아니다. 오프셋이
+만들지 않은 유일한 부분인 annulus이거나, 이미 자기교차한 안쪽 면이다.
+
+## 13. VMTK 고체벽 압출
+
+> 이 절과 14절은 **wedge 압출 경로 전용**이다. `WallMeshTetGenShell`이 켜져 있으면
+> 12절이 이를 대체한다.
 
 최종 `WallThickness` 배열을 surface에 추가하고
 `VMTKUtils_BoundaryLayerMesh()`를 호출한다.
@@ -567,7 +734,7 @@ point별 두께를 잘라내는 `MaximumLayerThickness`가 있지만 생성자 �
 때문에 이 상한이 라운딩 결과를 자를 수 있는지 의심할 수 있으나, 현재 구성에서는
 자르지 않는다.
 
-### 12.1 warp vector 구성
+### 13.1 warp vector 구성
 
 `vtkvmtkBoundaryLayerGenerator::BuildWarpVectors()`는 각 point normal을 정규화하고
 point별 두께를 곱한다.
@@ -579,7 +746,7 @@ w_i = normalize(n_i) × WallThickness(i) × LayerThicknessRatio
 고체벽의 `LayerThicknessRatio`는 `1.0`이므로 `|w_i|`는 최종
 `WallThickness(i)`다.
 
-### 12.2 VMTK 내부 tangle 검사와 방향 보정
+### 13.2 VMTK 내부 tangle 검사와 방향 보정
 
 VMTK는 warp를 한 번에 적용하지 않고 총 100 substep으로 점진적으로 적용한다.
 현재 구성은 initial 1회, intermediate 10회, final 89회로 나뉜다.
@@ -599,7 +766,7 @@ tangle이 있으면 `LocalUntangle()`이 주변 triangle tangent 성분을 사�
 untangle이 최종 방향을 추가로 기울일 수 있다. 이 방향 변경이 크면 요청한 normal
 방향보다 바깥으로 덜 나가 접합부가 움푹 들어가 보일 수 있다.
 
-### 12.3 layer 위치
+### 13.3 layer 위치
 
 전체 layer 수를 `L`, sublayer ratio를 `r`, 0부터 시작하는 layer index를 `k`라
 하면 layer 가중치는 다음과 같다.
@@ -619,7 +786,7 @@ p(i,k) = p_i + ((k+1)/L) × w_i
 따라서 `NumberOfWallLayers`는 총 벽 두께를 늘리지 않는다. 동일한 총 두께를 몇
 개의 요소 layer로 나눌지만 결정한다.
 
-## 13. wedge 생성과 tetrahedron 변환
+## 14. wedge 생성과 tetrahedron 변환
 
 VMTK는 시작 surface cell과 각 layer의 대응 cell을 연결한다.
 
@@ -645,7 +812,7 @@ VMTK는 시작 surface cell과 각 layer의 대응 cell을 연결한다.
 이는 node 순서만 바로잡는 과정이다. 기하적으로 뒤틀리거나 자기 교차한 요소를
 복구하는 알고리즘은 아니다.
 
-## 14. TetGen 유체 코어 생성
+## 15. TetGen 유체 코어 생성
 
 유체 boundary layer의 가장 안쪽 표면은 열린 입구/출구를 갖는다.
 `GenerateAndMeshCaps()`가 VMTK capper로 이를 닫고 원본 `ModelFaceID`를 복원한
@@ -660,12 +827,12 @@ boundary layer의 node 대응을 유지하는 데 필요하다. sizing function�
 TetGen은 고체벽 체적을 채우지 않는다. 고체벽은 VMTK의 surface extrusion과
 wedge-to-tet 변환으로 만들어진다.
 
-## 15. 유체와 고체벽 병합
+## 16. 유체와 고체벽 병합
 
 `GenerateMesh()`의 TetGen 단계가 끝나면 `AppendBoundaryLayerMesh()`가
 `VMTKUtils_AppendData()`를 호출한다.
 
-### 15.1 유체 코어와 유체 boundary layer
+### 16.1 유체 코어와 유체 boundary layer
 
 1. 유체 boundary-layer wedge/hex를 tetrahedron으로 변환한다.
 2. 음수 signed-volume tetrahedron의 node 순서를 보정한다.
@@ -681,7 +848,7 @@ mesh point로 병합된다.
 고체벽이 있으면 `NewRegionBoundaryLayer` 옵션과 무관하게 유체 boundary layer는
 TetGen 코어와 같은 유체 region에 남는다. 새 region ID는 고체벽에 사용된다.
 
-### 15.2 고체벽 region
+### 16.2 고체벽 region
 
 고체벽 `wallmesh_`도 tetrahedron으로 변환하고 orientation을 보정한다.
 유체 region ID가 `modelId`라면 고체벽의 모든 volume cell에 다음 값을 준다.
@@ -700,7 +867,7 @@ wall ModelRegionID = modelId + 1
 surface를 따로 얻고, `CellEntityIds=9999`인 wall 끝단 sidewall의
 `ModelFaceID`를 대응 cap에서 복원한다.
 
-### 15.3 fluid/wall interface의 node 병합
+### 16.3 fluid/wall interface의 node 병합
 
 `VMTKUtils_CreateNewBoundaryLayerRegion()`이 합쳐진 유체 volume과 wall volume을
 받는다.
@@ -721,7 +888,7 @@ surface를 따로 얻고, `CellEntityIds=9999`인 wall 끝단 sidewall의
 가능성은 있다. 중요한 보장은 ID가 조밀하다는 것이 아니라 같은 interface 좌표가
 같은 ID를 사용한다는 것이다.
 
-### 15.4 최종 surface 병합
+### 16.4 최종 surface 병합
 
 volume 병합과 surface 병합은 별도로 수행된다.
 
@@ -740,11 +907,11 @@ outer wall은 원래 모델보다 바깥에 있으므로 전체 surface에 대�
 최근접 매핑하지 않는다. fluid와 wall source를 분리해 각자의 `ModelFaceID`를
 복원한다.
 
-## 16. “접합부 병합”의 두 의미
+## 17. “접합부 병합”의 두 의미
 
 혈관 분지에서 말하는 병합은 다음 두 개를 구분해야 한다.
 
-### 16.1 혈관 branch의 기하 병합
+### 17.1 혈관 branch의 기하 병합
 
 mesher 안에서 독립적인 원통 branch들을 boolean union하는 단계는 없다. 입력
 모델링 단계에서 이미 branch가 하나의 연결된 surface로 병합되어 있어야 한다.
@@ -752,14 +919,18 @@ mesher는 그 접합부를 다음 방식으로 연속적으로 처리한다.
 
 - 공유 point topology 유지
 - 공유점의 local 두께를 고유 face별 산술 평균
-- centerline 반경에 따른 두께 변화
 - 오목 영역 normal(warp vector) 스무딩
-- 곡률 기반 두께 제한
-- Laplacian 두께 스무딩
-- 바깥벽 라운딩(두께 유지 볼록 fillet)
-- outer triangle fold 검사와 국소 두께 축소
+- Laplacian 두께 스무딩과 gradation 제한
 
-### 16.2 생성된 유체/고체 mesh의 병합
+여기까지는 두 경로가 같고, 접합부의 바깥면을 만드는 방식이 갈린다.
+
+| | wedge 압출 경로 | TetGen shell 경로 |
+| --- | --- | --- |
+| 두께 | 곡률 기반 제한으로 축소 | 요청값 유지 |
+| 바깥면 | 라운딩(볼록 fillet)으로 함몰을 메움 | 오프셋의 crease가 그 자리 |
+| 잔여 fold | outer triangle 검사 후 국소 두께 축소 | 발생하지 않음 |
+
+### 17.2 생성된 유체/고체 mesh의 병합
 
 이는 boolean 연산이 아니라 같은 좌표의 point를 합치고 ID를 일관되게 만드는
 데이터 병합이다.
@@ -769,7 +940,7 @@ mesher는 그 접합부를 다음 방식으로 연속적으로 처리한다.
 - 고체벽: 별도 `ModelRegionID`
 - 최종 surface: fluid/wall source별 face ID 복원 후 append
 
-## 17. 진단 출력의 의미
+## 18. 진단 출력의 의미
 
 현재 구현은 다음 정보를 로그로 출력한다.
 
@@ -781,9 +952,24 @@ mesher는 그 접합부를 다음 방식으로 연속적으로 처리한다.
   구역별 `t`, `R_typical`, `R_smallest`, 퇴화 삼각형 인접 여부
   (`Concave curvature vs requested wall thickness (t/R, ...)`)
 - 바깥벽 라운딩으로 끌어올린 오목 point 수와 최대 fillet 배율, 위치
-  (`Wall outer rounding: ...`)
-- 곡률 제한으로 매우 얇아진 point 수
-- fold 방지 반복 후에도 남은 triangle과 위치/형상/normal 정보
+  (`Wall outer rounding: ...`, wedge 경로 전용)
+- 곡률 제한으로 매우 얇아진 point 수(wedge 경로 전용)
+- fold 방지 반복 후에도 남은 triangle과 위치/형상/normal 정보(wedge 경로 전용)
+- shell 경로에서는 대신 다음이 출력된다.
+  - 오프셋 격자 크기/간격, 예산으로 거칠어졌다면 그 사실과 실제 해상도
+  - 밴드에서 평가한 voxel 수, 부호로 채운 안팎 voxel 수
+  - 오프셋 면의 점/삼각형 수와 연결된 shell 개수
+  - 리메시 전후 삼각형 품질(`offset outer wall, before/after remesh`)
+  - cap별 안쪽 rim과 트리밍된 rim의 점 수
+  - **양방향 오프셋 두께**(`Offset wall thickness [...]`). 바깥 방향(오프셋 면 →
+    안쪽 면)은 구성 오차를 재고 — 레벨셋은 모든 오프셋 점을 요청 거리에 놓으므로
+    미달은 격자 간격이나 리메시 탓이다 — 안쪽 방향(안쪽 면 → 오프셋 면)은
+    인터페이스 위에 실제로 서 있는 벽을 잰다. 접합부에서 1을 넘는 것은 crease가
+    채운 것이므로 의도된 결과이고, 1 미만이 벽이 없는 것이다. 안쪽 방향 비율은
+    `OffsetThicknessRatio` 필드로 `wall_offset_diagnostics.vtp`에 기록된다
+  - 면적 0인 혈관 끝 삼각형 수
+  - shell의 점/삼각형 수와 닫은 혈관 끝 수, TetGen이 채운 tetrahedron/절점 수
+  - interface/outer/side wall 삼각형 수
 - 최종 두께가 반경 보정 후 기준 두께의 90%/50%/25% 미만인 point 수
   (`Wall thickness reduction (final vs requested): ...`)
 - 얇아진 point를 **공간적으로 분리된 구역(thinned regions) 단위**로, 최악 구역부터
@@ -806,27 +992,37 @@ mesher는 그 접합부를 다음 방식으로 연속적으로 처리한다.
 warp tilt는 VMTK wrapper가 유체 boundary layer와 고체벽 양쪽에서 사용되므로
 호출 문맥과 압출 방향을 함께 보고 해석해야 한다.
 
-## 18. 보장 범위와 한계
+## 19. 보장 범위와 한계
 
 현재 알고리즘은 다음을 보장하거나 의도한다.
 
 - fluid/wall interface의 시작 좌표를 두께 처리 중 이동하지 않는다.
 - local 두께 공유점 평균이 triangle 밀도에 의존하지 않는다.
 - normal/두께 스무딩이 point 순회 순서에 의존하지 않는다.
-- 고체벽 layer 전체 두께가 point별 `WallThickness`를 따른다.
+- 고체벽 layer 전체 두께가 point별 `WallThickness`를 따른다(wedge 경로).
 - 유체와 벽이 interface node와 `GlobalNodeID`를 공유한다.
 - 유체와 벽을 서로 다른 `ModelRegionID`로 구분한다.
 
+shell 경로(12절)는 여기에 더해 다음을 보장한다.
+
+- 바깥 면의 모든 점이 안쪽 면에서 최소 요청 두께만큼 떨어져 있다(격자 해상도와
+  리메시 오차 범위 내. 그 오차 자체를 18절의 양방향 진단이 측정한다).
+- 바깥 면은 자기교차하지 않는다. 레벨셋이기 때문이다.
+- `nobisect=1`이므로 TetGen이 입력 facet에 절점을 추가하지 않는다.
+
 다음은 보장하지 않는다.
 
-- 떨어진 surface 구간 사이의 전역 outer-wall 자기 교차
+- 떨어진 surface 구간 사이의 전역 outer-wall 자기 교차(wedge 경로).
+  shell 경로에서는 대신 두 벽이 **융합**하며, 이는 오류로 검출되지 않는다(12.6절)
 - 입력 surface의 0-area triangle 또는 0-length normal 복구
 - VMTK untangle 뒤 모든 tetrahedron의 양의 Jacobian과 충분한 품질
 - node 순서 보정만으로 기하학적으로 접힌 요소 복구
 - 여러 TetGen `ModelRegionID`를 가진 입력의 일반적인 append
 - 최종 surface에 coincident interface face가 전혀 없다는 보장
+- shell 경로에서 벽 요소가 두께 방향으로 층을 이룬다는 보장. 채움은 비구조
+  tetrahedron이며 `NumberOfWallLayers`는 이 경로에서 의미가 없다
 
-## 19. 실행 후 검증 체크리스트
+## 20. 실행 후 검증 체크리스트
 
 Linux Docker 실행 환경에서 최소한 다음을 확인한다.
 
@@ -842,22 +1038,39 @@ Linux Docker 실행 환경에서 최소한 다음을 확인한다.
     거의 없는데도 `thinned regions`가 여러 개인가(두께 패스가 원인). 구역별
     `R_typical`과 `R_smallest`가 함께 작은지(날카로운 형상), `R_smallest`만
     작은지(퇴화 삼각형 아티팩트)도 함께 본다.
-10. wall layer 수를 바꿔도 총 두께가 유지되고 두께 방향 해상도만 변하는가.
+10. wall layer 수를 바꿔도 총 두께가 유지되고 두께 방향 해상도만 변하는가
+    (wedge 경로 한정. shell 경로에서는 이 옵션이 아무것도 하지 않는다).
 11. cap 및 sidewall의 `ModelFaceID`가 입력 face와 일치하는가.
-13. mesh-complete 출력 후에도 region, face, node, element ID가 보존되는가.
+12. mesh-complete 출력 후에도 region, face, node, element ID가 보존되는가.
+
+shell 경로(12절)에서는 추가로 다음을 확인한다.
+
+13. 오프셋 격자 간격이 예산 때문에 거칠어졌는가. 거칠어졌다면 그 해상도가 벽
+    두께 대비 충분한가.
+14. 양방향 오프셋 두께 진단에서 **바깥 방향**이 거의 1인가. 1보다 작다면 격자나
+    리메시가 두께를 갉아먹은 것이므로, 이 접근 자체의 이득이 사라진다.
+15. **안쪽 방향**에서 90% 미만 point 수가 0에 가까운가. 접합부에서 1을 넘는 것은
+    의도된 결과(crease가 채움)이므로 문제가 아니다.
+16. 요청보다 훨씬 두꺼운 구역이 있다면 그것이 두 혈관의 융합인가(12.6절).
+    융합이라면 해당 face의 local wall thickness를 간격 절반 아래로 내린다.
+17. 면적 0인 혈관 끝 삼각형 수가 0인가. 0이 아니라면 cap rim이 퇴화에 가깝다.
+18. 오프셋 면의 연결된 shell 개수가 예상과 맞는가(정상은 1개, 모델이 분리되어
+    있으면 그 개수).
 
 Mac 개발 환경에서는 실제 SimVascular/VMTK/TetGen 빌드와 실행 성공을 단정하지
 않는다. 실행 검증 결과는 저장소의 `logs/`에 남긴다.
 
-## 20. 코드 위치
+## 21. 코드 위치
 
 라인 번호는 변경에 따라 이동할 수 있으므로 함수명을 기준으로 찾는다.
 
 | 파일 | 핵심 함수/구조 |
 | --- | --- |
-| `Code/Source/sv/Mesh/TetGenMeshObject/sv_TetGenMeshObject.h` | `TGoptions`, `GenerateBoundaryLayerMesh`, `GenerateWallMesh`, `AppendBoundaryLayerMesh` |
-| `Code/Source/sv/Mesh/TetGenMeshObject/sv_TetGenMeshObject.cxx` | constructor 기본값, `SetMeshOptions`, `SetBoundaryLayer`, `SetWalls`, `GenerateMesh`, `GenerateSurfaceRemesh`, `SetCapBoundaryNormals`, `GenerateBoundaryLayerMesh`, `GenerateWallMesh`, `GenerateAndMeshCaps`, `AppendBoundaryLayerMesh` |
-| `Code/Source/sv/Mesh/TetGenMeshObject/sv_tetgenmesh_utils.cxx` | `TGenUtils_SmoothWarpVectorsInConcaveRegions`, `TGenUtils_SmoothPointArray`, `TGenUtils_ClampThicknessToConcaveCurvature`, `TGenUtils_ReportConcaveCurvatureVsThickness`, `TGenUtils_ClusterPointsIntoRegions`, `TGenUtils_RoundOuterWallToPreserveThickness`, `TGenUtils_LimitThicknessToPreventFold`, 품질 보고 함수 |
+| `Code/Source/sv/Mesh/TetGenMeshObject/sv_TetGenMeshObject.h` | `TGoptions`(`walltetgenshell` 포함), `GenerateBoundaryLayerMesh`, `GenerateWallMesh`, `FillWallMeshWithTetGen`, `AppendBoundaryLayerMesh` |
+| `Code/Source/sv/Mesh/TetGenMeshObject/sv_TetGenMeshObject.cxx` | constructor 기본값, `SetMeshOptions`, `SetBoundaryLayer`, `SetWalls`, `GenerateMesh`, `GenerateSurfaceRemesh`, `SetCapBoundaryNormals`, `GenerateBoundaryLayerMesh`, `GenerateWallMesh`(`extrudeWedges` 게이팅), `FillWallMeshWithTetGen`, `GenerateAndMeshCaps`, `AppendBoundaryLayerMesh` |
+| `Code/Source/sv/Mesh/TetGenMeshObject/sv_tetgenmesh_utils.cxx` (wedge 경로) | `TGenUtils_SmoothWarpVectorsInConcaveRegions`, `TGenUtils_SmoothPointArray`, `TGenUtils_ClampThicknessToConcaveCurvature`, `TGenUtils_ReportConcaveCurvatureVsThickness`, `TGenUtils_LimitThicknessGradation`, `TGenUtils_ClusterPointsIntoRegions`, `TGenUtils_RoundOuterWallToPreserveThickness`, `TGenUtils_LimitThicknessToPreventFold`, `TGenUtils_ReportAchievedWallThickness`, 품질 보고 함수 |
+| `Code/Source/sv/Mesh/TetGenMeshObject/sv_tetgenmesh_utils.cxx` (shell 경로) | `TGenUtils_ExtractBoundaryLoops`, `TGenUtils_BuildOffsetOuterSurface`, `TGenUtils_TrimOffsetSurfaceAtCaps`, `TGenUtils_StitchCapAnnulus`, `TGenUtils_BuildWallShellSurface`, `TGenUtils_FindLumenHolePoint`, `TGenUtils_ReportOffsetWallThickness`, 구조체 `TGenUtilsCapRim` |
+| `Code/Source/sv/Mesh/MMGMeshUtils/sv_mmg_mesh_utils.cxx` | `MMGUtils_SurfaceRemeshing` (오프셋 면 리메시) |
 | `Code/Source/sv/Mesh/VMTKUtils/sv_vmtk_utils.cxx` | `VMTKUtils_BoundaryLayerMesh`, `VMTKUtils_AppendData`, `VMTKUtils_CreateNewBoundaryLayerRegion`, `VMTKUtils_CreateBoundaryLayerSurfaceAndCaps`, `VMTKUtils_ReorderTetElements` |
 | `Code/ThirdParty/vmtk/simvascular_vmtk/vtkvmtkBoundaryLayerGenerator.cxx` | `RequestData`, `BuildWarpVectors`, `CheckTangle`, `LocalUntangle`, `WarpPoints` |
 | `Code/ThirdParty/vmtk/simvascular_vmtk/vtkvmtkUnstructuredGridTetraFilter.cxx` | `Execute` |
