@@ -57,6 +57,8 @@
 #include "vtkDataSetSurfaceFilter.h"
 #include "vtkAppendPolyData.h"
 #include "vtkPolyDataConnectivityFilter.h"
+#include "vtkCellLocator.h"
+#include "vtkGenericCell.h"
 #include "vtkCenterOfMass.h"
 
 #ifdef SV_USE_VMTK
@@ -2779,12 +2781,20 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // the points whose offset lands there have no outer point, which is why every
   // pass that insisted on giving them one had to pay in thickness.
   //
-  // 64 million voxels is the ceiling on the field: a float per voxel and a byte
-  // of bookkeeping is around 320 MB, which is a cost worth paying once per mesh
-  // and not worth exceeding. The builder coarsens the spacing to fit and says
-  // so, so a model too fine for the budget produces a rougher offset rather
-  // than a failure.
-  const vtkIdType maxOffsetVoxels = 64000000;
+  // The ceiling on the distance field: a float per voxel and a byte of
+  // bookkeeping, so 160 million is about 800 MB, paid once per mesh.
+  //
+  // It has to be this large because a vascular bounding box is mostly empty. A
+  // model a few tens of units across and a few hundred long needs a few hundred
+  // cells on its long axis before the spacing even reaches the wall thickness,
+  // and almost all of those cells are air. The builder coarsens the spacing to
+  // fit the budget and reports how many voxels are left per wall thickness; the
+  // smooth part of the offset survives a coarse grid, but the crease at a
+  // junction is rounded over about half a cell, so a count near one means the
+  // grid is eating the very thing the offset is for. If that happens on a model
+  // this budget cannot hold, the fix is to contour in slabs rather than to
+  // spend more memory.
+  const vtkIdType maxOffsetVoxels = 160000000;
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   if (TGenUtils_BuildOffsetOuterSurface(surface, thicknessArray,
         meshoptions_.maxedgesize, maxOffsetVoxels, offsetOuter) != SV_OK)
@@ -2793,32 +2803,86 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     return SV_ERROR;
   }
 
+  // The smallest wall the offset was asked for. It bounds how far the remesh
+  // below may move the surface, because that is the quantity the whole offset
+  // exists to keep.
+  double smallestThickness = 0.0, largestThickness = 0.0;
+  for (vtkIdType ptId = 0; ptId < thicknessArray->GetNumberOfTuples(); ptId++)
+  {
+    double t = thicknessArray->GetValue(ptId);
+    if (t <= 0.0)
+    {
+      continue;
+    }
+    if (smallestThickness == 0.0 || t < smallestThickness)
+    {
+      smallestThickness = t;
+    }
+    if (t > largestThickness)
+    {
+      largestThickness = t;
+    }
+  }
+  if (smallestThickness <= 0.0)
+  {
+    fprintf(stderr,"Every wall thickness is zero or negative, so there is no wall to fill\n");
+    return SV_ERROR;
+  }
+
   // The contour is at grid resolution and full of the slivers marching cubes
   // leaves behind, which the volume mesher would inherit. Remesh it to the
-  // mesh edge size first. The angle threshold keeps the crease at the junctions
-  // as a ridge, which is the one feature of the offset that must not be
-  // smoothed away.
+  // mesh edge size first.
+  //
+  // Two things about this remesher decide whether the offset survives it.
+  //
+  // It reads 'ModelFaceID' and returns without building anything if the array
+  // is absent, so the contour has to be given one or the remesh silently
+  // produces nothing. One face for the whole surface is the right answer here:
+  // the offset has no correspondence to the model's faces, and the wall
+  // boundary is tagged from the shell afterwards.
+  //
+  // Ridges - the edges MMG will not move - come only from the boundaries
+  // between different 'ModelFaceID' values; angle detection is switched off in
+  // the wrapper, which is why the angle argument is named 'dumAng' at the call
+  // site that uses it. With one face there are no ridges, so nothing pins the
+  // crease at the junctions except the Hausdorff distance. The wrapper's usual
+  // value is ten times the mesh size, which here would let MMG move the surface
+  // by many times the wall it is carrying; a tenth of the smallest wall keeps
+  // it. That is not a refinement constraint at these radii - a chord of the
+  // vessel deviates that far only at edges far longer than hmax - so it costs
+  // no elements.
 #ifdef SV_USE_MMG
   {
     double meshFactor = 0.8;
     double meshsize = meshFactor*meshoptions_.maxedgesize;
     double mmg_maxsize = 1.5*meshsize;
     double mmg_minsize = 0.5*meshsize;
-    if (meshoptions_.hausd == 0)
-    {
-      meshoptions_.hausd = 10.0*meshsize;
-    }
+    double offsetHausd = 0.1*smallestThickness;
     double dumAng = 45.0;
     double hgrad = 1.01;
     int useSizingFunction = 0;
     auto meshsizingfunction = vtkSmartPointer<vtkDoubleArray>::New();
 
+    auto offsetFaceIds = vtkSmartPointer<vtkIntArray>::New();
+    offsetFaceIds->SetName("ModelFaceID");
+    offsetFaceIds->SetNumberOfComponents(1);
+    offsetFaceIds->SetNumberOfTuples(offsetOuter->GetNumberOfCells());
+    offsetFaceIds->FillComponent(0, 1);
+    offsetOuter->GetCellData()->AddArray(offsetFaceIds);
+
+    fprintf(stdout,"  remeshing the offset surface to edge sizes %.5g..%.5g, holding it within %.5g of where the level set put it\n",
+        mmg_minsize, mmg_maxsize, offsetHausd);
+
     TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "offset outer wall, before remesh");
     if (MMGUtils_SurfaceRemeshing(offsetOuter, mmg_minsize, mmg_maxsize,
-          meshoptions_.hausd, dumAng, hgrad, useSizingFunction, meshsizingfunction,
-          meshoptions_.refinecount) != SV_OK)
+          offsetHausd, dumAng, hgrad, useSizingFunction, meshsizingfunction, 0) != SV_OK)
     {
       fprintf(stderr,"Problem remeshing the offset outer wall surface\n");
+      return SV_ERROR;
+    }
+    if (offsetOuter->GetNumberOfCells() == 0)
+    {
+      fprintf(stderr,"The remesh of the offset outer wall surface produced nothing\n");
       return SV_ERROR;
     }
     TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "offset outer wall, after remesh");
@@ -2830,7 +2894,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // Trim the dome the capping left over each vessel end, and pair the rim it
   // leaves with the inner cap rim so the wall can be closed between them.
   std::vector<TGenUtilsCapRim> caps;
-  if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, offsetOuter, caps) != SV_OK)
+  if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, offsetOuter, largestThickness, caps) != SV_OK)
   {
     fprintf(stderr,"Problem trimming the offset outer wall surface at the caps\n");
     return SV_ERROR;
@@ -2998,11 +3062,40 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
     // A triangle whose points are all inner points is the fluid/wall
     // interface, all outer points is the free outer wall, and a mix is a side
-    // wall closing the two at a cap. The ids follow the wedge extrusion: the
-    // interface is the inner surface id and a side wall is 9999.
+    // wall closing the two at a cap. 'CellEntityIds' follows the wedge
+    // extrusion, which is all the downstream split reads it for: it only tests
+    // for the side wall value.
     const int innerSurfaceCellId = 1;
     const int outerSurfaceCellId = 2;
     const int sidewallCellEntityId = 9999;
+
+    // 'ModelFaceID' is a different matter, because it is the face the solver
+    // and the mesh-complete output name their boundaries by, and the model
+    // already uses small integers for its own faces. Writing the entity id into
+    // it would give the interface the model's face 1 and the outer wall its
+    // face 2. So the interface keeps the face it came from - the wedge
+    // extrusion carries the same array through for the same reason - and the
+    // outer wall gets one new face past the end of the model's range. A side
+    // wall is left at 9999, which the downstream pass replaces with the id of
+    // the cap it closes against.
+    auto surfaceFaceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
+    int outerWallFaceId = outerSurfaceCellId;
+    if (surfaceFaceIds != nullptr)
+    {
+      double faceIdRange[2];
+      surfaceFaceIds->GetRange(faceIdRange, 0);
+      outerWallFaceId = (int)faceIdRange[1] + 1;
+    }
+    else
+    {
+      fprintf(stdout,"  the wall surface carries no 'ModelFaceID', so the wall boundary is tagged by its role alone\n");
+    }
+
+    auto faceLocator = vtkSmartPointer<vtkCellLocator>::New();
+    faceLocator->SetDataSet(surface);
+    faceLocator->BuildLocator();
+    auto faceCell = vtkSmartPointer<vtkGenericCell>::New();
+
     int numInnerCells = 0, numOuterCells = 0, numSideCells = 0;
 
     for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
@@ -3025,14 +3118,44 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       }
 
       int entityId = sidewallCellEntityId;
+      int faceId = sidewallCellEntityId;
       if (numInnerPts == 3)
       {
         entityId = innerSurfaceCellId;
         numInnerCells++;
+
+        // The face of the interface triangle is the face of the wall surface
+        // under it. It is looked up by position rather than by cell index
+        // because the shell only holds the triangles of that surface, and a
+        // surface that held anything else would put the two out of step.
+        faceId = outerWallFaceId;
+        if (surfaceFaceIds != nullptr)
+        {
+          double centroid[3] = {0.0, 0.0, 0.0};
+          for (vtkIdType j = 0; j < npts; j++)
+          {
+            double p[3];
+            shell->GetPoint(pts[j], p);
+            for (int k = 0; k < 3; k++)
+            {
+              centroid[k] += p[k]/3.0;
+            }
+          }
+          double closest[3];
+          vtkIdType closestCell = -1;
+          int subId = 0;
+          double distanceSquared = 0.0;
+          faceLocator->FindClosestPoint(centroid, closest, faceCell, closestCell, subId, distanceSquared);
+          if (closestCell >= 0)
+          {
+            faceId = surfaceFaceIds->GetValue(closestCell);
+          }
+        }
       }
       else if (numInnerPts == 0)
       {
         entityId = outerSurfaceCellId;
+        faceId = outerWallFaceId;
         numOuterCells++;
       }
       else
@@ -3042,14 +3165,14 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
       wallmesh_->InsertNextCell(VTK_TRIANGLE, npts, pts);
       cellEntityIds->InsertNextValue(entityId);
-      modelFaceIds->InsertNextValue(entityId);
+      modelFaceIds->InsertNextValue(faceId);
     }
 
     wallmesh_->GetCellData()->AddArray(cellEntityIds);
     wallmesh_->GetCellData()->AddArray(modelFaceIds);
 
-    fprintf(stdout,"  wall boundary tagged: %d interface, %d outer, %d side wall triangles\n",
-        numInnerCells, numOuterCells, numSideCells);
+    fprintf(stdout,"  wall boundary tagged: %d interface, %d outer, %d side wall triangles; the outer wall is ModelFaceID %d\n",
+        numInnerCells, numOuterCells, numSideCells, outerWallFaceId);
   }
 
   delete shellBehavior;

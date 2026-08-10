@@ -3302,12 +3302,16 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   fprintf(stdout,"Wall outer surface by distance field offset:\n");
   fprintf(stdout,"  thickness %.5g to %.5g, %zu cap rims closed with a fan\n",
       thicknessMin, thicknessMax, loops.size());
-  fprintf(stdout,"  grid %d x %d x %d = %zu voxels at spacing %.5g\n",
-      dims[0], dims[1], dims[2], numVoxels, spacing);
+  fprintf(stdout,"  grid %d x %d x %d = %zu voxels at spacing %.5g, which is %.2f cells per smallest wall thickness\n",
+      dims[0], dims[1], dims[2], numVoxels, spacing, thicknessMin/spacing);
   if (spacing > requestedSpacing*1.001)
   {
-    fprintf(stdout,"  the spacing was coarsened from %.5g to fit the %lld voxel budget, so the offset resolves features down to %.5g rather than half the smallest thickness\n",
-        requestedSpacing, (long long)maxVoxels, spacing);
+    fprintf(stdout,"  the spacing was coarsened from %.5g to fit the %lld voxel budget\n",
+        requestedSpacing, (long long)maxVoxels);
+  }
+  if (thicknessMin/spacing < 1.5)
+  {
+    fprintf(stdout,"  WARNING: fewer than 1.5 cells per wall thickness. The smooth part of the offset survives this, but the crease at a junction is rounded over about half a cell, so the wall there will read short in the offset thickness report below. Contouring in slabs rather than over one grid is what buys resolution here; raising the voxel budget alone will not reach far on a model this long.\n");
   }
 
   // Mark the band the level set can pass through: every voxel within the local
@@ -3617,12 +3621,14 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
  * reverse of the rim's own normal.
  * @param surface The inner surface, open at the caps.
  * @param outer The offset surface; trimmed in place.
+ * @param maxThickness The largest wall thickness, which bounds how far past a
+ * rim the dome to be cut off can reach.
  * @param caps Set to one entry per vessel end, holding both rims and the plane.
  * @return SV_OK if every cap was trimmed and its two rims paired.
  */
 
 int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
-    std::vector<TGenUtilsCapRim> &caps)
+    double maxThickness, std::vector<TGenUtilsCapRim> &caps)
 {
   caps.clear();
 
@@ -3711,13 +3717,18 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
 
   // Clip once per cap. The scalar is positive on everything that is kept: below
   // the plane, or far enough from this rim that the plane has no business
-  // reaching it. The dome is the only place both are negative. A window of
-  // twice the rim radius holds a dome that stands one thickness proud of a rim
-  // of that radius, for any wall thinner than the vessel it is on.
+  // reaching it. The dome is the only place both are negative.
+  //
+  // The dome of a rim of radius R under a wall of thickness t meets the cap
+  // plane at R + t, so the window has to hold that and no more than it needs
+  // to. Sizing it off the thickness rather than off R keeps it tight where the
+  // vessel is wide, and keeps it valid where the wall is thick relative to the
+  // vessel - a window of a fixed multiple of R would fall inside the rim it is
+  // meant to cut once t approached R.
   for (size_t c = 0; c < caps.size(); c++)
   {
     const TGenUtilsCapRim &cap = caps[c];
-    double window = 2.0*capRadius[c];
+    double window = capRadius[c] + 2.5*maxThickness;
 
     auto level = vtkSmartPointer<vtkDoubleArray>::New();
     level->SetName("CapTrimLevel");
