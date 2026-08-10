@@ -2215,8 +2215,6 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
     std::cout << "[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals." << std::endl;
   }
 
-  TGenUtils_WriteVTU("boundarylayermesh_normals.vtu", boundarylayermesh_);
-
   // Measure the fluid boundary layer against its own concave curvature, the
   // same way the solid wall is measured. The two are extruded from this one
   // surface in opposite directions, so a junction that is concave for the wall
@@ -2269,10 +2267,6 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
     fprintf(stderr,"Problem with boundary layer meshing\n");
     return SV_ERROR;
   }
-
-  TGenUtils_WriteVTU("boundarylayermesh.vtu", boundarylayermesh_);
-
-  TGenUtils_WriteVTU("innerSurface.vtu", innerSurface);
 
   // We take the inside surface of the boundary layer mesh and set the
   // member vtkPolyData polydatasolid_ to be equal to this. We will
