@@ -2810,12 +2810,12 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // rounded over about half a cell. So a count near one is the signal, and the
   // answer to it is to contour in slabs, which drops the memory to one slab at
   // a time, rather than to raise this and hope.
+  // How many voxels this buys is worked out where the field is stored, so that
+  // this call site never has to be kept in step with the storage.
   const double maxOffsetFieldBytes = 800.0e6;
-  const vtkIdType maxOffsetVoxels =
-      (vtkIdType)(maxOffsetFieldBytes/(double)(sizeof(float) + sizeof(unsigned char)));
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   if (TGenUtils_BuildOffsetOuterSurface(surface, thicknessArray,
-        meshoptions_.maxedgesize, maxOffsetVoxels, gWallThicknessMaxSlope, offsetOuter) != SV_OK)
+        meshoptions_.maxedgesize, maxOffsetFieldBytes, gWallThicknessMaxSlope, offsetOuter) != SV_OK)
   {
     fprintf(stderr,"Problem building the offset outer wall surface\n");
     return SV_ERROR;

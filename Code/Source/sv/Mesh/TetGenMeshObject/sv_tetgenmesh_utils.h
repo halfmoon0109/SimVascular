@@ -209,7 +209,7 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_StitchCapAnnulus(vtkPoints *points,
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,
     double targetEdgeSize,
-    vtkIdType maxVoxels,
+    double maxFieldBytes,
     double maxThicknessSlope,
     vtkPolyData *outer);
 

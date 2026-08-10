@@ -3138,8 +3138,9 @@ int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
  * @param array The requested thickness per point; one tuple per surface point.
  * @param targetEdgeSize The mesh edge size, or a non-positive value if unknown.
  * Used with the thickness to choose the grid spacing.
- * @param maxVoxels The largest grid to build; the spacing is coarsened until
- * the grid fits and the outcome is reported.
+ * @param maxFieldBytes The memory the distance field may occupy; the spacing is
+ * coarsened until the grid fits in it and the outcome is reported. It bounds
+ * the field alone, not the contour or the locators built alongside it.
  * @param maxThicknessSlope The bound the caller has already imposed on how fast
  * the thickness may change along the surface. The band is sized from it, so a
  * caller that does not enforce it will see the band's own check fire.
@@ -3148,8 +3149,22 @@ int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
  */
 
 int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
-    double targetEdgeSize, vtkIdType maxVoxels, double maxThicknessSlope, vtkPolyData *outer)
+    double targetEdgeSize, double maxFieldBytes, double maxThicknessSlope, vtkPolyData *outer)
 {
+  // A voxel costs a float of distance and a byte of bookkeeping, so how many
+  // voxels a byte budget buys is a property of this function rather than of its
+  // caller. The two arrays are declared below; working the count out anywhere
+  // else leaves arithmetic elsewhere to be corrected by hand the day one of
+  // them changes type, and nothing would report that it had not been.
+  const size_t bytesPerVoxel = sizeof(float) + sizeof(unsigned char);
+  vtkIdType maxVoxels = (vtkIdType)(maxFieldBytes/(double)bytesPerVoxel);
+  if (maxVoxels < 8)
+  {
+    fprintf(stderr,"A field budget of %.0f bytes leaves room for %lld voxels, which is not a grid\n",
+        maxFieldBytes, (long long)maxVoxels);
+    return SV_ERROR;
+  }
+
   if (maxThicknessSlope < 0.0 || maxThicknessSlope >= 1.0)
   {
     fprintf(stderr,"The wall thickness slope bound is %.5g; the band around the distance field is only finite for a bound below one\n",
@@ -3340,8 +3355,7 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   if (spacing > requestedSpacing*1.001)
   {
     fprintf(stdout,"  the spacing was coarsened from %.5g to fit the %lld voxel budget (%.0f MB of field)\n",
-        requestedSpacing, (long long)maxVoxels,
-        (double)maxVoxels*(sizeof(float) + sizeof(unsigned char))/1.0e6);
+        requestedSpacing, (long long)maxVoxels, (double)maxVoxels*bytesPerVoxel/1.0e6);
   }
   if (thicknessMin/spacing < 1.5)
   {
@@ -3604,6 +3618,11 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   image->SetOrigin(origin[0], origin[1], origin[2]);
   image->SetSpacing(spacing, spacing, spacing);
   image->GetPointData()->SetScalars(values);
+
+  // The bookkeeping has done its work by here, and holding it through the
+  // contour would put its fifth of the budget alongside the contour's own
+  // output at the one moment this function is at its largest.
+  std::vector<unsigned char>().swap(state);
 
   auto contourStart = std::chrono::steady_clock::now();
 
