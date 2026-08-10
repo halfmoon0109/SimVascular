@@ -2362,6 +2362,16 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
       meshoptions_.wallthickness, meshoptions_.wallthicknesscurvaturefactor,
       meshoptions_.wallthicknesssmoothingiterations, meshoptions_.numwallsublayers);
 
+  // Every thickness pass below except the gradation limit exists to keep a
+  // one-to-one outward extrusion valid, and each one buys that validity by
+  // taking thickness away - measured, the clamp, the rounding and the fold
+  // limit between them left hundreds of points under half the wall asked for.
+  // The shell fill does not extrude. It offsets the surface as a whole, where
+  // a concave junction creases instead of folding, so there is nothing for
+  // those passes to prevent and handing them the field first would only thin
+  // it for a problem the fill does not have.
+  const bool extrudeWedges = !meshoptions_.walltetgenshell;
+
   // Create a point data array giving the wall thickness at each node
   // of the surface.
   //
@@ -2473,7 +2483,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // radius of curvature would make the outward extruded outer wall fold
   // over and self-intersect. Only the thickness values change; the surface
   // points (the fluid/wall interface) never move.
-  if (TGenUtils_ClampThicknessToConcaveCurvature(surface, thicknessArray,
+  if (extrudeWedges &&
+      TGenUtils_ClampThicknessToConcaveCurvature(surface, thicknessArray,
         meshoptions_.wallthicknesscurvaturefactor) != SV_OK)
   {
     fprintf(stderr,"Problem clamping the wall thickness array to the surface curvature\n");
@@ -2500,7 +2511,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
     // unclamped neighbors, so the clamp is applied once more to restore
     // the curvature limit; the thickness stays smooth away from the
     // reclamped points.
-    if (TGenUtils_ClampThicknessToConcaveCurvature(surface, thicknessArray,
+    if (extrudeWedges &&
+        TGenUtils_ClampThicknessToConcaveCurvature(surface, thicknessArray,
           meshoptions_.wallthicknesscurvaturefactor) != SV_OK)
     {
       fprintf(stderr,"Problem clamping the wall thickness array to the surface curvature\n");
@@ -2544,7 +2556,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // the safety net for a degenerate input sliver that no rounding can carry.
   const double outerRoundingRelaxation = 0.5;
   const double maxFilletRatio = 3.0;
-  if (TGenUtils_RoundOuterWallToPreserveThickness(surface, thicknessArray,
+  if (extrudeWedges &&
+      TGenUtils_RoundOuterWallToPreserveThickness(surface, thicknessArray,
         meshoptions_.wallthicknesssmoothingiterations, outerRoundingRelaxation, maxFilletRatio) != SV_OK)
   {
     fprintf(stderr,"Problem rounding the outer wall to preserve the junction thickness\n");
@@ -2563,7 +2576,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // thickness, enough to clear a fold at a sliver triangle, whose thickness
   // has to drop to the order of the sliver's altitude; each iteration only
   // walks the surface triangles once and costs nothing against the meshing.
-  if (TGenUtils_LimitThicknessToPreventFold(surface, thicknessArray, 30) != SV_OK)
+  if (extrudeWedges &&
+      TGenUtils_LimitThicknessToPreventFold(surface, thicknessArray, 30) != SV_OK)
   {
     fprintf(stderr,"Problem limiting the wall thickness array to prevent the outer wall folding over\n");
     return SV_ERROR;
@@ -2578,7 +2592,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // levelling propagates one ring per iteration for up to thirty iterations,
   // and a bounded gradient makes the transition it leaves a taper instead of a
   // step that the next extrusion has to absorb.
-  if (TGenUtils_LimitThicknessGradation(surface, thicknessArray,
+  if (extrudeWedges &&
+      TGenUtils_LimitThicknessGradation(surface, thicknessArray,
         wallThicknessMaxSlope, "final wall extrusion length") != SV_OK)
   {
     fprintf(stderr,"Problem limiting the final wall thickness gradation\n");
@@ -2657,7 +2672,13 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // is actually produced, as the clearance from each outer point to the whole
   // inner surface, so the two can be compared and the gap between them is
   // visible rather than assumed away.
-  if (TGenUtils_ReportAchievedWallThickness(surface, thicknessArray, baseThickness,
+  //
+  // It measures the clearance from each extruded outer point, so it only says
+  // anything where those points are the outer surface. The shell fill's outer
+  // surface is offset as a whole and has no such point-for-point relation to
+  // the inner one, so this would be measuring a surface that is never built.
+  if (extrudeWedges &&
+      TGenUtils_ReportAchievedWallThickness(surface, thicknessArray, baseThickness,
         "solid wall, outward") != SV_OK)
   {
     fprintf(stderr,"Problem reporting the achieved wall thickness\n");
@@ -2757,16 +2778,85 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
 
 int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleArray* thicknessArray)
 {
+  // The outer surface is the true offset of the inner one at the requested
+  // thickness, not the inner one pushed along its normals. Dilating a solid by
+  // t rounds its convex features and creases its concave ones, and the parts of
+  // the naive offset that run past that crease are not on the boundary at all;
+  // the points whose offset lands there have no outer point, which is why every
+  // pass that insisted on giving them one had to pay in thickness.
+  //
+  // 64 million voxels is the ceiling on the field: a float per voxel and a byte
+  // of bookkeeping is around 320 MB, which is a cost worth paying once per mesh
+  // and not worth exceeding. The builder coarsens the spacing to fit and says
+  // so, so a model too fine for the budget produces a rougher offset rather
+  // than a failure.
+  const vtkIdType maxOffsetVoxels = 64000000;
+  auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
+  if (TGenUtils_BuildOffsetOuterSurface(surface, thicknessArray,
+        meshoptions_.maxedgesize, maxOffsetVoxels, offsetOuter) != SV_OK)
+  {
+    fprintf(stderr,"Problem building the offset outer wall surface\n");
+    return SV_ERROR;
+  }
+
+  // The contour is at grid resolution and full of the slivers marching cubes
+  // leaves behind, which the volume mesher would inherit. Remesh it to the
+  // mesh edge size first. The angle threshold keeps the crease at the junctions
+  // as a ridge, which is the one feature of the offset that must not be
+  // smoothed away.
+#ifdef SV_USE_MMG
+  {
+    double meshFactor = 0.8;
+    double meshsize = meshFactor*meshoptions_.maxedgesize;
+    double mmg_maxsize = 1.5*meshsize;
+    double mmg_minsize = 0.5*meshsize;
+    if (meshoptions_.hausd == 0)
+    {
+      meshoptions_.hausd = 10.0*meshsize;
+    }
+    double dumAng = 45.0;
+    double hgrad = 1.01;
+    int useSizingFunction = 0;
+    auto meshsizingfunction = vtkSmartPointer<vtkDoubleArray>::New();
+
+    TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "offset outer wall, before remesh");
+    if (MMGUtils_SurfaceRemeshing(offsetOuter, mmg_minsize, mmg_maxsize,
+          meshoptions_.hausd, dumAng, hgrad, useSizingFunction, meshsizingfunction,
+          meshoptions_.refinecount) != SV_OK)
+    {
+      fprintf(stderr,"Problem remeshing the offset outer wall surface\n");
+      return SV_ERROR;
+    }
+    TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "offset outer wall, after remesh");
+  }
+#else
+  fprintf(stdout,"  built without MMG, so the offset surface is filled at its grid resolution; expect many more wall elements than the mesh edge size asks for\n");
+#endif
+
+  // Trim the dome the capping left over each vessel end, and pair the rim it
+  // leaves with the inner cap rim so the wall can be closed between them.
+  std::vector<TGenUtilsCapRim> caps;
+  if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, offsetOuter, caps) != SV_OK)
+  {
+    fprintf(stderr,"Problem trimming the offset outer wall surface at the caps\n");
+    return SV_ERROR;
+  }
+
   auto shell = vtkSmartPointer<vtkPolyData>::New();
-  int numBoundaryEdges = 0;
-  if (TGenUtils_BuildWallShellSurface(surface, thicknessArray, shell, numBoundaryEdges) != SV_OK)
+  int numDegenerate = 0;
+  if (TGenUtils_BuildWallShellSurface(surface, offsetOuter, caps, shell, numDegenerate) != SV_OK)
   {
     fprintf(stderr,"Problem building the wall shell surface\n");
     return SV_ERROR;
   }
 
-  fprintf(stdout,"Filling the wall with TetGen tetrahedra: shell surface has %lld points and %lld triangles, %d boundary edges closed by side walls\n",
-      (long long)shell->GetNumberOfPoints(), (long long)shell->GetNumberOfCells(), numBoundaryEdges);
+  fprintf(stdout,"Filling the wall with TetGen tetrahedra: shell surface has %lld points and %lld triangles closing %zu vessel ends\n",
+      (long long)shell->GetNumberOfPoints(), (long long)shell->GetNumberOfCells(), caps.size());
+  if (numDegenerate > 0)
+  {
+    fprintf(stdout,"  %d of the vessel end triangles have no area; they are kept because dropping one would leave a hole in the wall, but the mesher may refuse them\n",
+        numDegenerate);
+  }
 
   auto shellInMesh = new tetgenio;
   auto shellOutMesh = new tetgenio;
@@ -2781,9 +2871,10 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
   // A closed inner surface encloses the lumen as well as the wall, so the
   // lumen has to be marked as a hole or it would be filled with wall elements.
-  // An inner surface left open at the caps is closed by the side wall strips
-  // and encloses the wall alone, so there is nothing to exclude.
-  if (numBoundaryEdges == 0)
+  // An inner surface left open at the caps has a rim pair at each end and is
+  // closed by the annulus between them, so it encloses the wall alone and there
+  // is nothing to exclude.
+  if (caps.empty())
   {
     double holePoint[3];
     if (TGenUtils_FindLumenHolePoint(surface, holePoint) != SV_OK)
