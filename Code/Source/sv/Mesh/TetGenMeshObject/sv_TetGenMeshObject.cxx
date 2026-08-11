@@ -2814,8 +2814,10 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // this call site never has to be kept in step with the storage.
   const double maxOffsetFieldBytes = 800.0e6;
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
+  double offsetGridSpacing = 0.0;
   if (TGenUtils_BuildOffsetOuterSurface(surface, thicknessArray,
-        meshoptions_.maxedgesize, maxOffsetFieldBytes, gWallThicknessMaxSlope, offsetOuter) != SV_OK)
+        meshoptions_.maxedgesize, maxOffsetFieldBytes, gWallThicknessMaxSlope, offsetOuter,
+        offsetGridSpacing) != SV_OK)
   {
     fprintf(stderr,"Problem building the offset outer wall surface\n");
     return SV_ERROR;
@@ -2866,16 +2868,27 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // crease at the junctions except the Hausdorff distance. The wrapper's usual
   // value is ten times the mesh size, which here would let MMG move the surface
   // by many times the wall it is carrying; a tenth of the smallest wall keeps
-  // it. That is not a refinement constraint at these radii - a chord of the
-  // vessel deviates that far only at edges far longer than hmax - so it costs
-  // no elements.
+  // it.
+  //
+  // But a tolerance below what the surface itself is worth does not buy
+  // accuracy, it buys elements. A contour of a grid locates the level set to
+  // about half a cell, and the wrinkle it leaves at that scale is not the model
+  // - it is the grid. Asked to hold a tolerance far under a cell, MMG refines
+  // until it can follow that wrinkle: measured on a grid coarsened to nine
+  // times the tolerance, it turned 736 thousand triangles into 5.8 million,
+  // sixteen times the inner surface, in three minutes. So the tolerance is the
+  // looser of the two, and which one won is reported, because the grid winning
+  // means the remesh is free to move the surface by more than a tenth of the
+  // smallest wall - the coarse grid having already cost that wall its shape.
 #ifdef SV_USE_MMG
   {
     double meshFactor = 0.8;
     double meshsize = meshFactor*meshoptions_.maxedgesize;
     double mmg_maxsize = 1.5*meshsize;
     double mmg_minsize = 0.5*meshsize;
-    double offsetHausd = 0.1*smallestThickness;
+    double thicknessHausd = 0.1*smallestThickness;
+    double gridHausd = 0.5*offsetGridSpacing;
+    double offsetHausd = std::max(thicknessHausd, gridHausd);
     double dumAng = 45.0;
     double hgrad = 1.01;
     int useSizingFunction = 0;
@@ -2890,6 +2903,11 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
     fprintf(stdout,"  remeshing the offset surface to edge sizes %.5g..%.5g, holding it within %.5g of where the level set put it\n",
         mmg_minsize, mmg_maxsize, offsetHausd);
+    if (gridHausd > thicknessHausd)
+    {
+      fprintf(stdout,"    that is half a grid cell rather than a tenth of the smallest wall (%.5g), because the grid is coarser than that wall\n",
+          thicknessHausd);
+    }
 
     TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "offset outer wall, before remesh");
     if (MMGUtils_SurfaceRemeshing(offsetOuter, mmg_minsize, mmg_maxsize,

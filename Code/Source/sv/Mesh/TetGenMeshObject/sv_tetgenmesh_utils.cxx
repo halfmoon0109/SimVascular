@@ -3145,12 +3145,19 @@ int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
  * the thickness may change along the surface. The band is sized from it, so a
  * caller that does not enforce it will see the band's own check fire.
  * @param outer Set to the contoured offset surface.
+ * @param gridSpacing Set to the spacing the grid was built at, which may be
+ * coarser than the one asked for. It bounds how accurately the surface locates
+ * the level set, so it is what any later pass has to compare its own tolerance
+ * against rather than assuming the surface is exact.
  * @return SV_OK if the offset surface is built.
  */
 
 int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
-    double targetEdgeSize, double maxFieldBytes, double maxThicknessSlope, vtkPolyData *outer)
+    double targetEdgeSize, double maxFieldBytes, double maxThicknessSlope, vtkPolyData *outer,
+    double &gridSpacing)
 {
+  gridSpacing = 0.0;
+
   // A voxel costs a float of distance and a byte of bookkeeping, so how many
   // voxels a byte budget buys is a property of this function rather than of its
   // caller. The two arrays are declared below; working the count out anywhere
@@ -3346,6 +3353,7 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   }
 
   size_t numVoxels = (size_t)dims[0]*(size_t)dims[1]*(size_t)dims[2];
+  gridSpacing = spacing;
 
   fprintf(stdout,"Wall outer surface by distance field offset:\n");
   fprintf(stdout,"  thickness %.5g to %.5g, %zu cap rims closed with a fan\n",
