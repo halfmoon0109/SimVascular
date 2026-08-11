@@ -3674,18 +3674,190 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
   fprintf(stdout,"  %lld of the %lld contour triangles were degenerate and collapsed\n",
       (long long)(numContourCells - outer->GetNumberOfCells()), (long long)numContourCells);
 
-  // More than one shell means the offset is not simply the outside of the wall:
-  // a thickness large enough to close a lumen leaves a sheet inside it, and a
-  // model with detached vessels offsets into one shell per vessel. Neither is
-  // an error here, but both change what the fill will be asked to do.
+  // The outer wall is one shell per connected piece of the inner surface,
+  // because dilating a connected set leaves it connected. Whatever else the
+  // contour produced is not on the wall boundary, and there are two ways to
+  // produce it: a thickness large enough to close a lumen leaves a sheet inside
+  // it, which the sign of the distance identifies, and a grid too coarse for
+  // the level set sheds fragments where the surface pinches, which are what is
+  // left over once the sheets are gone.
+  //
+  // Neither survives to be harmless. Both are closed shells until the cap trim
+  // cuts them, and then they are rims that belong to no vessel end - which is
+  // where they were first noticed, as a boundary walk that would not close. So
+  // they are dropped here, and reported, because how much is dropped is the
+  // measure of how badly the grid resolved the level set.
+  auto innerRegions = vtkSmartPointer<vtkPolyDataConnectivityFilter>::New();
+  innerRegions->SetInputData(surface);
+  innerRegions->SetExtractionModeToAllRegions();
+  innerRegions->Update();
+  int numInnerRegions = innerRegions->GetNumberOfExtractedRegions();
+
   auto connectivity = vtkSmartPointer<vtkPolyDataConnectivityFilter>::New();
   connectivity->SetInputData(outer);
   connectivity->SetExtractionModeToAllRegions();
+  connectivity->ColorRegionsOn();
   connectivity->Update();
 
-  fprintf(stdout,"  offset surface has %lld points and %lld triangles in %d connected shells\n",
+  int numShells = connectivity->GetNumberOfExtractedRegions();
+
+  fprintf(stdout,"  offset surface has %lld points and %lld triangles in %d connected shells,"
+      " against %d connected regions of the inner surface\n",
       (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells(),
-      connectivity->GetNumberOfExtractedRegions());
+      numShells, numInnerRegions);
+
+  if (numShells > numInnerRegions)
+  {
+    vtkPolyData *colored = connectivity->GetOutput();
+    colored->BuildCells();
+    vtkDataArray *regionIds = colored->GetCellData()->GetArray("RegionId");
+    if (regionIds == nullptr || regionIds->GetNumberOfTuples() != colored->GetNumberOfCells())
+    {
+      fprintf(stderr,"The connectivity of the offset surface did not label its cells, so its shells cannot be told apart\n");
+      return SV_ERROR;
+    }
+
+    // One shell is entirely on one side of the model, so a handful of its
+    // points settle which side that is; they are taken from the cells the shell
+    // happens to be labelled on first, since there is nothing to choose between
+    // them.
+    const int maxSamples = 8;
+    std::vector<vtkIdType> shellCells((size_t)numShells, 0);
+    std::vector<double> shellCentroid((size_t)numShells*3, 0.0);
+    std::vector<std::vector<vtkIdType> > shellSamples((size_t)numShells);
+
+    for (vtkIdType cellId = 0; cellId < colored->GetNumberOfCells(); cellId++)
+    {
+      int shell = (int)regionIds->GetTuple1(cellId);
+      if (shell < 0 || shell >= numShells)
+      {
+        continue;
+      }
+      vtkIdType npts;
+      const vtkIdType *pts;
+      colored->GetCellPoints(cellId, npts, pts);
+      if (npts != 3)
+      {
+        continue;
+      }
+      shellCells[(size_t)shell]++;
+      double p[3];
+      colored->GetPoint(pts[0], p);
+      for (int k = 0; k < 3; k++)
+      {
+        shellCentroid[(size_t)shell*3 + k] += p[k];
+      }
+      if ((int)shellSamples[(size_t)shell].size() < maxSamples)
+      {
+        shellSamples[(size_t)shell].push_back(pts[0]);
+      }
+    }
+
+    std::vector<int> outsideShells;
+    std::vector<int> insideShells;
+    for (int shell = 0; shell < numShells; shell++)
+    {
+      if (shellCells[(size_t)shell] == 0)
+      {
+        continue;
+      }
+      for (int k = 0; k < 3; k++)
+      {
+        shellCentroid[(size_t)shell*3 + k] /= (double)shellCells[(size_t)shell];
+      }
+
+      int numOutsideSamples = 0;
+      for (size_t s = 0; s < shellSamples[(size_t)shell].size(); s++)
+      {
+        double p[3];
+        colored->GetPoint(shellSamples[(size_t)shell][s], p);
+        if (outwardSign*implicit->EvaluateFunction(p) > 0.0)
+        {
+          numOutsideSamples++;
+        }
+      }
+      if (2*numOutsideSamples > (int)shellSamples[(size_t)shell].size())
+      {
+        outsideShells.push_back(shell);
+      }
+      else
+      {
+        insideShells.push_back(shell);
+      }
+    }
+
+    // Largest first, so that keeping one shell per region of the inner surface
+    // is keeping the ones that are the wall rather than the ones that are dust.
+    std::sort(outsideShells.begin(), outsideShells.end(),
+        [&shellCells](int a, int b) { return shellCells[(size_t)a] > shellCells[(size_t)b]; });
+
+    if ((int)outsideShells.size() < numInnerRegions)
+    {
+      fprintf(stderr,"The offset surface has %zu shells outside the model but the inner surface has %d regions, so at least one region has no outer wall at all\n",
+          outsideShells.size(), numInnerRegions);
+      return SV_ERROR;
+    }
+
+    std::vector<int> kept(outsideShells.begin(), outsideShells.begin() + numInnerRegions);
+    std::vector<int> dropped(outsideShells.begin() + numInnerRegions, outsideShells.end());
+    dropped.insert(dropped.end(), insideShells.begin(), insideShells.end());
+
+    vtkIdType numDroppedCells = 0;
+    for (size_t d = 0; d < dropped.size(); d++)
+    {
+      numDroppedCells += shellCells[(size_t)dropped[d]];
+    }
+
+    fprintf(stdout,"  keeping %zu shells (%lld triangles) as the outer wall and dropping %zu (%lld triangles, %.2f%% of the contour):\n",
+        kept.size(), (long long)(outer->GetNumberOfCells() - numDroppedCells),
+        dropped.size(), (long long)numDroppedCells,
+        100.0*(double)numDroppedCells/(double)outer->GetNumberOfCells());
+
+    const size_t maxListed = 12;
+    for (size_t d = 0; d < dropped.size() && d < maxListed; d++)
+    {
+      int shell = dropped[d];
+      bool isInside = std::find(insideShells.begin(), insideShells.end(), shell) != insideShells.end();
+      fprintf(stdout,"    dropped %lld triangles %s the model at (%.5g, %.5g, %.5g)\n",
+          (long long)shellCells[(size_t)shell], isInside ? "inside" : "outside",
+          shellCentroid[(size_t)shell*3], shellCentroid[(size_t)shell*3+1],
+          shellCentroid[(size_t)shell*3+2]);
+    }
+    if (dropped.size() > maxListed)
+    {
+      fprintf(stdout,"    ... %zu further dropped shells\n", dropped.size() - maxListed);
+    }
+
+    // The same filter rather than a second one, so that the numbers the shells
+    // were labelled with above are the numbers being asked for here.
+    connectivity->SetExtractionModeToSpecifiedRegions();
+    for (size_t s = 0; s < kept.size(); s++)
+    {
+      connectivity->AddSpecifiedRegion(kept[s]);
+    }
+    connectivity->Update();
+
+    // Extracting regions leaves the points of the dropped ones behind, unused,
+    // and an unused point is a point the volume mesher renumbers around.
+    auto unusedCleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+    unusedCleaner->SetInputConnection(connectivity->GetOutputPort());
+    unusedCleaner->PointMergingOff();
+    unusedCleaner->Update();
+
+    auto keptSurface = vtkSmartPointer<vtkPolyData>::New();
+    keptSurface->SetPoints(unusedCleaner->GetOutput()->GetPoints());
+    keptSurface->SetPolys(unusedCleaner->GetOutput()->GetPolys());
+    outer->DeepCopy(keptSurface);
+
+    if (outer->GetNumberOfCells() == 0)
+    {
+      fprintf(stderr,"Dropping the shells that are not the outer wall left no offset surface\n");
+      return SV_ERROR;
+    }
+
+    fprintf(stdout,"  the outer wall is %lld points and %lld triangles\n",
+        (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells());
+  }
 
   return SV_OK;
 }
