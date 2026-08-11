@@ -3126,6 +3126,173 @@ int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
 }
 
 // -------------------------------------
+// RemoveBoundaryFlaps
+// -------------------------------------
+/**
+ * @brief Removes the triangles that hang off the boundary of a surface by a
+ * single edge, until none are left.
+ * @note A triangle with two of its three edges on the boundary is joined to the
+ * rest of the surface along one edge only. It is a flap, and a boundary that
+ * runs out along one and back is not a loop, which is what the rim walk needs
+ * the boundary to be. Removing it is safe in a way that removing a triangle
+ * generally is not: its third edge is interior, so the neighbour across it is
+ * still there and that edge simply becomes the boundary instead. The boundary
+ * that ran a -> b -> c around the flap runs a -> c after it, one edge shorter
+ * and still closed. A triangle with all three edges on the boundary is loose
+ * altogether and goes the same way.
+ *
+ * Removing a flap can expose another behind it, so this repeats until the
+ * surface is clean, and reports how much it took. A handful is the contour
+ * leaving a near-degenerate triangle where the grid could not resolve the level
+ * set - one such triangle, of zero area and a whole cell long, is what sent the
+ * rim walk off the end of a three point chain. Thousands would mean the surface
+ * is not a surface, which the count is there to make visible.
+ * @param surface The surface, repaired in place; its cells must be triangles.
+ * @param numRemoved Set to the number of triangles removed.
+ * @param firstRemoved Set to the centre of the first triangle removed, for the
+ * log; untouched if none were.
+ * @return SV_OK if the surface is left with triangles on it.
+ */
+
+static int RemoveBoundaryFlaps(vtkPolyData *surface, int &numRemoved, double firstRemoved[3])
+{
+  numRemoved = 0;
+
+  // A flap removal can expose at most one more behind it, so the number of
+  // passes is bounded by the number of triangles; the bound is only here so a
+  // surface that somehow never settles stops rather than spins.
+  const int maxPasses = 100;
+  auto edgeNeighbors = vtkSmartPointer<vtkIdList>::New();
+
+  for (int pass = 0; pass < maxPasses; pass++)
+  {
+    surface->BuildLinks();
+
+    std::vector<bool> drop((size_t)surface->GetNumberOfCells(), false);
+    int numDropped = 0;
+
+    for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellId, npts, pts);
+      if (npts != 3)
+      {
+        continue;
+      }
+
+      int numBoundaryEdges = 0;
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        surface->GetCellEdgeNeighbors(cellId, pts[j], pts[(j+1)%npts], edgeNeighbors);
+        if (edgeNeighbors->GetNumberOfIds() == 0)
+        {
+          numBoundaryEdges++;
+        }
+      }
+
+      if (numBoundaryEdges >= 2)
+      {
+        if (numRemoved + numDropped == 0)
+        {
+          for (int k = 0; k < 3; k++)
+          {
+            firstRemoved[k] = 0.0;
+          }
+          for (vtkIdType j = 0; j < npts; j++)
+          {
+            double p[3];
+            surface->GetPoint(pts[j], p);
+            for (int k = 0; k < 3; k++)
+            {
+              firstRemoved[k] += p[k]/3.0;
+            }
+          }
+        }
+        drop[(size_t)cellId] = true;
+        numDropped++;
+      }
+    }
+
+    if (numDropped == 0)
+    {
+      break;
+    }
+
+    auto keptCells = vtkSmartPointer<vtkCellArray>::New();
+    for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+    {
+      if (drop[(size_t)cellId])
+      {
+        continue;
+      }
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellId, npts, pts);
+      if (npts != 3)
+      {
+        continue;
+      }
+      vtkIdType triangle[3] = {pts[0], pts[1], pts[2]};
+      keptCells->InsertNextCell(3, triangle);
+    }
+
+    auto repaired = vtkSmartPointer<vtkPolyData>::New();
+    repaired->SetPoints(surface->GetPoints());
+    repaired->SetPolys(keptCells);
+    surface->DeepCopy(repaired);
+
+    numRemoved += numDropped;
+
+    if (surface->GetNumberOfCells() == 0)
+    {
+      fprintf(stderr,"Removing the triangles hanging off the boundary left no surface at all\n");
+      return SV_ERROR;
+    }
+  }
+
+  if (numRemoved > 0)
+  {
+    // The removed triangles took the last use of some points with them, and an
+    // unused point is one the volume mesher renumbers its input around.
+    std::vector<vtkIdType> newPointId((size_t)surface->GetNumberOfPoints(), -1);
+    auto keptPoints = vtkSmartPointer<vtkPoints>::New();
+    auto keptCells = vtkSmartPointer<vtkCellArray>::New();
+
+    for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellId, npts, pts);
+      if (npts != 3)
+      {
+        continue;
+      }
+
+      vtkIdType triangle[3];
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (newPointId[(size_t)pts[j]] < 0)
+        {
+          double p[3];
+          surface->GetPoint(pts[j], p);
+          newPointId[(size_t)pts[j]] = keptPoints->InsertNextPoint(p);
+        }
+        triangle[j] = newPointId[(size_t)pts[j]];
+      }
+      keptCells->InsertNextCell(3, triangle);
+    }
+
+    auto compacted = vtkSmartPointer<vtkPolyData>::New();
+    compacted->SetPoints(keptPoints);
+    compacted->SetPolys(keptCells);
+    surface->DeepCopy(compacted);
+  }
+
+  return SV_OK;
+}
+
+// -------------------------------------
 // LabelConnectedShells
 // -------------------------------------
 /**
@@ -4173,6 +4340,23 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
       fprintf(stderr,"Trimming the offset surface at the cap at (%.5g, %.5g, %.5g) removed all of it\n",
           cap.origin[0], cap.origin[1], cap.origin[2]);
       return SV_ERROR;
+    }
+  }
+
+  // The rims are about to be walked, and a triangle joined to the surface by
+  // one edge would send the walk out along it and leave it there.
+  {
+    int numFlaps = 0;
+    double firstFlap[3] = {0.0, 0.0, 0.0};
+    if (RemoveBoundaryFlaps(outer, numFlaps, firstFlap) != SV_OK)
+    {
+      fprintf(stderr,"Problem removing the triangles hanging off the trimmed offset surface\n");
+      return SV_ERROR;
+    }
+    if (numFlaps > 0)
+    {
+      fprintf(stdout,"  removed %d triangles hanging off the trimmed surface by a single edge, the first at (%.5g, %.5g, %.5g)\n",
+          numFlaps, firstFlap[0], firstFlap[1], firstFlap[2]);
     }
   }
 
