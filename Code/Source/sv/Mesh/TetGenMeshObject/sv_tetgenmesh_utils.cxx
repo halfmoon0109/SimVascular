@@ -3129,17 +3129,19 @@ int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
 // RemoveBoundaryFlaps
 // -------------------------------------
 /**
- * @brief Removes the triangles that hang off the boundary of a surface by a
- * single edge, until none are left.
- * @note A triangle with two of its three edges on the boundary is joined to the
- * rest of the surface along one edge only. It is a flap, and a boundary that
- * runs out along one and back is not a loop, which is what the rim walk needs
- * the boundary to be. Removing it is safe in a way that removing a triangle
- * generally is not: its third edge is interior, so the neighbour across it is
- * still there and that edge simply becomes the boundary instead. The boundary
- * that ran a -> b -> c around the flap runs a -> c after it, one edge shorter
- * and still closed. A triangle with all three edges on the boundary is loose
- * altogether and goes the same way.
+ * @brief Removes triangles that hang from an edge already shared by the rest
+ * of a surface, until none are left.
+ * @note Two boundary edges alone do not make a triangle a flap. A valid open
+ * surface can have an ear joined to the rest by one edge; that edge has one
+ * neighbour and the two boundary edges remain part of a closed loop. The
+ * dangling case has two boundary edges and a third edge with at least two
+ * neighbours. The third edge was already interior before the extra triangle
+ * was attached, so its two boundary edges form a chain that cannot close
+ * through the underlying surface.
+ *
+ * Removing that extra triangle is safe in a way that removing a boundary ear
+ * is not: the neighbours across its third edge are still there and that edge
+ * remains interior.
  *
  * Removing a flap can expose another behind it, so this repeats until the
  * surface is clean, and reports how much it took. A handful is the contour
@@ -3158,13 +3160,11 @@ static int RemoveBoundaryFlaps(vtkPolyData *surface, int &numRemoved, double fir
 {
   numRemoved = 0;
 
-  // A flap removal can expose at most one more behind it, so the number of
-  // passes is bounded by the number of triangles; the bound is only here so a
-  // surface that somehow never settles stops rather than spins.
-  const int maxPasses = 100;
+  // Every non-empty pass removes at least one triangle, so this must settle in
+  // no more passes than there were triangles on entry.
   auto edgeNeighbors = vtkSmartPointer<vtkIdList>::New();
 
-  for (int pass = 0; pass < maxPasses; pass++)
+  while (true)
   {
     surface->BuildLinks();
 
@@ -3182,6 +3182,7 @@ static int RemoveBoundaryFlaps(vtkPolyData *surface, int &numRemoved, double fir
       }
 
       int numBoundaryEdges = 0;
+      int numOverusedEdges = 0;
       for (vtkIdType j = 0; j < npts; j++)
       {
         surface->GetCellEdgeNeighbors(cellId, pts[j], pts[(j+1)%npts], edgeNeighbors);
@@ -3189,9 +3190,13 @@ static int RemoveBoundaryFlaps(vtkPolyData *surface, int &numRemoved, double fir
         {
           numBoundaryEdges++;
         }
+        else if (edgeNeighbors->GetNumberOfIds() > 1)
+        {
+          numOverusedEdges++;
+        }
       }
 
-      if (numBoundaryEdges >= 2)
+      if (numBoundaryEdges == 2 && numOverusedEdges == 1)
       {
         if (numRemoved + numDropped == 0)
         {
@@ -3246,7 +3251,8 @@ static int RemoveBoundaryFlaps(vtkPolyData *surface, int &numRemoved, double fir
 
     if (surface->GetNumberOfCells() == 0)
     {
-      fprintf(stderr,"Removing the triangles hanging off the boundary left no surface at all\n");
+      fprintf(stderr,"Removing %d triangles hanging off the boundary, the first at (%.5g, %.5g, %.5g), left no surface at all\n",
+          numRemoved, firstRemoved[0], firstRemoved[1], firstRemoved[2]);
       return SV_ERROR;
     }
   }
