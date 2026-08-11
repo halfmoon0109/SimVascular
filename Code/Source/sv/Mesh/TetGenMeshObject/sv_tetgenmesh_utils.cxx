@@ -628,8 +628,11 @@ int TGenUtils_WriteVTP(char *filename,vtkPolyData *PData)
 {
   vtkSmartPointer<vtkXMLPolyDataWriter> writer  = vtkSmartPointer<vtkXMLPolyDataWriter>::New();
 
-  std::string fn = "out.vtp";
-  writer->SetFileName(fn.c_str());
+  // The name that was asked for. This wrote to a fixed 'out.vtp' whatever it
+  // was given, so every caller shared one file and the last write of a run was
+  // the only one that survived - the two wall diagnostics landed on top of each
+  // other, and the file named in the log never existed.
+  writer->SetFileName(filename);
 #if VTK_MAJOR_VERSION <= 5
   writer->SetInput(PData);
 #else
@@ -637,7 +640,11 @@ int TGenUtils_WriteVTP(char *filename,vtkPolyData *PData)
 #endif
   //writer->SetDataModeToAscii();
 
-  writer->Write();
+  if (!writer->Write())
+  {
+    fprintf(stderr,"Could not write the polydata to %s\n", filename);
+    return SV_ERROR;
+  }
 
   return SV_OK;
 }
@@ -4085,10 +4092,15 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
     // surface out is what makes the failure visible, and it is written from
     // here rather than from the walk because this is the pass that produced it.
     char trimmedFile[] = "wall_offset_trimmed.vtp";
-    TGenUtils_WriteVTP(trimmedFile, outer);
-
-    fprintf(stderr,"Problem extracting the trimmed rims of the offset surface; it has been written to %s as it stood when the walk failed\n",
-        trimmedFile);
+    if (TGenUtils_WriteVTP(trimmedFile, outer) == SV_OK)
+    {
+      fprintf(stderr,"Problem extracting the trimmed rims of the offset surface; it has been written to %s as it stood when the walk failed\n",
+          trimmedFile);
+    }
+    else
+    {
+      fprintf(stderr,"Problem extracting the trimmed rims of the offset surface, and it could not be written out to be looked at\n");
+    }
     return SV_ERROR;
   }
 
