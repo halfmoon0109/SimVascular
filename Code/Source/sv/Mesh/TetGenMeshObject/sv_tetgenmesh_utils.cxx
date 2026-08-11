@@ -3126,6 +3126,76 @@ int TGenUtils_ExtractBoundaryLoops(vtkPolyData *surface,
 }
 
 // -------------------------------------
+// LabelConnectedShells
+// -------------------------------------
+/**
+ * @brief Labels each triangle of a surface with the connected shell it belongs
+ * to, two triangles being connected when they share a point.
+ * @note This is what vtkPolyDataConnectivityFilter computes, and reading the
+ * labels off that filter is how it was done first. The filter writes them into
+ * a 'RegionId' array, and the array it was read from - the one on the cells -
+ * was not there in the VTK this is built against, so the pass that needed the
+ * labels stopped instead of running. Which arrays that filter attaches, under
+ * which extraction mode, is a detail of a library this cannot be tested
+ * against; the labelling itself is a breadth-first walk over the cells and
+ * costs less to write than the question costs to answer.
+ * @param surface The surface; its cells must be triangles.
+ * @param cellShell Set to the shell index of each cell, or -1 for a cell that
+ * is not a triangle.
+ * @return The number of shells.
+ */
+
+static int LabelConnectedShells(vtkPolyData *surface, std::vector<int> &cellShell)
+{
+  vtkIdType numCells = surface->GetNumberOfCells();
+  cellShell.assign((size_t)numCells, -1);
+
+  surface->BuildLinks();
+
+  auto pointCells = vtkSmartPointer<vtkIdList>::New();
+  std::deque<vtkIdType> queue;
+  int numShells = 0;
+
+  for (vtkIdType seed = 0; seed < numCells; seed++)
+  {
+    if (cellShell[(size_t)seed] >= 0)
+    {
+      continue;
+    }
+
+    int shell = numShells++;
+    cellShell[(size_t)seed] = shell;
+    queue.clear();
+    queue.push_back(seed);
+
+    while (!queue.empty())
+    {
+      vtkIdType cellId = queue.front();
+      queue.pop_front();
+
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellId, npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        surface->GetPointCells(pts[j], pointCells);
+        for (vtkIdType n = 0; n < pointCells->GetNumberOfIds(); n++)
+        {
+          vtkIdType neighbor = pointCells->GetId(n);
+          if (cellShell[(size_t)neighbor] < 0)
+          {
+            cellShell[(size_t)neighbor] = shell;
+            queue.push_back(neighbor);
+          }
+        }
+      }
+    }
+  }
+
+  return numShells;
+}
+
+// -------------------------------------
 // TGenUtils_BuildOffsetOuterSurface
 // -------------------------------------
 /**
@@ -3704,31 +3774,26 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
       (long long)(numContourCells - outer->GetNumberOfCells()), (long long)numContourCells);
 
   // The outer wall is one shell per connected piece of the inner surface,
-  // because dilating a connected set leaves it connected. Whatever else the
-  // contour produced is not on the wall boundary, and there are two ways to
-  // produce it: a thickness large enough to close a lumen leaves a sheet inside
-  // it, which the sign of the distance identifies, and a grid too coarse for
-  // the level set sheds fragments where the surface pinches, which are what is
-  // left over once the sheets are gone.
+  // because dilating a connected set leaves it connected. So anything past that
+  // count is debris the grid shed where it could not hold the level set, and
+  // the count itself is worth reporting either way.
   //
-  // Neither survives to be harmless. Both are closed shells until the cap trim
-  // cuts them, and then they are rims that belong to no vessel end - which is
-  // where they were first noticed, as a boundary walk that would not close. So
-  // they are dropped here, and reported, because how much is dropped is the
-  // measure of how badly the grid resolved the level set.
-  auto innerRegions = vtkSmartPointer<vtkPolyDataConnectivityFilter>::New();
-  innerRegions->SetInputData(surface);
-  innerRegions->SetExtractionModeToAllRegions();
-  innerRegions->Update();
-  int numInnerRegions = innerRegions->GetNumberOfExtractedRegions();
+  // Debris does not stay harmless. Each fragment is a closed shell until the
+  // cap trim cuts it, and then it is a rim belonging to no vessel end - which
+  // is how it was first noticed, as a boundary walk that would not close. It is
+  // dropped here, and how much of the contour goes with it is the measure of
+  // how badly the grid resolved the level set.
+  //
+  // Each shell is checked against the sign of the distance as well. The level
+  // set is d = t with t positive, and d is negative inside the model, so every
+  // point of every shell has to lie outside it; a shell that does not means the
+  // field or the sign its unevaluated voxels were filled with is wrong, which
+  // is worth seeing in the log rather than meshing.
+  std::vector<int> innerShell;
+  int numInnerRegions = LabelConnectedShells(surface, innerShell);
 
-  auto connectivity = vtkSmartPointer<vtkPolyDataConnectivityFilter>::New();
-  connectivity->SetInputData(outer);
-  connectivity->SetExtractionModeToAllRegions();
-  connectivity->ColorRegionsOn();
-  connectivity->Update();
-
-  int numShells = connectivity->GetNumberOfExtractedRegions();
+  std::vector<int> cellShell;
+  int numShells = LabelConnectedShells(outer, cellShell);
 
   fprintf(stdout,"  offset surface has %lld points and %lld triangles in %d connected shells,"
       " against %d connected regions of the inner surface\n",
@@ -3737,15 +3802,6 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
 
   if (numShells > numInnerRegions)
   {
-    vtkPolyData *colored = connectivity->GetOutput();
-    colored->BuildCells();
-    vtkDataArray *regionIds = colored->GetCellData()->GetArray("RegionId");
-    if (regionIds == nullptr || regionIds->GetNumberOfTuples() != colored->GetNumberOfCells())
-    {
-      fprintf(stderr,"The connectivity of the offset surface did not label its cells, so its shells cannot be told apart\n");
-      return SV_ERROR;
-    }
-
     // One shell is entirely on one side of the model, so a handful of its
     // points settle which side that is; they are taken from the cells the shell
     // happens to be labelled on first, since there is nothing to choose between
@@ -3755,23 +3811,23 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
     std::vector<double> shellCentroid((size_t)numShells*3, 0.0);
     std::vector<std::vector<vtkIdType> > shellSamples((size_t)numShells);
 
-    for (vtkIdType cellId = 0; cellId < colored->GetNumberOfCells(); cellId++)
+    for (vtkIdType cellId = 0; cellId < outer->GetNumberOfCells(); cellId++)
     {
-      int shell = (int)regionIds->GetTuple1(cellId);
+      int shell = cellShell[(size_t)cellId];
       if (shell < 0 || shell >= numShells)
       {
         continue;
       }
       vtkIdType npts;
       const vtkIdType *pts;
-      colored->GetCellPoints(cellId, npts, pts);
+      outer->GetCellPoints(cellId, npts, pts);
       if (npts != 3)
       {
         continue;
       }
       shellCells[(size_t)shell]++;
       double p[3];
-      colored->GetPoint(pts[0], p);
+      outer->GetPoint(pts[0], p);
       for (int k = 0; k < 3; k++)
       {
         shellCentroid[(size_t)shell*3 + k] += p[k];
@@ -3799,7 +3855,7 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
       for (size_t s = 0; s < shellSamples[(size_t)shell].size(); s++)
       {
         double p[3];
-        colored->GetPoint(shellSamples[(size_t)shell][s], p);
+        outer->GetPoint(shellSamples[(size_t)shell][s], p);
         if (outwardSign*implicit->EvaluateFunction(p) > 0.0)
         {
           numOutsideSamples++;
@@ -3842,6 +3898,12 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
         dropped.size(), (long long)numDroppedCells,
         100.0*(double)numDroppedCells/(double)outer->GetNumberOfCells());
 
+    if (!insideShells.empty())
+    {
+      fprintf(stdout,"  WARNING: %zu of them lie inside the model, which the level set d = t cannot produce. The distance field or the sign its unevaluated voxels were filled with is wrong, and the surface being kept is only as trustworthy as that.\n",
+          insideShells.size());
+    }
+
     const size_t maxListed = 12;
     for (size_t d = 0; d < dropped.size() && d < maxListed; d++)
     {
@@ -3857,25 +3919,55 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
       fprintf(stdout,"    ... %zu further dropped shells\n", dropped.size() - maxListed);
     }
 
-    // The same filter rather than a second one, so that the numbers the shells
-    // were labelled with above are the numbers being asked for here.
-    connectivity->SetExtractionModeToSpecifiedRegions();
+    // Carrying the kept cells over by hand, for the same reason the labelling
+    // is done by hand: the labels are this function's own, so there is no
+    // filter to hand them back to.
+    std::vector<bool> keepShell((size_t)numShells, false);
     for (size_t s = 0; s < kept.size(); s++)
     {
-      connectivity->AddSpecifiedRegion(kept[s]);
+      keepShell[(size_t)kept[s]] = true;
     }
-    connectivity->Update();
 
-    // Extracting regions leaves the points of the dropped ones behind, unused,
-    // and an unused point is a point the volume mesher renumbers around.
-    auto unusedCleaner = vtkSmartPointer<vtkCleanPolyData>::New();
-    unusedCleaner->SetInputConnection(connectivity->GetOutputPort());
-    unusedCleaner->PointMergingOff();
-    unusedCleaner->Update();
+    // The points of the dropped shells have to go with them. An unused point is
+    // one the volume mesher renumbers its input around, and the wall tagging
+    // downstream depends on that numbering - so the points are renumbered here,
+    // where the map from old to new is still in hand.
+    std::vector<vtkIdType> newPointId((size_t)outer->GetNumberOfPoints(), -1);
+    auto keptPoints = vtkSmartPointer<vtkPoints>::New();
+    auto keptCells = vtkSmartPointer<vtkCellArray>::New();
+
+    for (vtkIdType cellId = 0; cellId < outer->GetNumberOfCells(); cellId++)
+    {
+      int shell = cellShell[(size_t)cellId];
+      if (shell < 0 || !keepShell[(size_t)shell])
+      {
+        continue;
+      }
+      vtkIdType npts;
+      const vtkIdType *pts;
+      outer->GetCellPoints(cellId, npts, pts);
+      if (npts != 3)
+      {
+        continue;
+      }
+
+      vtkIdType triangle[3];
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (newPointId[(size_t)pts[j]] < 0)
+        {
+          double p[3];
+          outer->GetPoint(pts[j], p);
+          newPointId[(size_t)pts[j]] = keptPoints->InsertNextPoint(p);
+        }
+        triangle[j] = newPointId[(size_t)pts[j]];
+      }
+      keptCells->InsertNextCell(3, triangle);
+    }
 
     auto keptSurface = vtkSmartPointer<vtkPolyData>::New();
-    keptSurface->SetPoints(unusedCleaner->GetOutput()->GetPoints());
-    keptSurface->SetPolys(unusedCleaner->GetOutput()->GetPolys());
+    keptSurface->SetPoints(keptPoints);
+    keptSurface->SetPolys(keptCells);
     outer->DeepCopy(keptSurface);
 
     if (outer->GetNumberOfCells() == 0)
