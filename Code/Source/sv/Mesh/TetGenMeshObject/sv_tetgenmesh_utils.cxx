@@ -4001,19 +4001,20 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
     }
   }
 
-  // One clip for every cap, not one clip per cap. A point is kept when every
-  // cap keeps it, so the scalar to clip against is the smallest of the per-cap
-  // scalars and the whole trim is a single cut.
+  // Clip once per cap. The scalar is positive on everything that is kept: below
+  // the plane, or far enough from this rim that the plane has no business
+  // reaching it. The dome is the only place both are negative.
   //
-  // Clipping in sequence would give the same set, but it re-triangulates the
-  // entire surface once per vessel end - fourteen passes over millions of
-  // triangles here - and each pass hands the next one its own cut edges to cut
-  // again. One pass is both cheaper and the only one whose output was cut from
-  // the surface the contour actually produced.
-  //
-  // The per-cap scalar is positive on everything that cap keeps: below the
-  // plane, or far enough from that rim that its plane has no business reaching
-  // it. The dome is the only place both are negative.
+  // One clip against the smallest of the per-cap scalars would produce the same
+  // set of kept points and save thirteen passes over the surface, but not the
+  // same cut. The clip places a cut point by interpolating the scalar along an
+  // edge linearly, and that is exact for one cap - 'below' is a linear function
+  // of position, so a cut governed by it lands on the cap plane itself. The
+  // smallest of several is concave rather than linear, and interpolating it
+  // linearly underestimates it, so on any edge where the cap that gives the
+  // smallest value changes between its two ends the cut lands short by up to an
+  // edge length. That is a rim pulled off its cap plane, and the pass below
+  // pairs rims to caps by how well they lie on one.
   //
   // The dome of a rim of radius R under a wall of thickness t meets the cap
   // plane at R + t, so the window has to hold that and no more than it needs
@@ -4021,62 +4022,59 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
   // vessel is wide, and keeps it valid where the wall is thick relative to the
   // vessel - a window of a fixed multiple of R would fall inside the rim it is
   // meant to cut once t approached R.
-  auto level = vtkSmartPointer<vtkDoubleArray>::New();
-  level->SetName("CapTrimLevel");
-  level->SetNumberOfComponents(1);
-  level->SetNumberOfTuples(outer->GetNumberOfPoints());
-
-  for (vtkIdType ptId = 0; ptId < outer->GetNumberOfPoints(); ptId++)
+  for (size_t c = 0; c < caps.size(); c++)
   {
-    double x[3];
-    outer->GetPoint(ptId, x);
+    const TGenUtilsCapRim &cap = caps[c];
+    double window = capRadius[c] + 2.5*maxThickness;
 
-    double keep = std::numeric_limits<double>::max();
-    for (size_t c = 0; c < caps.size(); c++)
+    auto level = vtkSmartPointer<vtkDoubleArray>::New();
+    level->SetName("CapTrimLevel");
+    level->SetNumberOfComponents(1);
+    level->SetNumberOfTuples(outer->GetNumberOfPoints());
+    for (vtkIdType ptId = 0; ptId < outer->GetNumberOfPoints(); ptId++)
     {
-      const TGenUtilsCapRim &cap = caps[c];
-      double window = capRadius[c] + 2.5*maxThickness;
+      double x[3];
+      outer->GetPoint(ptId, x);
       double offset[3];
       vtkMath::Subtract(cap.origin, x, offset);
       double below = vtkMath::Dot(offset, cap.outward);
       double away = std::sqrt(vtkMath::Distance2BetweenPoints(x, cap.origin)) - window;
-      keep = std::min(keep, std::max(below, away));
+      level->SetValue(ptId, std::max(below, away));
     }
-    level->SetValue(ptId, keep);
-  }
-  outer->GetPointData()->SetScalars(level);
+    outer->GetPointData()->SetScalars(level);
 
-  auto clipper = vtkSmartPointer<vtkClipPolyData>::New();
-  clipper->SetInputData(outer);
-  clipper->GenerateClipScalarsOff();
-  clipper->GenerateClippedOutputOff();
-  clipper->InsideOutOff();
-  clipper->SetValue(0.0);
+    auto clipper = vtkSmartPointer<vtkClipPolyData>::New();
+    clipper->SetInputData(outer);
+    clipper->GenerateClipScalarsOff();
+    clipper->GenerateClippedOutputOff();
+    clipper->InsideOutOff();
+    clipper->SetValue(0.0);
 
-  auto triangles = vtkSmartPointer<vtkTriangleFilter>::New();
-  triangles->SetInputConnection(clipper->GetOutputPort());
-  triangles->PassLinesOff();
-  triangles->PassVertsOff();
+    auto triangles = vtkSmartPointer<vtkTriangleFilter>::New();
+    triangles->SetInputConnection(clipper->GetOutputPort());
+    triangles->PassLinesOff();
+    triangles->PassVertsOff();
 
-  // Clipping leaves a pair of coincident points on every cut edge, and the rim
-  // cannot be walked until they are one point.
-  auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
-  cleaner->SetInputConnection(triangles->GetOutputPort());
-  cleaner->Update();
+    // Clipping leaves a pair of coincident points on every cut edge, and the
+    // rim cannot be walked until they are one point.
+    auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
+    cleaner->SetInputConnection(triangles->GetOutputPort());
+    cleaner->Update();
 
-  // Only the triangles are carried on. Cleaning can turn a collapsed one into a
-  // line, and a line sharing an edge with a triangle would make that edge look
-  // interior when the rim is walked.
-  auto trimmed = vtkSmartPointer<vtkPolyData>::New();
-  trimmed->SetPoints(cleaner->GetOutput()->GetPoints());
-  trimmed->SetPolys(cleaner->GetOutput()->GetPolys());
-  outer->DeepCopy(trimmed);
+    // Only the triangles are carried on. Cleaning can turn a collapsed one into
+    // a line, and a line sharing an edge with a triangle would make that edge
+    // look interior when the rim is walked.
+    auto trimmed = vtkSmartPointer<vtkPolyData>::New();
+    trimmed->SetPoints(cleaner->GetOutput()->GetPoints());
+    trimmed->SetPolys(cleaner->GetOutput()->GetPolys());
+    outer->DeepCopy(trimmed);
 
-  if (outer->GetNumberOfCells() == 0)
-  {
-    fprintf(stderr,"Trimming the offset surface at the %zu cap planes removed all of it\n",
-        caps.size());
-    return SV_ERROR;
+    if (outer->GetNumberOfCells() == 0)
+    {
+      fprintf(stderr,"Trimming the offset surface at the cap at (%.5g, %.5g, %.5g) removed all of it\n",
+          cap.origin[0], cap.origin[1], cap.origin[2]);
+      return SV_ERROR;
+    }
   }
 
   std::vector<std::vector<vtkIdType> > outerLoops;
