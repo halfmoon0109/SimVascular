@@ -135,6 +135,8 @@ public:
 
     void SetupGUI(QWidget *parent );
 
+    void UpdateMesherSpecificGUI(const std::string& meshType);
+
     void RunCommands(bool fromGUI = true);
 
     double EstimateEdgeSize();

@@ -187,6 +187,12 @@ void sv4guiMeshEdit::SetupGUI(QWidget *parent )
 
     ui->toolBox->setCurrentIndex(0);
 
+    // No mesh is selected yet, so hide every mesher-specific widget. Without
+    // this the panel starts out showing the TetGen and the MeshSim widgets
+    // stacked on top of each other, and half of them disappear as soon as a
+    // mesh is selected.
+    UpdateMesherSpecificGUI("");
+
     //for local table
     m_TableModelLocal = new QStandardItemModel(this);
     ui->tableViewLocal->setModel(m_TableModelLocal);
@@ -1367,30 +1373,45 @@ void sv4guiMeshEdit::UpdateGUI()
     else
         ui->labelModelName->setText("No model found");
 
-    if(!m_MitkMesh)
+    // Nothing usable is selected, so show no mesher options at all rather than
+    // leaving the previous mesh's widgets on screen with stale values.
+    if(!m_MitkMesh || !m_Model)
+    {
+        UpdateMesherSpecificGUI("");
         return;
+    }
 
-    if(!m_Model)
-        return;
+    UpdateMesherSpecificGUI(m_MeshType);
 
     if(m_MeshType=="TetGen")
-    {
-        ui->widgetGlobal_T->show();
-        ui->widgetGlobal_M->hide();
-        ui->widgetAdvancedT->show();
-        ui->widgetAdvancedM->hide();
-        ui->widgetAdvancedFlagsT->show();
         UpdateTetGenGUI();
-    }
     else if(m_MeshType=="MeshSim")
-    {
-        ui->widgetGlobal_T->hide();
-        ui->widgetGlobal_M->show();
-        ui->widgetAdvancedT->hide();
-        ui->widgetAdvancedM->show();
-        ui->widgetAdvancedFlagsT->hide();
         UpdateMeshSimGUI();
-    }
+}
+
+//-------------------------
+// UpdateMesherSpecificGUI
+//-------------------------
+// Show only the widgets that belong to the given mesher, so that the panel
+// never offers an option the mesher does not support. An empty mesh type
+// means no mesh is selected and hides all of them.
+//
+void sv4guiMeshEdit::UpdateMesherSpecificGUI(const std::string& meshType)
+{
+    bool isTetGen = (meshType=="TetGen");
+    bool isMeshSim = (meshType=="MeshSim");
+
+    ui->widgetGlobal_T->setVisible(isTetGen);
+    ui->widgetGlobal_M->setVisible(isMeshSim);
+    ui->widgetAdvancedT->setVisible(isTetGen);
+    ui->widgetAdvancedM->setVisible(isMeshSim);
+    ui->widgetAdvancedFlagsT->setVisible(isTetGen);
+
+    // The wall mesh page is TetGen-only. A tool box page cannot be hidden the
+    // way a plain widget can, so disable its button instead.
+    int wallMeshPageIndex = ui->toolBox->indexOf(ui->MeshingWallMeshWidgetPage);
+    if(wallMeshPageIndex>=0)
+        ui->toolBox->setItemEnabled(wallMeshPageIndex, isTetGen);
 }
 
 void sv4guiMeshEdit::UpdateTetGenGUI()
