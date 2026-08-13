@@ -1446,6 +1446,11 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
 
     ui->checkBoxFastMeshing->setChecked(false);
 
+    ui->checkBoxMultipleRegions->setChecked(false);
+
+    ui->MinDihedralAngleCheckBox->setChecked(false);
+    ui->MinDihedralAngleSpinBox->setValue(10.0);
+
     //local table
     ui->tableViewLocal->setItemDelegateForColumn(3,m_DefaultDelegate);
 
@@ -1615,6 +1620,13 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
         if(cmdHistory[i]=="")
             continue;
 
+        // ParseCommand only writes the values its own command uses, so clear
+        // them first. Otherwise a parameter that an older command format omits
+        // (e.g. the boundary layer constant thickness flag) reads back
+        // whatever the previous command happened to leave behind.
+        for(size_t j=0;j<sizeof(values)/sizeof(values[0]);j++)
+            values[j]=0;
+
         if(!mesh->ParseCommand(cmdHistory[i],flag,values,strValues,option,msg))
         {
             QMessageBox::warning(m_Parent,"Parsing Error","Error in parsing command history!");
@@ -1631,6 +1643,10 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
             ui->sbLayersT->setValue(values[0]);
             ui->dsbPortionT->setValue(values[1]);
             ui->dsbRatioT->setValue(values[2]);
+            // Optional fourth parameter; the older four-parameter form of the
+            // command does not have it and leaves it cleared, which is the
+            // same as not using a constant thickness.
+            ui->checkBoxConstantThicknessBL->setChecked(values[3]!=0.0);
         }
         else if(flag=="useCenterlineRadius")
         {
@@ -1791,7 +1807,13 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
         }
         else if (flag == "BoundaryLayerDirection")
         {
-          ui->checkBoxBoundaryLayerDirection->setChecked(true);
+          // The command carries 0 or 1, so an unchecked box has to be restored
+          // as unchecked instead of being forced back on.
+          ui->checkBoxBoundaryLayerDirection->setChecked(values[0]!=0.0);
+        }
+        else if (flag == "AllowMultipleRegions")
+        {
+          ui->checkBoxMultipleRegions->setChecked(values[0]!=0.0);
         }
         else if (flag == "GenerateWallMesh")
         {
