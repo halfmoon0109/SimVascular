@@ -2952,7 +2952,8 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // Trim the dome the capping left over each vessel end, and pair the rim it
   // leaves with the inner cap rim so the wall can be closed between them.
   std::vector<TGenUtilsCapRim> caps;
-  if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, offsetOuter, largestThickness, caps) != SV_OK)
+  if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, offsetOuter, thicknessArray,
+        largestThickness, caps) != SV_OK)
   {
     fprintf(stderr,"Problem trimming the offset outer wall surface at the caps\n");
     return SV_ERROR;

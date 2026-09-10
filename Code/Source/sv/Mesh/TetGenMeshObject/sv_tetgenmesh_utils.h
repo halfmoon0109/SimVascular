@@ -196,6 +196,7 @@ struct TGenUtilsCapRim
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface,
     vtkPolyData *outer,
+    vtkDoubleArray *thickness,
     double maxThickness,
     std::vector<TGenUtilsCapRim> &caps);
 

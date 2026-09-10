@@ -4179,14 +4179,18 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
  * reverse of the rim's own normal.
  * @param surface The inner surface, open at the caps.
  * @param outer The offset surface; trimmed in place.
- * @param maxThickness The largest wall thickness, which bounds how far past a
- * rim the dome to be cut off can reach.
+ * @param thickness The wall thickness per point of the inner surface, which is
+ * what the dome over each cap was offset by. May be null, in which case every
+ * cap falls back to maxThickness.
+ * @param maxThickness The largest wall thickness, used for a cap whose own
+ * thickness is not available.
  * @param caps Set to one entry per vessel end, holding both rims and the plane.
  * @return SV_OK if every cap was trimmed and its two rims paired.
  */
 
 int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
-    double maxThickness, std::vector<TGenUtilsCapRim> &caps)
+    vtkDoubleArray *thickness, double maxThickness,
+    std::vector<TGenUtilsCapRim> &caps)
 {
   caps.clear();
 
@@ -4210,6 +4214,7 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
   }
 
   std::vector<double> capRadius(innerLoops.size(), 0.0);
+  std::vector<double> capThickness(innerLoops.size(), maxThickness);
   caps.resize(innerLoops.size());
 
   for (size_t c = 0; c < innerLoops.size(); c++)
@@ -4271,6 +4276,27 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
           cap.origin[0], cap.origin[1], cap.origin[2]);
       return SV_ERROR;
     }
+
+    // The dome over this cap stands as far off the end as the wall is thick
+    // there, and the thickness at the rim is what the fan across the opening
+    // was offset by. The largest thickness anywhere in the model says nothing
+    // about this end and, on a model whose walls range over an order of
+    // magnitude, sizes the cut for the thickest vessel at every cap.
+    if (thickness != nullptr)
+    {
+      double local = 0.0;
+      for (size_t m = 0; m < loop.size(); m++)
+      {
+        if (loop[m] >= 0 && loop[m] < thickness->GetNumberOfTuples())
+        {
+          local = std::max(local, thickness->GetValue(loop[m]));
+        }
+      }
+      if (local > 0.0)
+      {
+        capThickness[c] = local;
+      }
+    }
   }
 
   // Clip once per cap. The scalar is positive on everything that is kept: below
@@ -4293,11 +4319,13 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
   // to. Sizing it off the thickness rather than off R keeps it tight where the
   // vessel is wide, and keeps it valid where the wall is thick relative to the
   // vessel - a window of a fixed multiple of R would fall inside the rim it is
-  // meant to cut once t approached R.
+  // meant to cut once t approached R. The t is this cap's own: a window built
+  // from the model's thickest wall reaches the same distance past every rim,
+  // and past a thin vessel's cap that is most of the way to its neighbour.
   for (size_t c = 0; c < caps.size(); c++)
   {
     const TGenUtilsCapRim &cap = caps[c];
-    double window = capRadius[c] + 2.5*maxThickness;
+    double window = capRadius[c] + 2.5*capThickness[c];
 
     auto level = vtkSmartPointer<vtkDoubleArray>::New();
     level->SetName("CapTrimLevel");
@@ -4501,9 +4529,10 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
       caps.size(), (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells());
   for (size_t c = 0; c < caps.size(); c++)
   {
-    fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): inner rim %zu points, trimmed rim %zu points\n",
+    fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): inner rim %zu points, trimmed rim %zu points, cut within %.5g of the rim centre (radius %.5g, wall %.5g)\n",
         caps[c].origin[0], caps[c].origin[1], caps[c].origin[2],
-        caps[c].innerLoop.size(), caps[c].outerLoop.size());
+        caps[c].innerLoop.size(), caps[c].outerLoop.size(),
+        capRadius[c] + 2.5*capThickness[c], capRadius[c], capThickness[c]);
   }
 
   return SV_OK;
