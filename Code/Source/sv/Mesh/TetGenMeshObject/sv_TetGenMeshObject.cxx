@@ -2377,10 +2377,10 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // one-to-one outward extrusion valid, and each one buys that validity by
   // taking thickness away - measured, the clamp, the rounding and the fold
   // limit between them left hundreds of points under half the wall asked for.
-  // The shell fill does not extrude. It offsets the surface as a whole, where
-  // a concave junction creases instead of folding, so there is nothing for
-  // those passes to prevent and handing them the field first would only thin
-  // it for a problem the fill does not have.
+  // The shell fill extrudes at the full thickness and cuts away the part of
+  // the extrusion that folds, so a concave junction creases instead of
+  // folding; there is nothing for those passes to prevent and handing them
+  // the field first would only thin it for a problem the fill does not have.
   const bool extrudeWedges = !meshoptions_.walltetgenshell;
 
   // Create a point data array giving the wall thickness at each node
@@ -2770,7 +2770,9 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
  * correspondence fixed the only way to keep the extrusion valid is to shorten
  * it, which is what thins the wall there. Filling the volume between the two
  * surfaces has no such correspondence, so the mesher is free to put whatever
- * nodes it needs where the two vessels merge.
+ * nodes it needs where the two vessels merge. The outer surface is the
+ * extrusion with its folds cut out and the cuts closed, which is the boundary
+ * of the dilated solid.
  *
  * The inner surface is passed through unchanged. It is the fluid/wall
  * interface, and the solver matches its nodes one to one against the fluid
@@ -2786,184 +2788,50 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
 int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleArray* thicknessArray)
 {
   // The outer surface is the true offset of the inner one at the requested
-  // thickness, not the inner one pushed along its normals. Dilating a solid by
-  // t rounds its convex features and creases its concave ones, and the parts of
-  // the naive offset that run past that crease are not on the boundary at all;
-  // the points whose offset lands there have no outer point, which is why every
-  // pass that insisted on giving them one had to pay in thickness.
+  // thickness, not the inner one pushed along its normals and left there.
+  // Dilating a solid by t rounds its convex features and creases its concave
+  // ones, and the parts of the naive extrusion that run past that crease are
+  // not on the boundary at all; the points whose extrusion lands there have no
+  // outer point, which is why every pass that insisted on giving them one had
+  // to pay in thickness.
   //
-  // What bounds the distance field is memory, so that is what the budget says;
-  // the voxel count follows from how a voxel is stored and moves with it.
+  // The offset is built by extruding and then cutting away every part of the
+  // extrusion that lies inside the wall of another sheet. The first build of
+  // this fill contoured a distance field over a grid instead, and measured, the
+  // grid could not afford the model: to hold the field in memory its spacing
+  // had to be four and a half times the thinnest wall, at which the offset of
+  // the thin vessels collapsed onto their inner surface (offset thickness read
+  // 0.000 at their ends), the ends of neighbouring thin vessels fused, and the
+  // wall over the interface came out short at five percent of the interface
+  // against under one for the extrusion it was meant to replace. A grid pays
+  // for the whole bounding box at the resolution of the thinnest wall; cutting
+  // the extrusion pays per surface point.
   //
-  // The figure itself is a judgement rather than a derivation. It is what an
-  // aortic model a few tens of units across and a few hundred long needs to
-  // reach a spacing of half its wall thickness, which is the coarsest grid that
-  // still resolves the crease at a junction: such a model runs to roughly a
-  // hundred and forty million voxels, and this leaves a little over that. A
-  // vascular bounding box is mostly air, so almost all of it is spent on empty
-  // space - that is the cost of contouring over one dense grid, and it is the
-  // reason the number is this large rather than this small.
-  //
-  // A model that does not fit is not refused. The builder coarsens the spacing
-  // and reports how many cells are left per wall thickness, and the smooth part
-  // of the offset survives a coarse grid; it is the crease that does not,
-  // rounded over about half a cell. So a count near one is the signal, and the
-  // answer to it is to contour in slabs, which drops the memory to one slab at
-  // a time, rather than to raise this and hope.
-  // How many voxels this buys is worked out where the field is stored, so that
-  // this call site never has to be kept in step with the storage.
-  const double maxOffsetFieldBytes = 800.0e6;
+  // The cut margin allows for the extruded sheet not standing exactly a wall
+  // above its own surface, because a vertex normal is not the normal of the
+  // facets around it: the warp smoothing turns them by up to ten degrees,
+  // which is a shortfall of a percent and a half, and a sliver at a junction
+  // turns them further. The clearance is what the two sheets that met at a
+  // crease are held apart by once cut, so that they end short of each other
+  // rather than crossing.
+  const double cutBelowFraction = 0.95;
+  const double clearanceFraction = 1.03;
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
-  double offsetGridSpacing = 0.0;
-  if (TGenUtils_BuildOffsetOuterSurface(surface, thicknessArray,
-        meshoptions_.maxedgesize, maxOffsetFieldBytes, gWallThicknessMaxSlope, offsetOuter,
-        offsetGridSpacing) != SV_OK)
-  {
-    fprintf(stderr,"Problem building the offset outer wall surface\n");
-    return SV_ERROR;
-  }
-
-  // The smallest wall the offset was asked for. It bounds how far the remesh
-  // below may move the surface, because that is the quantity the whole offset
-  // exists to keep.
-  double smallestThickness = 0.0, largestThickness = 0.0;
-  for (vtkIdType ptId = 0; ptId < thicknessArray->GetNumberOfTuples(); ptId++)
-  {
-    double t = thicknessArray->GetValue(ptId);
-    if (t <= 0.0)
-    {
-      continue;
-    }
-    if (smallestThickness == 0.0 || t < smallestThickness)
-    {
-      smallestThickness = t;
-    }
-    if (t > largestThickness)
-    {
-      largestThickness = t;
-    }
-  }
-  if (smallestThickness <= 0.0)
-  {
-    fprintf(stderr,"Every wall thickness is zero or negative, so there is no wall to fill\n");
-    return SV_ERROR;
-  }
-
-  // The contour is at grid resolution and full of the slivers marching cubes
-  // leaves behind, which the volume mesher would inherit. Remesh it to the
-  // mesh edge size first.
-  //
-  // Two things about this remesher decide whether the offset survives it.
-  //
-  // It reads 'ModelFaceID' and returns without building anything if the array
-  // is absent, so the contour has to be given one or the remesh silently
-  // produces nothing. One face for the whole surface is the right answer here:
-  // the offset has no correspondence to the model's faces, and the wall
-  // boundary is tagged from the shell afterwards.
-  //
-  // Ridges - the edges MMG will not move - come only from the boundaries
-  // between different 'ModelFaceID' values; angle detection is switched off in
-  // the wrapper, which is why the angle argument is named 'dumAng' at the call
-  // site that uses it. With one face there are no ridges, so nothing pins the
-  // crease at the junctions except the Hausdorff distance. The wrapper's usual
-  // value is ten times the mesh size, which here would let MMG move the surface
-  // by many times the wall it is carrying; a tenth of the smallest wall keeps
-  // it.
-  //
-  // But a tolerance below what the surface itself is worth does not buy
-  // accuracy, it buys elements. A contour of a grid locates the level set to
-  // about half a cell, and the wrinkle it leaves at that scale is not the model
-  // - it is the grid. Asked to hold a tolerance far under a cell, MMG refines
-  // until it can follow that wrinkle: measured on a grid coarsened to nine
-  // times the tolerance, it turned 736 thousand triangles into 5.8 million,
-  // sixteen times the inner surface, in three minutes. So the tolerance is the
-  // looser of the two, and which one won is reported, because the grid winning
-  // means the remesh is free to move the surface by more than a tenth of the
-  // smallest wall - the coarse grid having already cost that wall its shape.
-#ifdef SV_USE_MMG
-  {
-    double meshFactor = 0.8;
-    double meshsize = meshFactor*meshoptions_.maxedgesize;
-    double mmg_maxsize = 1.5*meshsize;
-    double mmg_minsize = 0.5*meshsize;
-    double thicknessHausd = 0.1*smallestThickness;
-    double gridHausd = 0.5*offsetGridSpacing;
-    double offsetHausd = std::max(thicknessHausd, gridHausd);
-    double dumAng = 45.0;
-    double hgrad = 1.01;
-    int useSizingFunction = 0;
-    auto meshsizingfunction = vtkSmartPointer<vtkDoubleArray>::New();
-
-    auto offsetFaceIds = vtkSmartPointer<vtkIntArray>::New();
-    offsetFaceIds->SetName("ModelFaceID");
-    offsetFaceIds->SetNumberOfComponents(1);
-    offsetFaceIds->SetNumberOfTuples(offsetOuter->GetNumberOfCells());
-    offsetFaceIds->FillComponent(0, 1);
-    offsetOuter->GetCellData()->AddArray(offsetFaceIds);
-
-    fprintf(stdout,"  remeshing the offset surface to edge sizes %.5g..%.5g, holding it within %.5g of where the level set put it\n",
-        mmg_minsize, mmg_maxsize, offsetHausd);
-    if (gridHausd > thicknessHausd)
-    {
-      fprintf(stdout,"    that is half a grid cell rather than a tenth of the smallest wall (%.5g), because the grid is coarser than that wall\n",
-          thicknessHausd);
-    }
-
-    TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "offset outer wall, before remesh");
-    if (MMGUtils_SurfaceRemeshing(offsetOuter, mmg_minsize, mmg_maxsize,
-          offsetHausd, dumAng, hgrad, useSizingFunction, meshsizingfunction, 0) != SV_OK)
-    {
-      fprintf(stderr,"Problem remeshing the offset outer wall surface\n");
-      return SV_ERROR;
-    }
-    if (offsetOuter->GetNumberOfCells() == 0)
-    {
-      fprintf(stderr,"The remesh of the offset outer wall surface produced nothing\n");
-      return SV_ERROR;
-    }
-
-    // The remesher hands back a surface whose points have been split at every
-    // edge sharper than thirty degrees, because it computes normals with
-    // splitting on. The duplicates sit exactly on top of each other, so nothing
-    // has moved, but the surface is no longer joined along those edges: every
-    // one of them reads as a boundary when the cap rims are walked, and every
-    // duplicate reads as a repeated vertex to the volume mesher, which
-    // renumbers its input when it finds them and would take the ordering the
-    // wall tagging depends on with it. Merging them back costs nothing here.
-    auto splitMerger = vtkSmartPointer<vtkCleanPolyData>::New();
-    splitMerger->SetInputData(offsetOuter);
-    splitMerger->Update();
-
-    vtkIdType numSplitPoints = offsetOuter->GetNumberOfPoints();
-    auto merged = vtkSmartPointer<vtkPolyData>::New();
-    merged->SetPoints(splitMerger->GetOutput()->GetPoints());
-    merged->SetPolys(splitMerger->GetOutput()->GetPolys());
-    offsetOuter->DeepCopy(merged);
-
-    fprintf(stdout,"  the remesh returned %lld points split along its sharp edges, merged back to %lld\n",
-        (long long)numSplitPoints, (long long)offsetOuter->GetNumberOfPoints());
-
-    TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "offset outer wall, after remesh");
-  }
-#else
-  fprintf(stdout,"  built without MMG, so the offset surface is filled at its grid resolution; expect many more wall elements than the mesh edge size asks for\n");
-#endif
-
-  // Trim the dome the capping left over each vessel end, and pair the rim it
-  // leaves with the inner cap rim so the wall can be closed between them.
   std::vector<TGenUtilsCapRim> caps;
-  if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, offsetOuter, thicknessArray,
-        largestThickness, caps) != SV_OK)
+  if (TGenUtils_BuildTrimmedExtrudedOuterSurface(surface, thicknessArray,
+        cutBelowFraction, clearanceFraction, offsetOuter, caps) != SV_OK)
   {
-    fprintf(stderr,"Problem trimming the offset outer wall surface at the caps\n");
+    fprintf(stderr,"Problem building the trimmed outer wall surface\n");
     return SV_ERROR;
   }
+  TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "trimmed outer wall");
 
-  // Measure the wall the offset actually makes, now that it has been remeshed
-  // and trimmed and is the surface the fill will use. Both directions are
-  // reported because they answer different questions: outward checks that the
-  // construction kept the thickness through the grid and the remesh, inward is
-  // the wall standing over the interface.
+  // Measure the wall the outer surface actually makes, now that it is the
+  // surface the fill will use. Both directions are reported because they answer
+  // different questions: outward checks that the construction kept the
+  // thickness - here that the trimming and the clearance moves left every
+  // outer point a wall away from the interface - inward is the wall standing
+  // over the interface.
   if (TGenUtils_ReportOffsetWallThickness(surface, thicknessArray, offsetOuter,
         "solid wall, offset") != SV_OK)
   {
@@ -3054,17 +2922,13 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   catch (int r)
   {
     fprintf(stderr,"ERROR: TetGen quit with error code %d while filling the wall. The shell it was\
- given is the inner surface, the offset surface, and the annulus closing the two at each vessel end;\
- TetGen prints the coordinates of the intersection above, so look them up to see which of the three it\
- is in. It is not the junction problem the extrusion had: the offset surface is a level set and cannot\
- fold onto itself, and where two walls would run into each other it merges them rather than crossing\
- them. Check the annulus first. It is the only part not built by the offset, it is triangulated by\
- angle about the cap axis, and that ordering only exists for a rim that winds once about its own\
- centre; a rim that got past that check but is close to failing it shows up as the zero-area end\
- triangles counted above. Otherwise the inner surface is self-intersecting and the wall has inherited\
- it - see the interface triangle quality report. Note that two vessels closer together than twice the\
- wall thickness do not fail here at all, they fuse into one solid, which reads in the offset thickness\
- report as an interface region carrying far more wall than was asked for\n", r);
+ given is the inner surface, the trimmed outer surface, and the annulus closing the two at each vessel\
+ end; TetGen prints the coordinates of the intersection above, so look them up to see which it is in.\
+ An intersection on the outer surface near a hole listed above is a crease or seam the trim left\
+ crossing: either a fold shallower than the cut margin that the cut did not reach, or two sheets that\
+ met at under the own-sheet angle and were taken for one. An intersection on the annulus is a rim\
+ whose extruded points were moved off the cap plane by the clearance. Otherwise the inner surface is\
+ self-intersecting and the wall has inherited it - see the interface triangle quality report\n", r);
     delete shellBehavior;
     delete shellInMesh;
     delete shellOutMesh;
