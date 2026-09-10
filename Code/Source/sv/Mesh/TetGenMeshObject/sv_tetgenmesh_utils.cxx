@@ -4390,6 +4390,67 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
   {
     fprintf(stderr,"The trimmed offset surface has %zu rims but the wall has %zu cap openings. A cut has taken more than the dome off its end, which happens when a vessel curves back within a rim radius of another vessel's cap.\n",
         outerLoops.size(), caps.size());
+
+    // Which rim is the spare decides what to do about it, and the two cases
+    // read differently here. A spare that lies on a cap plane is a second loop
+    // left by that cap's own cut, so the dome it cut was joined to something -
+    // the offset of two vessels fused before the cut reached them. A spare far
+    // off every plane is a cut that landed somewhere it does not belong, and
+    // then the window that bounds it is what needs tightening.
+    for (size_t l = 0; l < outerLoops.size(); l++)
+    {
+      double centre[3] = {0.0, 0.0, 0.0};
+      for (size_t m = 0; m < outerLoops[l].size(); m++)
+      {
+        double x[3];
+        outer->GetPoint(outerLoops[l][m], x);
+        for (int k = 0; k < 3; k++)
+        {
+          centre[k] += x[k]/(double)outerLoops[l].size();
+        }
+      }
+
+      double radius = 0.0;
+      for (size_t m = 0; m < outerLoops[l].size(); m++)
+      {
+        double x[3];
+        outer->GetPoint(outerLoops[l][m], x);
+        radius = std::max(radius, std::sqrt(vtkMath::Distance2BetweenPoints(x, centre)));
+      }
+
+      size_t nearest = 0;
+      double nearestDeviation = 0.0;
+      for (size_t c = 0; c < caps.size(); c++)
+      {
+        double deviation = 0.0;
+        for (size_t m = 0; m < outerLoops[l].size(); m++)
+        {
+          double x[3];
+          outer->GetPoint(outerLoops[l][m], x);
+          double offset[3];
+          vtkMath::Subtract(x, caps[c].origin, offset);
+          deviation = std::max(deviation, std::abs(vtkMath::Dot(offset, caps[c].outward)));
+        }
+        if (c == 0 || deviation < nearestDeviation)
+        {
+          nearest = c;
+          nearestDeviation = deviation;
+        }
+      }
+
+      fprintf(stderr,"  rim %zu: %zu points, centre (%.5g, %.5g, %.5g), radius %.5g; flattest against the cap at (%.5g, %.5g, %.5g), off its plane by %.5g against that cap's rim radius %.5g%s\n",
+          l, outerLoops[l].size(), centre[0], centre[1], centre[2], radius,
+          caps[nearest].origin[0], caps[nearest].origin[1], caps[nearest].origin[2],
+          nearestDeviation, capRadius[nearest],
+          nearestDeviation <= 0.05*capRadius[nearest] ? " -- on that plane" : "");
+    }
+
+    char trimmedFile[] = "wall_offset_trimmed.vtp";
+    if (TGenUtils_WriteVTP(trimmedFile, outer) == SV_OK)
+    {
+      fprintf(stderr,"  the trimmed surface has been written to %s\n", trimmedFile);
+    }
+
     return SV_ERROR;
   }
 
