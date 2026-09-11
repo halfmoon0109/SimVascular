@@ -2807,19 +2807,17 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // for the whole bounding box at the resolution of the thinnest wall; cutting
   // the extrusion pays per surface point.
   //
-  // The cut margin allows for the extruded sheet not standing exactly a wall
-  // above its own surface, because a vertex normal is not the normal of the
-  // facets around it: the warp smoothing turns them by up to ten degrees,
-  // which is a shortfall of a percent and a half, and a sliver at a junction
-  // turns them further. The clearance is what the two sheets that met at a
-  // crease are held apart by once cut, so that they end short of each other
-  // rather than crossing.
-  const double cutBelowFraction = 0.95;
+  // The clearance is what the two sheets that met at a crease are held apart
+  // by once cut, so that they end short of each other rather than crossing:
+  // a point is cut when it stands within this fraction of another sheet's
+  // wall from that sheet's surface, and the cut edge is put exactly at the
+  // crossing. A sheet's own facets do not count against it, so this need not
+  // allow for a vertex normal leaning against them.
   const double clearanceFraction = 1.03;
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   std::vector<TGenUtilsCapRim> caps;
   if (TGenUtils_BuildTrimmedExtrudedOuterSurface(surface, thicknessArray,
-        cutBelowFraction, clearanceFraction, offsetOuter, caps) != SV_OK)
+        clearanceFraction, offsetOuter, caps) != SV_OK)
   {
     fprintf(stderr,"Problem building the trimmed outer wall surface\n");
     return SV_ERROR;

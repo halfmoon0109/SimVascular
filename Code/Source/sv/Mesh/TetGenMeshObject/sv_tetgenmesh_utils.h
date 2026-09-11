@@ -202,8 +202,7 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,
-    double removeBelow,
-    double clearAbove,
+    double clearance,
     vtkPolyData *outer,
     std::vector<TGenUtilsCapRim> &caps);
 
