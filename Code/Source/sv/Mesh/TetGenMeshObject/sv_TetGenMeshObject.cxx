@@ -2827,9 +2827,8 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // Measure the wall the outer surface actually makes, now that it is the
   // surface the fill will use. Both directions are reported because they answer
   // different questions: outward checks that the construction kept the
-  // thickness - here that the trimming and the clearance moves left every
-  // outer point a wall away from the interface - inward is the wall standing
-  // over the interface.
+  // thickness - here that the trimming left every outer point a wall away
+  // from the interface - inward is the wall standing over the interface.
   if (TGenUtils_ReportOffsetWallThickness(surface, thicknessArray, offsetOuter,
         "solid wall, offset") != SV_OK)
   {
@@ -2924,9 +2923,10 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
  end; TetGen prints the coordinates of the intersection above, so look them up to see which it is in.\
  An intersection on the outer surface near a hole listed above is a crease or seam the trim left\
  crossing: either a fold shallower than the cut margin that the cut did not reach, or two sheets that\
- met at under the own-sheet angle and were taken for one. An intersection on the annulus is a rim\
- whose extruded points were moved off the cap plane by the clearance. Otherwise the inner surface is\
- self-intersecting and the wall has inherited it - see the interface triangle quality report\n", r);
+ met at under the own-sheet angle and were taken for one, or a fragment at a cap rim that came out\
+ turned over and could not be cut without cutting the rim - the trim log counts those as held rim\
+ corners. Otherwise the inner surface is self-intersecting and the wall has inherited it - see the\
+ interface triangle quality report\n", r);
     delete shellBehavior;
     delete shellInMesh;
     delete shellOutMesh;

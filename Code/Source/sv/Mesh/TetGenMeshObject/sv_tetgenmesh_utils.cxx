@@ -5520,7 +5520,10 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   // A kept point on no whole triangle is left holding a fan of slivers
   // between cut points, and a kept point whose edges cross the clearance
   // within a twentieth of their length would leave slivers of that size; both
-  // are cut in turn and the cut made again, until the cut is stable.
+  // are cut in turn and the cut made again, until the cut is stable. A cap
+  // rim point is never cut this way: the rim has to survive whole for the
+  // vessel end to be closed, and cutting one would fail the build outright
+  // where holding the cut point off it leaves a sliver at worst.
   auto outerPoints = vtkSmartPointer<vtkPoints>::New();
   auto outerCells = vtkSmartPointer<vtkCellArray>::New();
   std::vector<vtkIdType> newId((size_t)numPts, -1);
@@ -5529,11 +5532,13 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   vtkIdType numKeptOriginal = 0, numOuterPts = 0, numCutPts = 0;
   int numCutCells = 0, numDroppedCells = 0;
   int numPeninsula = 0, numDemoted = 0, numFolded = 0, numRounds = 0, lastFolded = 0;
+  int numRimHeld = 0;
   const int maxRounds = 8;
   const double edgeFloor = 0.05;
   while (true)
   {
     numRounds++;
+    numRimHeld = 0;
     // Peninsulas: kept points on no whole triangle.
     while (true)
     {
@@ -5691,8 +5696,13 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       {
         // The crossing is at the kept end: the fragment there would be a
         // sliver a twentieth of an edge across. The kept point goes next
-        // round; for this one the cut point is held off it.
-        if (!demote[(size_t)kept])
+        // round, unless it is on a cap rim; for this one the cut point is
+        // held off it either way.
+        if (rimOfPoint[(size_t)kept] >= 0)
+        {
+          numRimHeld++;
+        }
+        else if (!demote[(size_t)kept])
         {
           demote[(size_t)kept] = true;
           demotedThisRound++;
@@ -5791,9 +5801,18 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       }
       for (int j = 0; j < 3; j++)
       {
-        if (pts[j] < numKeptOriginal && !demote[(size_t)cutFrom[(size_t)pts[j]]])
+        if (pts[j] >= numKeptOriginal)
         {
-          demote[(size_t)cutFrom[(size_t)pts[j]]] = true;
+          continue;
+        }
+        vtkIdType corner = cutFrom[(size_t)pts[j]];
+        if (rimOfPoint[(size_t)corner] >= 0)
+        {
+          numRimHeld++;
+        }
+        else if (!demote[(size_t)corner])
+        {
+          demote[(size_t)corner] = true;
           lastFolded++;
         }
       }
@@ -6220,8 +6239,8 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   fprintf(stdout,"  %lld points extruded; %d cut: %d on a triangle the extrusion turned over (%d triangles), %d inside a lumen, %d within %.3g of another sheet's wall, %d left on no whole triangle, %d whose edges crossed the clearance within %.2g of their length, %d on a fragment that came out turned over; %d had no thickness\n",
       (long long)numPts, numRemoved, numInvertedPts, numInvertedCells, numInLumen, numUnderWall,
       clearance, numPeninsula, numDemoted, edgeFloor, numFolded, numNoThickness);
-  fprintf(stdout,"  %d rounds of cutting; the last left %d fragments turned over%s\n",
-      numRounds, lastFolded, (lastFolded > 0) ? " - the volume mesher will meet them" : "");
+  fprintf(stdout,"  %d rounds of cutting; the last left %d fragments turned over%s, and held %d cap rim corners that would otherwise have been cut\n",
+      numRounds, lastFolded, (lastFolded > 0) ? " - the volume mesher will meet them" : "", numRimHeld);
   fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges\n",
       numCutCells, numDroppedCells, (long long)numCutPts);
   fprintf(stdout,"  %lld standing queries, %.1f s for the first pass over every point\n",
