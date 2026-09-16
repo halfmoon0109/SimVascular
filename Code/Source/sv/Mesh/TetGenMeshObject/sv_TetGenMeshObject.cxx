@@ -2816,8 +2816,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   const double clearanceFraction = 1.03;
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   std::vector<TGenUtilsCapRim> caps;
+  int numUnresolved = 0;
   if (TGenUtils_BuildTrimmedExtrudedOuterSurface(surface, thicknessArray,
-        clearanceFraction, offsetOuter, caps) != SV_OK)
+        clearanceFraction, offsetOuter, caps, numUnresolved) != SV_OK)
   {
     fprintf(stderr,"Problem building the trimmed outer wall surface\n");
     return SV_ERROR;
@@ -2844,6 +2845,18 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     TGenUtils_WriteVTP(offsetDiagnosticsFile, surface);
   }
   surface->GetPointData()->RemoveArray("OffsetThicknessRatio");
+
+  // The reports above are what the trim is judged by, so they run whatever
+  // state the surface is in; but a surface with folds or crossings left in it
+  // is one the volume mesher refuses, and the trim log has already said where
+  // they are, so this stops here rather than let the mesher say it again with
+  // less.
+  if (numUnresolved > 0)
+  {
+    fprintf(stderr,"The trimmed outer wall has %d triangles the volume mesher will refuse (turned over or passing through the surface); see the trim log above and wall_outer_trimmed.vtp\n",
+        numUnresolved);
+    return SV_ERROR;
+  }
 
   auto shell = vtkSmartPointer<vtkPolyData>::New();
   int numDegenerate = 0;

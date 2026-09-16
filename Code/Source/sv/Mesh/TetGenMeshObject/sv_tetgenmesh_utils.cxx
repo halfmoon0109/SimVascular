@@ -5073,13 +5073,19 @@ static int BuildSeamBands(vtkPoints *points, const std::vector<vtkIdType> &first
  * @param outer Set to the trimmed and closed outer surface.
  * @param caps Set to one entry per vessel end, pairing its inner rim with its
  * extruded rim.
+ * @param numUnresolved Set to the number of triangles the surface is left
+ * with that the volume mesher will refuse: fragments still turned over when
+ * the cut stopped, and triangles passing through the surface. The surface is
+ * returned whatever this is, so that it can be measured and looked at; the
+ * caller decides whether to go on.
  * @return SV_OK if the outer surface was built and every hole closed.
  */
 
 int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
-    double clearance, vtkPolyData *outer, std::vector<TGenUtilsCapRim> &caps)
+    double clearance, vtkPolyData *outer, std::vector<TGenUtilsCapRim> &caps, int &numUnresolved)
 {
   caps.clear();
+  numUnresolved = 0;
 
   if (surface == nullptr || array == nullptr || outer == nullptr)
   {
@@ -5635,6 +5641,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   int numCutCells = 0, numDroppedCells = 0;
   int numPeninsula = 0, numDemoted = 0, numFolded = 0, numRounds = 0, lastFolded = 0;
   int numRimHeld = 0;
+  bool converged = false;
   const int maxRounds = 8;
   const double edgeFloor = 0.05;
   while (true)
@@ -5921,7 +5928,8 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     }
     numFolded += lastFolded;
     numDemoted += demotedThisRound;
-    if ((lastFolded == 0 && demotedThisRound == 0) || numRounds >= maxRounds)
+    converged = (lastFolded == 0 && demotedThisRound == 0);
+    if (converged || numRounds >= maxRounds)
     {
       break;
     }
@@ -6447,18 +6455,23 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   outer->SetPoints(outerPoints);
   outer->SetPolys(outerCells);
 
-  // What is left crossing once every hole is closed: a closing triangle is
-  // tested against the whole surface, later closures included, and what it
-  // crosses is marked with it. Per hole, so that the log says which holes
-  // the volume mesher will refuse and how they were closed.
-  int numCrossing = 0;
+  // What is left crossing once every hole is closed: every triangle is
+  // tested against the whole surface, and what it crosses is marked with it.
+  // The closing triangles are counted per hole, so that the log says which
+  // holes the volume mesher will refuse and how they were closed; the whole
+  // and fragment triangles are counted on their own, because a sheet crossing
+  // another sheet is a fold the cut did not reach - the cut only looks at
+  // where the points stand, and a triangle whose three points all stand
+  // clear can still run through a wall between them.
+  int numCrossing = 0, numSheetCrossing = 0;
+  vtkIdType firstSheetCrossing = -1;
   std::vector<int> cellCrossing(cellRole.size(), 0);
   std::vector<int> holeCrossing(numHoles, 0);
   std::vector<vtkIdType> holeFirstCrossing(numHoles, -1);
   {
     vtkIdType numOuterCells = (vtkIdType)cellRole.size();
     std::vector<vtkIdType> hits;
-    for (vtkIdType cellId = numBaseCells; cellId < numOuterCells; cellId++)
+    for (vtkIdType cellId = 0; cellId < numOuterCells; cellId++)
     {
       hits.clear();
       int count = crossings(&tri[(size_t)9*cellId], &triPts[(size_t)3*cellId], cellId, &hits);
@@ -6466,12 +6479,21 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       {
         continue;
       }
-      numCrossing++;
       cellCrossing[(size_t)cellId] = 1;
       for (size_t c = 0; c < hits.size(); c++)
       {
         cellCrossing[(size_t)hits[c]] = 1;
       }
+      if (cellId < numBaseCells)
+      {
+        numSheetCrossing++;
+        if (firstSheetCrossing < 0)
+        {
+          firstSheetCrossing = cellId;
+        }
+        continue;
+      }
+      numCrossing++;
       int hole = cellHole[(size_t)cellId];
       if (hole >= 0)
       {
@@ -6510,8 +6532,9 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   fprintf(stdout,"  %lld points extruded; %d cut: %d on a triangle the extrusion turned over (%d triangles), %d inside a lumen, %d within %.3g of another sheet's wall, %d left on no whole triangle, %d whose edges crossed the clearance within %.2g of their length, %d on a fragment that came out turned over, %d for having no thickness alone; %d had no thickness\n",
       (long long)numPts, numRemoved, numInvertedPts, numInvertedCells, numInLumen, numUnderWall,
       clearance, numPeninsula, numDemoted, edgeFloor, numFolded, numNoThicknessOnly, numNoThickness);
-  fprintf(stdout,"  %d rounds of cutting; the last left %d fragments turned over%s, and held %d cap rim corners that would otherwise have been cut\n",
-      numRounds, lastFolded, (lastFolded > 0) ? " - the volume mesher will meet them" : "", numRimHeld);
+  fprintf(stdout,"  %d rounds of cutting%s; the last left %d fragments turned over%s, and held %d cap rim corners that would otherwise have been cut\n",
+      numRounds, converged ? ", converged" : " - the bound, not convergence: the last round's cuts were not made",
+      lastFolded, (lastFolded > 0) ? " - the volume mesher will refuse them" : "", numRimHeld);
   fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges\n",
       numCutCells, numDroppedCells, (long long)numCutPts);
   fprintf(stdout,"  %lld standing queries over a %d x %d x %d grid of %.4g bins (reach %.4g), %.1f s for the first pass over every point\n",
@@ -6522,8 +6545,14 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   {
     fprintf(stdout,"%s\n", closureLines[l].c_str());
   }
-  fprintf(stdout,"  %d closing triangles pass through the surface%s; the surface is written to wall_outer_trimmed.vtp with TrimRole (0 whole, 1 fragment, 2 zip, 3 seam band), TrimHole and TrimCrossing on its cells\n",
-      numCrossing, (numCrossing > 0) ? " - the volume mesher will refuse them" : "");
+  fprintf(stdout,"  %d closing triangles and %d sheet triangles pass through the surface%s; the surface is written to wall_outer_trimmed.vtp with TrimRole (0 whole, 1 fragment, 2 zip, 3 seam band), TrimHole and TrimCrossing on its cells\n",
+      numCrossing, numSheetCrossing, (numCrossing + numSheetCrossing > 0) ? " - the volume mesher will refuse them" : "");
+  if (numSheetCrossing > 0)
+  {
+    const double *f = &tri[(size_t)9*firstSheetCrossing];
+    fprintf(stdout,"    a sheet triangle crossing the surface is a fold the cut did not reach, the first at (%.5g, %.5g, %.5g)\n",
+        (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
+  }
   for (size_t h = 0; h < numHoles; h++)
   {
     if (holeCrossing[h] == 0)
@@ -6549,6 +6578,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   }
   fprintf(stdout,"  the outer wall is %lld points and %lld triangles, %.1f s\n",
       (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells(), seconds);
+  numUnresolved = lastFolded + numCrossing + numSheetCrossing;
   return SV_OK;
 }
 
