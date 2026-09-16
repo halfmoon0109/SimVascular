@@ -431,6 +431,18 @@ int TGenUtils_ConvertToVTK(tetgenio *outmesh,vtkUnstructuredGrid *volumemesh,vtk
   numPolys = outmesh->numberoftetrahedra;
   numFaces = outmesh->numberoftrifaces;
 
+  // Every array read below has to be there. TetGen fills adjtetlist only
+  // when it was run with neighout above one, so a caller that left that
+  // unset would be read through a null pointer here.
+  if (outmesh->pointlist == nullptr || (numPolys > 0 && outmesh->tetrahedronlist == nullptr) ||
+      (numFaces > 0 && (outmesh->trifacelist == nullptr || outmesh->adjtetlist == nullptr)))
+  {
+    fprintf(stderr,"TetGen output is missing an array the conversion needs (points %s, tetrahedra %s, faces %s, face neighbours %s); the mesher has to be run with neighout = 2\n",
+        outmesh->pointlist ? "yes" : "no", outmesh->tetrahedronlist ? "yes" : "no",
+        outmesh->trifacelist ? "yes" : "no", outmesh->adjtetlist ? "yes" : "no");
+    return SV_ERROR;
+  }
+
   bool *pointOnSurface = new bool[numPts];
   int *pointMapping = new int[numPts];
 

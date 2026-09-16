@@ -2910,6 +2910,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   shellBehavior->quality = 1;
   shellBehavior->minratio = 1.414;
   shellBehavior->mindihedral = 10.0;
+  // The conversion below reads the tetrahedra adjacent to each boundary face,
+  // which TetGen only writes at this level.
+  shellBehavior->neighout = 2;
 
   fprintf(stdout,"  TetGen wall fill started...\n");
   try
