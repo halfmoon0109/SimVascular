@@ -5305,15 +5305,38 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   const double reach = clearance*largestThickness;
   double gridOrigin[3], gridDims[3];
   int gridSize[3];
+  // The bins are the reach across, so that the triangles within reach of a
+  // point are in the bins around it, but never more of them than this: the
+  // grid covers the bounding box, empty space included, and a thin wall on a
+  // large model would otherwise ask for bounding box over reach cubed of
+  // them, which is memory in the tens of gigabytes. A bin wider than the
+  // reach just holds more triangles per bin, and the box test on each
+  // triangle still dismisses them cheaply.
+  const double maxBins = 4.0e6;
+  double binSize = reach;
+  {
+    double volume = 1.0;
+    for (int k = 0; k < 3; k++)
+    {
+      volume *= bounds[2*k+1] - bounds[2*k] + 2.0*reach;
+    }
+    binSize = std::max(reach, std::cbrt(volume/maxBins));
+  }
   for (int k = 0; k < 3; k++)
   {
     gridOrigin[k] = bounds[2*k] - reach;
     gridDims[k] = bounds[2*k+1] + reach - gridOrigin[k];
-    gridSize[k] = std::max(1, (int)std::ceil(gridDims[k]/reach));
+    gridSize[k] = std::max(1, (int)std::ceil(gridDims[k]/binSize));
+  }
+  if ((double)gridSize[0]*gridSize[1]*gridSize[2] > 2.0*maxBins)
+  {
+    fprintf(stderr,"The trim grid would be %d x %d x %d bins over a %.5g x %.5g x %.5g box, more than it is bounded to\n",
+        gridSize[0], gridSize[1], gridSize[2], gridDims[0], gridDims[1], gridDims[2]);
+    return SV_ERROR;
   }
   auto binOf = [&](double value, int axis)
   {
-    int bin = (int)std::floor((value - gridOrigin[axis])/reach);
+    int bin = (int)std::floor((value - gridOrigin[axis])/binSize);
     return std::min(std::max(bin, 0), gridSize[axis] - 1);
   };
   auto binIndex = [&](int i, int j, int k)
@@ -6466,8 +6489,8 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       numRounds, lastFolded, (lastFolded > 0) ? " - the volume mesher will meet them" : "", numRimHeld);
   fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges\n",
       numCutCells, numDroppedCells, (long long)numCutPts);
-  fprintf(stdout,"  %lld standing queries, %.1f s for the first pass over every point\n",
-      numQueries, firstPassSeconds);
+  fprintf(stdout,"  %lld standing queries over a %d x %d x %d grid of %.4g bins (reach %.4g), %.1f s for the first pass over every point\n",
+      numQueries, gridSize[0], gridSize[1], gridSize[2], binSize, reach, firstPassSeconds);
   fprintf(stdout,"  %zu cap rims kept whole; %zu holes: %d zipped across a crease, %d pairs joined as the two sides of a seam, the largest %zu points around; %d closed by a fallback because the preferred closure crossed the surface more\n",
       rims.size(), numHoles, numZipped, numJoined, largestHole, numFellBack);
   for (size_t l = 0; l < closureLines.size(); l++)
