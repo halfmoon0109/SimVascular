@@ -4675,14 +4675,47 @@ static bool SegmentCrossesTriangle(const double p0[3], const double p1[3],
 // TrianglesCross
 // -------------------------------------
 /**
- * @brief Whether two triangles that share no corner pass through each other.
- * @note Two triangles cross when an edge of either passes through the other,
- * unless they are coplanar, which the wall has no reason to produce and is
- * not tested for.
+ * @brief Whether two triangles pass through each other.
+ * @note Two triangles that share no corner cross when an edge of either
+ * passes through the other. Two that share one corner can still cross, with
+ * the edge opposite the shared corner of one passing through the other - a
+ * fan folded over at its apex does this - and that edge is the only one
+ * tested for them, because the two edges at the shared corner touch the other
+ * triangle there by construction. Two that share an edge are not tested:
+ * they can only overlap, coplanar, which the wall has no reason to produce.
+ * @param f The corners of one triangle, nine values.
+ * @param fp Its three point ids.
+ * @param g The corners of the other, nine values.
+ * @param gp Its three point ids.
  */
 
-static bool TrianglesCross(const double *f, const double *g)
+static bool TrianglesCross(const double *f, const vtkIdType *fp,
+    const double *g, const vtkIdType *gp)
 {
+  int sharedF = -1, sharedG = -1, numShared = 0;
+  for (int m = 0; m < 3; m++)
+  {
+    for (int n = 0; n < 3; n++)
+    {
+      if (fp[m] == gp[n])
+      {
+        sharedF = m;
+        sharedG = n;
+        numShared++;
+      }
+    }
+  }
+  if (numShared >= 2)
+  {
+    return false;
+  }
+  if (numShared == 1)
+  {
+    int f1 = (sharedF+1)%3, f2 = (sharedF+2)%3;
+    int g1 = (sharedG+1)%3, g2 = (sharedG+2)%3;
+    return SegmentCrossesTriangle(&f[3*f1], &f[3*f2], &g[0], &g[3], &g[6]) ||
+        SegmentCrossesTriangle(&g[3*g1], &g[3*g2], &f[0], &f[3], &f[6]);
+  }
   for (int k = 0; k < 3; k++)
   {
     if (SegmentCrossesTriangle(&f[3*k], &f[3*((k+1)%3)], &g[0], &g[3], &g[6]) ||
@@ -4715,17 +4748,22 @@ static bool TrianglesCross(const double *f, const double *g)
  * they close.
  * @param points The points the loop indexes into.
  * @param loop The loop, in boundary walk order.
- * @param cells The triangles are appended here.
+ * @param triangles The triangles are appended here, three ids each.
+ * @param quiet Whether to say nothing when the loop cannot be filled, for a
+ * caller trying this as one of several closures.
  * @return SV_OK if the loop was filled.
  */
 
 static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkIdType> &loop,
-    vtkCellArray *cells)
+    std::vector<vtkIdType> &triangles, bool quiet)
 {
   size_t n = loop.size();
   if (n < 3)
   {
-    fprintf(stderr,"Cannot fill a loop of %zu points\n", n);
+    if (!quiet)
+    {
+      fprintf(stderr,"Cannot fill a loop of %zu points\n", n);
+    }
     return SV_ERROR;
   }
   // The cost is cubic in the loop, and this is the loop a crease reaches
@@ -4733,10 +4771,13 @@ static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkId
   const size_t maxLoop = 1500;
   if (n > maxLoop)
   {
-    double p[3];
-    points->GetPoint(loop[0], p);
-    fprintf(stderr,"A hole in the outer wall at (%.5g, %.5g, %.5g) has a %zu point edge, more than the %zu the least-area fill is bounded to\n",
-        p[0], p[1], p[2], n, maxLoop);
+    if (!quiet)
+    {
+      double p[3];
+      points->GetPoint(loop[0], p);
+      fprintf(stderr,"A hole in the outer wall at (%.5g, %.5g, %.5g) has a %zu point edge, more than the %zu the least-area fill is bounded to\n",
+          p[0], p[1], p[2], n, maxLoop);
+    }
     return SV_ERROR;
   }
   std::vector<double> xyz(3*n);
@@ -4789,8 +4830,9 @@ static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkId
       continue;
     }
     size_t k = (size_t)split[i*n+j];
-    vtkIdType triangle[3] = {loop[j], loop[k], loop[i]};
-    cells->InsertNextCell(3, triangle);
+    triangles.push_back(loop[j]);
+    triangles.push_back(loop[k]);
+    triangles.push_back(loop[i]);
     pending.push_back(std::make_pair(i, k));
     pending.push_back(std::make_pair(k, j));
   }
@@ -4798,11 +4840,12 @@ static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkId
 }
 
 // -------------------------------------
-// StitchLoopPair
+// BuildSeamBands
 // -------------------------------------
 /**
- * @brief Joins two closed loops that run alongside each other with a band of
- * triangles, the way two rims are joined.
+ * @brief Builds the two bands of triangles that join two closed loops running
+ * alongside each other, one for each way round the second loop, the way two
+ * rims are joined.
  * @note Where two vessels run closer than twice the wall, or a branch leaves a
  * vessel whose wall is thicker than the branch is wide, the wall of one
  * crosses the wall of the other along a closed curve, and cutting both back
@@ -4814,18 +4857,21 @@ static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkId
  * The loops are walked together from their closest pair of points, advancing
  * whichever loop leaves the shorter diagonal, which is the merge that suits two
  * curves a small fraction of a wall apart. Which way round the second loop has
- * to be walked is measured from where its neighbours fall against the first,
- * and each triangle is wound against the loop edge it uses, so the band faces
- * the way the sheets do.
+ * to be walked cannot be told from the neighbours of the closest pair alone,
+ * so both bands are built and handed back with their areas; the caller
+ * chooses. Each triangle is wound against the loop edge it uses, so the band
+ * faces the way the sheets do.
  * @param points The points both loops index into.
  * @param first One loop, in boundary walk order.
  * @param second The other loop, in boundary walk order.
- * @param cells The band's triangles are appended here.
- * @return SV_OK if the loops were joined.
+ * @param bands Set to the two bands, three ids per triangle: the second loop
+ * walked forwards in the first, backwards in the second.
+ * @param areas Set to the total area of each band.
+ * @return SV_OK if the bands were built.
  */
 
-static int StitchLoopPair(vtkPoints *points, const std::vector<vtkIdType> &first,
-    const std::vector<vtkIdType> &second, vtkCellArray *cells)
+static int BuildSeamBands(vtkPoints *points, const std::vector<vtkIdType> &first,
+    const std::vector<vtkIdType> &second, std::vector<vtkIdType> bands[2], double areas[2])
 {
   size_t n = first.size();
   size_t m = second.size();
@@ -4857,12 +4903,11 @@ static int StitchLoopPair(vtkPoints *points, const std::vector<vtkIdType> &first
     }
   }
   auto F = [&](size_t step) { return first[(i0 + step) % n]; };
-  // Which way round the second loop runs against the first is decided by
-  // walking it both ways and keeping the band with less area. Deciding it
-  // from the neighbours of the closest pair alone is wrong when that pair
-  // sits at the end of a seam, where the loop turns round and both neighbours
-  // are equally close; the band then joins one side of the seam to the other
-  // and crosses everything between.
+  // Deciding the direction from the neighbours of the closest pair alone is
+  // wrong when that pair sits at the end of a seam, where the loop turns
+  // round and both neighbours are equally close; the band then joins one side
+  // of the seam to the other and crosses everything between. So both are
+  // built.
   auto band = [&](int dir, std::vector<vtkIdType> &triangles)
   {
     triangles.clear();
@@ -4929,15 +4974,8 @@ static int StitchLoopPair(vtkPoints *points, const std::vector<vtkIdType> &first
     }
     return area;
   };
-  std::vector<vtkIdType> forward, backward;
-  double forwardArea = band(1, forward);
-  double backwardArea = band(-1, backward);
-  const std::vector<vtkIdType> &chosen = (forwardArea <= backwardArea) ? forward : backward;
-  for (size_t t = 0; t + 2 < chosen.size(); t += 3)
-  {
-    vtkIdType triangle[3] = {chosen[t], chosen[t+1], chosen[t+2]};
-    cells->InsertNextCell(3, triangle);
-  }
+  areas[0] = band(1, bands[0]);
+  areas[1] = band(-1, bands[1]);
   return SV_OK;
 }
 
@@ -4978,7 +5016,10 @@ static int StitchLoopPair(vtkPoints *points, const std::vector<vtkIdType> &first
  * crossing. The holes are then closed: a hole on its
  * own is the gap at a crease and is zipped shut across it, and two holes that
  * run alongside each other are the two sides of a seam where one vessel's wall
- * crosses another's, and are joined to each other.
+ * crosses another's, and are joined to each other. Every closure is tested
+ * for passing through the surface, which is what the volume mesher refuses,
+ * and a pair whose band does so is closed the other way round, or each on its
+ * own, whichever crosses least.
  *
  * The extruded rim of each cap is kept as the outer rim of that vessel end, so
  * the two rims are one to one. A cap whose rim is cut into by a neighbouring
@@ -6029,7 +6070,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
 
   // Close the holes. Each outer triangle is tagged with what it is - whole,
   // fragment, crease zip or seam band - and which hole it closes, for the
-  // crossing check below and for the surface written out after it.
+  // crossing check and for the surface written out after it.
   const int roleWhole = 0, roleFragment = 1, roleZip = 2, roleSeam = 3;
   std::vector<int> cellRole, cellHole;
   for (size_t outerCellId = 0; outerCellId < sourceCell.size(); outerCellId++)
@@ -6039,77 +6080,69 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     cellRole.push_back(whole ? roleWhole : roleFragment);
     cellHole.push_back(-1);
   }
-  int numZipped = 0, numJoined = 0;
-  size_t largestHole = 0;
-  std::vector<std::pair<double,vtkIdType> > holeSeeds;
-  for (size_t h = 0; h < numHoles; h++)
+
+  // Whether a triangle passes through the surface as it stands, which is what
+  // the volume mesher refuses. The whole and fragment triangles are binned on
+  // the same grid as the inner surface; the closing triangles accepted so far
+  // are kept in a sparse map over the same bins, since they are few and are
+  // added one hole at a time.
+  vtkIdType numBaseCells = outerCells->GetNumberOfCells();
+  std::vector<double> tri;
+  std::vector<vtkIdType> triPts;
+  std::vector<int> testedStamp;
+  tri.reserve((size_t)9*numBaseCells);
+  triPts.reserve((size_t)3*numBaseCells);
+  auto appendTri = [&](const vtkIdType pts[3])
   {
-    largestHole = std::max(largestHole, holes[h].size());
-    holeSeeds.push_back(std::make_pair(-(double)holes[h].size(), holes[h][0]));
-    vtkIdType before = outerCells->GetNumberOfCells();
-    int role = roleZip;
-    if (partner[h] < 0)
+    for (int j = 0; j < 3; j++)
     {
-      if (TriangulateLoopByLeastArea(outerPoints, holes[h], outerCells) != SV_OK)
-      {
-        fprintf(stderr,"Problem zipping a crease in the outer wall\n");
-        return SV_ERROR;
-      }
-      numZipped++;
+      triPts.push_back(pts[j]);
+      double p[3];
+      outerPoints->GetPoint(pts[j], p);
+      tri.insert(tri.end(), p, p + 3);
     }
-    else if ((size_t)partner[h] > h)
+    testedStamp.push_back(0);
+    return (vtkIdType)(triPts.size()/3) - 1;
+  };
+  for (vtkIdType cellId = 0; cellId < numBaseCells; cellId++)
+  {
+    appendTri(&outerTris[(size_t)3*cellId]);
+  }
+  auto binRange = [&](const double *t, int lo[3], int hi[3])
+  {
+    for (int k = 0; k < 3; k++)
     {
-      if (StitchLoopPair(outerPoints, holes[h], holes[(size_t)partner[h]], outerCells) != SV_OK)
-      {
-        fprintf(stderr,"Problem joining the two sides of a seam in the outer wall\n");
-        return SV_ERROR;
-      }
-      numJoined++;
-      role = roleSeam;
+      double low = std::min(t[k], std::min(t[3+k], t[6+k]));
+      double high = std::max(t[k], std::max(t[3+k], t[6+k]));
+      lo[k] = binOf(low, k);
+      hi[k] = binOf(high, k);
     }
-    for (vtkIdType added = before; added < outerCells->GetNumberOfCells(); added++)
+  };
+  std::vector<int> outerBinStart(numBins + 1, 0);
+  for (vtkIdType cellId = 0; cellId < numBaseCells; cellId++)
+  {
+    int lo[3], hi[3];
+    binRange(&tri[(size_t)9*cellId], lo, hi);
+    for (int k = lo[2]; k <= hi[2]; k++)
     {
-      cellRole.push_back(role);
-      cellHole.push_back((int)h);
+      for (int j = lo[1]; j <= hi[1]; j++)
+      {
+        for (int i = lo[0]; i <= hi[0]; i++)
+        {
+          outerBinStart[binIndex(i, j, k) + 1]++;
+        }
+      }
     }
   }
-  outer->Initialize();
-  outer->SetPoints(outerPoints);
-  outer->SetPolys(outerCells);
-
-  // Whether any closing triangle passes through the surface. The volume
-  // mesher finds this too, but reports it as three point numbers; this says
-  // which hole, how it was closed, and where. The triangles are binned on the
-  // same grid as the inner surface, and a closing triangle is tested against
-  // every triangle in the bins its box touches that shares no corner with it.
-  int numCrossing = 0;
-  std::vector<int> cellCrossing(cellRole.size(), 0);
-  std::vector<std::string> crossingLines;
+  for (size_t b = 0; b < numBins; b++)
   {
-    vtkIdType numOuterCells = outer->GetNumberOfCells();
-    std::vector<double> tri((size_t)9*numOuterCells, 0.0);
-    std::vector<vtkIdType> triPts((size_t)3*numOuterCells, -1);
-    std::vector<int> outerBinStart(numBins + 1, 0);
-    auto binRange = [&](const double *t, int lo[3], int hi[3])
+    outerBinStart[b + 1] += outerBinStart[b];
+  }
+  std::vector<vtkIdType> outerBinCells((size_t)outerBinStart[numBins], -1);
+  {
+    std::vector<int> cursor(outerBinStart.begin(), outerBinStart.end() - 1);
+    for (vtkIdType cellId = 0; cellId < numBaseCells; cellId++)
     {
-      for (int k = 0; k < 3; k++)
-      {
-        double low = std::min(t[k], std::min(t[3+k], t[6+k]));
-        double high = std::max(t[k], std::max(t[3+k], t[6+k]));
-        lo[k] = binOf(low, k);
-        hi[k] = binOf(high, k);
-      }
-    };
-    for (vtkIdType cellId = 0; cellId < numOuterCells; cellId++)
-    {
-      vtkIdType npts;
-      const vtkIdType *pts;
-      outer->GetCellPoints(cellId, npts, pts);
-      for (int j = 0; j < 3; j++)
-      {
-        triPts[(size_t)3*cellId + j] = pts[j];
-        outerPoints->GetPoint(pts[j], &tri[(size_t)9*cellId + 3*j]);
-      }
       int lo[3], hi[3];
       binRange(&tri[(size_t)9*cellId], lo, hi);
       for (int k = lo[2]; k <= hi[2]; k++)
@@ -6118,98 +6151,274 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
         {
           for (int i = lo[0]; i <= hi[0]; i++)
           {
-            outerBinStart[binIndex(i, j, k) + 1]++;
+            outerBinCells[(size_t)cursor[binIndex(i, j, k)]++] = cellId;
           }
         }
       }
     }
-    for (size_t b = 0; b < numBins; b++)
+  }
+  std::map<size_t, std::vector<vtkIdType> > extraBins;
+  auto insertExtra = [&](vtkIdType cellId)
+  {
+    int lo[3], hi[3];
+    binRange(&tri[(size_t)9*cellId], lo, hi);
+    for (int k = lo[2]; k <= hi[2]; k++)
     {
-      outerBinStart[b + 1] += outerBinStart[b];
-    }
-    std::vector<vtkIdType> outerBinCells((size_t)outerBinStart[numBins], -1);
-    {
-      std::vector<int> cursor(outerBinStart.begin(), outerBinStart.end() - 1);
-      for (vtkIdType cellId = 0; cellId < numOuterCells; cellId++)
+      for (int j = lo[1]; j <= hi[1]; j++)
       {
-        int lo[3], hi[3];
-        binRange(&tri[(size_t)9*cellId], lo, hi);
-        for (int k = lo[2]; k <= hi[2]; k++)
+        for (int i = lo[0]; i <= hi[0]; i++)
         {
-          for (int j = lo[1]; j <= hi[1]; j++)
+          extraBins[binIndex(i, j, k)].push_back(cellId);
+        }
+      }
+    }
+  };
+  int testStamp = 0;
+  // How many triangles of the surface a triangle passes through; the ids of
+  // those are appended to hits when it is given. A triangle already in the
+  // surface is skipped by its own index.
+  auto crossings = [&](const double *f, const vtkIdType *fp, vtkIdType self,
+      std::vector<vtkIdType> *hits)
+  {
+    testStamp++;
+    int count = 0;
+    int lo[3], hi[3];
+    binRange(f, lo, hi);
+    auto test = [&](vtkIdType other)
+    {
+      if (other == self || testedStamp[(size_t)other] == testStamp)
+      {
+        return;
+      }
+      testedStamp[(size_t)other] = testStamp;
+      if (TrianglesCross(f, fp, &tri[(size_t)9*other], &triPts[(size_t)3*other]))
+      {
+        count++;
+        if (hits != nullptr)
+        {
+          hits->push_back(other);
+        }
+      }
+    };
+    for (int k = lo[2]; k <= hi[2]; k++)
+    {
+      for (int j = lo[1]; j <= hi[1]; j++)
+      {
+        for (int i = lo[0]; i <= hi[0]; i++)
+        {
+          size_t bin = binIndex(i, j, k);
+          for (int c = outerBinStart[bin]; c < outerBinStart[bin + 1]; c++)
           {
-            for (int i = lo[0]; i <= hi[0]; i++)
+            test(outerBinCells[(size_t)c]);
+          }
+          std::map<size_t, std::vector<vtkIdType> >::const_iterator found = extraBins.find(bin);
+          if (found != extraBins.end())
+          {
+            for (size_t c = 0; c < found->second.size(); c++)
             {
-              outerBinCells[(size_t)cursor[binIndex(i, j, k)]++] = cellId;
+              test(found->second[c]);
             }
           }
         }
       }
     }
-    std::vector<int> testedStamp((size_t)numOuterCells, 0);
-    int testStamp = 0;
-    int shown = 0;
-    for (vtkIdType cellId = 0; cellId < numOuterCells; cellId++)
+    return count;
+  };
+  // How many crossings a candidate closure would make: its triangles against
+  // the surface, and against each other, since a fill can fold over itself.
+  auto closureCrossings = [&](const std::vector<vtkIdType> &triangles)
+  {
+    size_t numTriangles = triangles.size()/3;
+    std::vector<double> xyz(9*numTriangles);
+    for (size_t t = 0; t < 3*numTriangles; t++)
     {
-      if (cellRole[(size_t)cellId] < roleZip)
+      outerPoints->GetPoint(triangles[t], &xyz[3*t]);
+    }
+    int total = 0;
+    for (size_t t = 0; t < numTriangles; t++)
+    {
+      total += crossings(&xyz[9*t], &triangles[3*t], -1, nullptr);
+    }
+    for (size_t t = 0; t < numTriangles; t++)
+    {
+      for (size_t u = t+1; u < numTriangles; u++)
+      {
+        if (TrianglesCross(&xyz[9*t], &triangles[3*t], &xyz[9*u], &triangles[3*u]))
+        {
+          total++;
+        }
+      }
+    }
+    return total;
+  };
+
+  // Each hole is closed by whichever of its closures passes through the
+  // surface least. A hole on its own is the gap at a crease and has one
+  // closure, the zip. A pair of holes are the two sides of a seam, and have
+  // three: the band with the second loop walked forwards, the band with it
+  // walked backwards, and - when the pairing was wrong and they are two
+  // creases that happen to run close - each zipped on its own. Preference
+  // among equals is the band of less area, then the other band, then the
+  // zips.
+  struct Closure
+  {
+    std::vector<vtkIdType> triangles;
+    std::vector<int> holeOf;
+    int role;
+    const char *how;
+    int crossings;
+  };
+  int numZipped = 0, numJoined = 0, numFellBack = 0;
+  size_t largestHole = 0;
+  std::vector<std::pair<double,vtkIdType> > holeSeeds;
+  std::vector<std::string> closureLines;
+  for (size_t h = 0; h < numHoles; h++)
+  {
+    largestHole = std::max(largestHole, holes[h].size());
+    holeSeeds.push_back(std::make_pair(-(double)holes[h].size(), holes[h][0]));
+    if (partner[h] >= 0 && (size_t)partner[h] < h)
+    {
+      continue;
+    }
+    std::vector<Closure> options;
+    if (partner[h] < 0)
+    {
+      Closure zip;
+      if (TriangulateLoopByLeastArea(outerPoints, holes[h], zip.triangles, false) != SV_OK)
+      {
+        fprintf(stderr,"Problem zipping a crease in the outer wall\n");
+        return SV_ERROR;
+      }
+      zip.holeOf.assign(zip.triangles.size()/3, (int)h);
+      zip.role = roleZip;
+      zip.how = "zipped";
+      options.push_back(zip);
+    }
+    else
+    {
+      size_t g = (size_t)partner[h];
+      std::vector<vtkIdType> bands[2];
+      double areas[2];
+      if (BuildSeamBands(outerPoints, holes[h], holes[g], bands, areas) != SV_OK)
+      {
+        fprintf(stderr,"Problem joining the two sides of a seam in the outer wall\n");
+        return SV_ERROR;
+      }
+      int lesser = (areas[0] <= areas[1]) ? 0 : 1;
+      for (int which = 0; which < 2; which++)
+      {
+        Closure band;
+        int b = (which == 0) ? lesser : 1 - lesser;
+        band.triangles = bands[b];
+        band.holeOf.assign(band.triangles.size()/3, (int)h);
+        band.role = roleSeam;
+        band.how = (which == 0) ? "seam band" : "seam band the other way round";
+        options.push_back(band);
+      }
+      Closure zips;
+      std::vector<vtkIdType> second;
+      if (TriangulateLoopByLeastArea(outerPoints, holes[h], zips.triangles, true) == SV_OK &&
+          TriangulateLoopByLeastArea(outerPoints, holes[g], second, true) == SV_OK)
+      {
+        zips.holeOf.assign(zips.triangles.size()/3, (int)h);
+        zips.holeOf.insert(zips.holeOf.end(), second.size()/3, (int)g);
+        zips.triangles.insert(zips.triangles.end(), second.begin(), second.end());
+        zips.role = roleZip;
+        zips.how = "zipped each on its own";
+        options.push_back(zips);
+      }
+    }
+    size_t chosen = 0;
+    for (size_t o = 0; o < options.size(); o++)
+    {
+      options[o].crossings = closureCrossings(options[o].triangles);
+      if (options[o].crossings < options[chosen].crossings)
+      {
+        chosen = o;
+      }
+    }
+    const Closure &closure = options[chosen];
+    if (chosen > 0)
+    {
+      numFellBack++;
+    }
+    if (chosen > 0 || closure.crossings > 0)
+    {
+      double p[3];
+      outerPoints->GetPoint(holes[h][0], p);
+      std::string line;
+      char head[256];
+      snprintf(head, sizeof(head), "    hole %zu (%zu points) at (%.5g, %.5g, %.5g): %s, %d triangles crossing the surface",
+          h, holes[h].size(), p[0], p[1], p[2], closure.how, closure.crossings);
+      line = head;
+      int numOthers = 0;
+      for (size_t o = 0; o < options.size(); o++)
+      {
+        if (o == chosen)
+        {
+          continue;
+        }
+        char other[128];
+        snprintf(other, sizeof(other), "%s %s would cross %d", (numOthers == 0) ? ";" : ",",
+            options[o].how, options[o].crossings);
+        line += other;
+        numOthers++;
+      }
+      closureLines.push_back(line);
+    }
+    if (closure.role == roleSeam)
+    {
+      numJoined++;
+    }
+    else
+    {
+      numZipped += (partner[h] < 0) ? 1 : 2;
+    }
+    for (size_t t = 0; t < closure.triangles.size()/3; t++)
+    {
+      const vtkIdType *pts = &closure.triangles[3*t];
+      outerCells->InsertNextCell(3, pts);
+      cellRole.push_back(closure.role);
+      cellHole.push_back(closure.holeOf[t]);
+      insertExtra(appendTri(pts));
+    }
+  }
+  outer->Initialize();
+  outer->SetPoints(outerPoints);
+  outer->SetPolys(outerCells);
+
+  // What is left crossing once every hole is closed: a closing triangle is
+  // tested against the whole surface, later closures included, and what it
+  // crosses is marked with it. Per hole, so that the log says which holes
+  // the volume mesher will refuse and how they were closed.
+  int numCrossing = 0;
+  std::vector<int> cellCrossing(cellRole.size(), 0);
+  std::vector<int> holeCrossing(numHoles, 0);
+  std::vector<vtkIdType> holeFirstCrossing(numHoles, -1);
+  {
+    vtkIdType numOuterCells = (vtkIdType)cellRole.size();
+    std::vector<vtkIdType> hits;
+    for (vtkIdType cellId = numBaseCells; cellId < numOuterCells; cellId++)
+    {
+      hits.clear();
+      int count = crossings(&tri[(size_t)9*cellId], &triPts[(size_t)3*cellId], cellId, &hits);
+      if (count == 0)
       {
         continue;
       }
-      testStamp++;
-      const double *f = &tri[(size_t)9*cellId];
-      const vtkIdType *fp = &triPts[(size_t)3*cellId];
-      int lo[3], hi[3];
-      binRange(f, lo, hi);
-      for (int k = lo[2]; k <= hi[2]; k++)
+      numCrossing++;
+      cellCrossing[(size_t)cellId] = 1;
+      for (size_t c = 0; c < hits.size(); c++)
       {
-        for (int j = lo[1]; j <= hi[1]; j++)
+        cellCrossing[(size_t)hits[c]] = 1;
+      }
+      int hole = cellHole[(size_t)cellId];
+      if (hole >= 0)
+      {
+        holeCrossing[(size_t)hole]++;
+        if (holeFirstCrossing[(size_t)hole] < 0)
         {
-          for (int i = lo[0]; i <= hi[0]; i++)
-          {
-            size_t bin = binIndex(i, j, k);
-            for (int c = outerBinStart[bin]; c < outerBinStart[bin + 1]; c++)
-            {
-              vtkIdType other = outerBinCells[(size_t)c];
-              if (other == cellId || testedStamp[(size_t)other] == testStamp)
-              {
-                continue;
-              }
-              testedStamp[(size_t)other] = testStamp;
-              const vtkIdType *gp = &triPts[(size_t)3*other];
-              bool shared = false;
-              for (int m = 0; m < 3 && !shared; m++)
-              {
-                shared = gp[m] == fp[0] || gp[m] == fp[1] || gp[m] == fp[2];
-              }
-              if (shared || !TrianglesCross(f, &tri[(size_t)9*other]))
-              {
-                continue;
-              }
-              if (cellCrossing[(size_t)cellId] == 0)
-              {
-                numCrossing++;
-              }
-              cellCrossing[(size_t)cellId] = 1;
-              cellCrossing[(size_t)other] = 1;
-              if (shown < 8)
-              {
-                shown++;
-                const double *g = &tri[(size_t)9*other];
-                int hole = cellHole[(size_t)cellId];
-                const char *how = (cellRole[(size_t)cellId] == roleZip) ? "zipped" : "seam band";
-                const char *what = (cellRole[(size_t)other] == roleWhole) ? "whole" :
-                    (cellRole[(size_t)other] == roleFragment) ? "fragment" :
-                    (cellRole[(size_t)other] == roleZip) ? "zip" : "seam band";
-                char line[512];
-                snprintf(line, sizeof(line), "    closing triangle of hole %d (%s, %zu points) at (%.5g, %.5g, %.5g) crosses a %s triangle%s at (%.5g, %.5g, %.5g)",
-                    hole, how, holes[(size_t)hole].size(),
-                    (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0,
-                    what, (cellHole[(size_t)other] >= 0 && cellHole[(size_t)other] != hole) ? " of another hole" : "",
-                    (g[0]+g[3]+g[6])/3.0, (g[1]+g[4]+g[7])/3.0, (g[2]+g[5]+g[8])/3.0);
-                crossingLines.push_back(line);
-              }
-            }
-          }
+          holeFirstCrossing[(size_t)hole] = cellId;
         }
       }
     }
@@ -6247,13 +6456,24 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       numCutCells, numDroppedCells, (long long)numCutPts);
   fprintf(stdout,"  %lld standing queries, %.1f s for the first pass over every point\n",
       numQueries, firstPassSeconds);
-  fprintf(stdout,"  %zu cap rims kept whole; %zu holes: %d zipped across a crease, %d pairs joined as the two sides of a seam, the largest %zu points around\n",
-      rims.size(), numHoles, numZipped, numJoined, largestHole);
+  fprintf(stdout,"  %zu cap rims kept whole; %zu holes: %d zipped across a crease, %d pairs joined as the two sides of a seam, the largest %zu points around; %d closed by a fallback because the preferred closure crossed the surface more\n",
+      rims.size(), numHoles, numZipped, numJoined, largestHole, numFellBack);
+  for (size_t l = 0; l < closureLines.size(); l++)
+  {
+    fprintf(stdout,"%s\n", closureLines[l].c_str());
+  }
   fprintf(stdout,"  %d closing triangles pass through the surface%s; the surface is written to wall_outer_trimmed.vtp with TrimRole (0 whole, 1 fragment, 2 zip, 3 seam band), TrimHole and TrimCrossing on its cells\n",
       numCrossing, (numCrossing > 0) ? " - the volume mesher will refuse them" : "");
-  for (size_t l = 0; l < crossingLines.size(); l++)
+  for (size_t h = 0; h < numHoles; h++)
   {
-    fprintf(stdout,"%s\n", crossingLines[l].c_str());
+    if (holeCrossing[h] == 0)
+    {
+      continue;
+    }
+    const double *f = &tri[(size_t)9*holeFirstCrossing[h]];
+    fprintf(stdout,"    hole %zu (%s, %zu points): %d of its closing triangles cross the surface, the first at (%.5g, %.5g, %.5g)\n",
+        h, (cellRole[(size_t)holeFirstCrossing[h]] == roleZip) ? "zipped" : "seam band", holes[h].size(),
+        holeCrossing[h], (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
   }
   if (!holeSeeds.empty())
   {
