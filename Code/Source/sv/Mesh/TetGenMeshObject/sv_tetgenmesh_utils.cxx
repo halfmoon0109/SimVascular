@@ -5473,7 +5473,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
 
   std::vector<double> standingOf((size_t)numPts, 1.0);
   std::vector<bool> removed((size_t)numPts, false);
-  int numInLumen = 0, numUnderWall = 0, numInvertedPts = 0;
+  int numInLumen = 0, numUnderWall = 0, numInvertedPts = 0, numNoThicknessOnly = 0;
   for (vtkIdType ptId = 0; ptId < numPts; ptId++)
   {
     double x[3] = {extruded[(size_t)3*ptId], extruded[(size_t)3*ptId+1], extruded[(size_t)3*ptId+2]};
@@ -5504,6 +5504,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     else if (array->GetValue(ptId) <= 0.0)
     {
       removed[(size_t)ptId] = true;
+      numNoThicknessOnly++;
     }
   }
   double firstPassSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -5831,7 +5832,8 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       }
     }
   }
-  int numRemoved = numInvertedPts + numInLumen + numUnderWall + numPeninsula + numDemoted + numFolded;
+  int numRemoved = numInvertedPts + numInLumen + numUnderWall + numPeninsula + numDemoted + numFolded +
+      numNoThicknessOnly;
 
   // The boundary of what is left: the extruded cap rims, and the holes. The
   // walk builds links, so it is given a surface that is not added to after.
@@ -6236,9 +6238,9 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
 
   double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   fprintf(stdout,"Wall outer surface by extrusion, trimmed where it runs inside the wall:\n");
-  fprintf(stdout,"  %lld points extruded; %d cut: %d on a triangle the extrusion turned over (%d triangles), %d inside a lumen, %d within %.3g of another sheet's wall, %d left on no whole triangle, %d whose edges crossed the clearance within %.2g of their length, %d on a fragment that came out turned over; %d had no thickness\n",
+  fprintf(stdout,"  %lld points extruded; %d cut: %d on a triangle the extrusion turned over (%d triangles), %d inside a lumen, %d within %.3g of another sheet's wall, %d left on no whole triangle, %d whose edges crossed the clearance within %.2g of their length, %d on a fragment that came out turned over, %d for having no thickness alone; %d had no thickness\n",
       (long long)numPts, numRemoved, numInvertedPts, numInvertedCells, numInLumen, numUnderWall,
-      clearance, numPeninsula, numDemoted, edgeFloor, numFolded, numNoThickness);
+      clearance, numPeninsula, numDemoted, edgeFloor, numFolded, numNoThicknessOnly, numNoThickness);
   fprintf(stdout,"  %d rounds of cutting; the last left %d fragments turned over%s, and held %d cap rim corners that would otherwise have been cut\n",
       numRounds, lastFolded, (lastFolded > 0) ? " - the volume mesher will meet them" : "", numRimHeld);
   fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges\n",
