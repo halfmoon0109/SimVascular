@@ -4803,18 +4803,20 @@ static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkId
       loopBounds[2*c+1] = (i == 0) ? xyz[c] : std::max(loopBounds[2*c+1], xyz[3*i+c]);
     }
   }
-  // A triangle with no area is charged the whole loop's extent squared on
-  // top, so that the fill takes any triangulation without one before one
-  // with. The least-area choice alone does not avoid them: every
-  // triangulation of a flat loop has the same area, and a triangle of three
-  // points in a line, whose long edge passes through the middle point, then
-  // costs nothing.
+  // A triangle with no area is charged more than any triangulation's whole
+  // area on top - the loop's extent squared per triangle, times the number
+  // of triangles - so that the fill takes any triangulation without one
+  // before one with, whatever the areas: the sum is then ordered first on
+  // how many flat triangles it has and only then on area. The least-area
+  // choice alone does not avoid them: every triangulation of a flat loop has
+  // the same area, and a triangle of three points in a line, whose long edge
+  // passes through the middle point, then costs nothing.
   double extent = 0.0;
   for (int c = 0; c < 3; c++)
   {
     extent = std::max(extent, loopBounds[2*c+1] - loopBounds[2*c]);
   }
-  const double degeneratePenalty = extent*extent;
+  const double degeneratePenalty = (double)n*extent*extent;
   auto area = [&](size_t i, size_t k, size_t j)
   {
     double e1[3], e2[3], cross[3];
@@ -5075,7 +5077,8 @@ static int BuildSeamBands(vtkPoints *points, const std::vector<vtkIdType> &first
  * extruded rim.
  * @param numUnresolved Set to the number of triangles the surface is left
  * with that the volume mesher will refuse: fragments still turned over when
- * the cut stopped, and triangles passing through the surface. The surface is
+ * the cut stopped, triangles passing through the surface, and closing
+ * triangles with no area. The surface is
  * returned whatever this is, so that it can be measured and looked at; the
  * caller decides whether to go on.
  * @param cutConverged Set to whether the rounds of cutting ended because
@@ -6476,8 +6479,8 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   // another sheet is a fold the cut did not reach - the cut only looks at
   // where the points stand, and a triangle whose three points all stand
   // clear can still run through a wall between them.
-  int numCrossing = 0, numSheetCrossing = 0;
-  vtkIdType firstSheetCrossing = -1;
+  int numCrossing = 0, numSheetCrossing = 0, numDegenerateClosing = 0;
+  vtkIdType firstSheetCrossing = -1, firstDegenerate = -1;
   std::vector<int> cellCrossing(cellRole.size(), 0);
   std::vector<int> holeCrossing(numHoles, 0);
   std::vector<vtkIdType> holeFirstCrossing(numHoles, -1);
@@ -6486,6 +6489,27 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     std::vector<vtkIdType> hits;
     for (vtkIdType cellId = 0; cellId < numOuterCells; cellId++)
     {
+      // A closing triangle with no area is one a fill could not avoid - a
+      // loop with no triangulation free of them - and the volume mesher
+      // refuses it as it does a crossing.
+      if (cellId >= numBaseCells)
+      {
+        const double *f = &tri[(size_t)9*cellId];
+        double e1[3], e2[3], cross[3];
+        vtkMath::Subtract(f + 3, f, e1);
+        vtkMath::Subtract(f + 6, f, e2);
+        vtkMath::Cross(e1, e2, cross);
+        double longest2 = std::max(vtkMath::Dot(e1, e1), vtkMath::Dot(e2, e2));
+        if (0.5*vtkMath::Norm(cross) <= 1.0e-6*longest2)
+        {
+          numDegenerateClosing++;
+          cellCrossing[(size_t)cellId] = 1;
+          if (firstDegenerate < 0)
+          {
+            firstDegenerate = cellId;
+          }
+        }
+      }
       hits.clear();
       int count = crossings(&tri[(size_t)9*cellId], &triPts[(size_t)3*cellId], cellId, &hits);
       if (count == 0)
@@ -6515,6 +6539,36 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
         {
           holeFirstCrossing[(size_t)hole] = cellId;
         }
+      }
+    }
+  }
+
+  // Where the cut points actually stand. A cut point found by bisection is
+  // at the clearance by construction; one held off a kept corner at the edge
+  // floor is not, and stands wherever that put it - inside the clearance,
+  // and at the other sheet's outer surface if the crossing was close to the
+  // corner. This is what the rounds of cutting were converging on, so a cut
+  // that stopped at its bound is judged by this count.
+  int numBelowClearance = 0, numBelowWall = 0;
+  double worstStanding = std::numeric_limits<double>::max();
+  vtkIdType worstCutPoint = -1;
+  for (vtkIdType ptId = numKeptOriginal; ptId < numOuterPts; ptId++)
+  {
+    double x[3], closest[3], wall = 0.0;
+    outerPoints->GetPoint(ptId, x);
+    double f = standing(x, cutFrom[(size_t)ptId], cutTo[(size_t)ptId], &direction[(size_t)3*cutFrom[(size_t)ptId]],
+        closest, wall);
+    if (f < clearance)
+    {
+      numBelowClearance++;
+      if (f < 1.0)
+      {
+        numBelowWall++;
+      }
+      if (f < worstStanding)
+      {
+        worstStanding = f;
+        worstCutPoint = ptId;
       }
     }
   }
@@ -6566,6 +6620,23 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     fprintf(stdout,"    a sheet triangle crossing the surface is a fold the cut did not reach, the first at (%.5g, %.5g, %.5g)\n",
         (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
   }
+  if (numDegenerateClosing > 0)
+  {
+    const double *f = &tri[(size_t)9*firstDegenerate];
+    fprintf(stdout,"  %d closing triangles have no area - a hole with no triangulation free of them - the first at (%.5g, %.5g, %.5g); the volume mesher will refuse them\n",
+        numDegenerateClosing, (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
+  }
+  if (numBelowClearance > 0)
+  {
+    double p[3];
+    outerPoints->GetPoint(worstCutPoint, p);
+    fprintf(stdout,"  %d cut points stand inside the clearance of another sheet, %d of them inside its wall, the worst at %.4g of a wall at (%.5g, %.5g, %.5g); these are the cut points held off a corner at the edge floor\n",
+        numBelowClearance, numBelowWall, worstStanding, p[0], p[1], p[2]);
+  }
+  else
+  {
+    fprintf(stdout,"  every cut point stands at least the clearance from every other sheet\n");
+  }
   for (size_t h = 0; h < numHoles; h++)
   {
     if (holeCrossing[h] == 0)
@@ -6591,7 +6662,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   }
   fprintf(stdout,"  the outer wall is %lld points and %lld triangles, %.1f s\n",
       (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells(), seconds);
-  numUnresolved = foldedTriangles + numCrossing + numSheetCrossing;
+  numUnresolved = foldedTriangles + numCrossing + numSheetCrossing + numDegenerateClosing;
   cutConverged = converged;
   return SV_OK;
 }
