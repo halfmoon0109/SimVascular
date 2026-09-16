@@ -5077,8 +5077,8 @@ static int BuildSeamBands(vtkPoints *points, const std::vector<vtkIdType> &first
  * extruded rim.
  * @param numUnresolved Set to the number of triangles the surface is left
  * with that the volume mesher will refuse: fragments still turned over when
- * the cut stopped, triangles passing through the surface, and closing
- * triangles with no area. The surface is
+ * the cut stopped, triangles passing through the surface, closing triangles
+ * with no area, and cut points inside another wall or a lumen. The surface is
  * returned whatever this is, so that it can be measured and looked at; the
  * caller decides whether to go on.
  * @param cutConverged Set to whether the rounds of cutting ended because
@@ -5642,7 +5642,11 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   // rim point is never cut this way: the rim has to survive whole for the
   // vessel end to be closed, and cutting one would fail the build outright
   // where holding the cut point off it leaves a sliver at worst.
+  // The cut points are found to double precision, and the points are kept
+  // at that: vtkPoints' default is float, which would round them by a few
+  // parts in ten million and put them off the clearance they were found on.
   auto outerPoints = vtkSmartPointer<vtkPoints>::New();
+  outerPoints->SetDataTypeToDouble();
   auto outerCells = vtkSmartPointer<vtkCellArray>::New();
   std::vector<vtkIdType> newId((size_t)numPts, -1);
   std::vector<double> scale;
@@ -5720,6 +5724,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     // The cut point on an edge is shared by the two triangles on that edge,
     // which is what keeps the cut edges a closed chain.
     outerPoints = vtkSmartPointer<vtkPoints>::New();
+    outerPoints->SetDataTypeToDouble();
     outerCells = vtkSmartPointer<vtkCellArray>::New();
     std::fill(newId.begin(), newId.end(), -1);
     scale.clear();
@@ -6546,22 +6551,36 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   // Where the cut points actually stand. A cut point found by bisection is
   // at the clearance by construction; one held off a kept corner at the edge
   // floor is not, and stands wherever that put it - inside the clearance,
-  // and at the other sheet's outer surface if the crossing was close to the
-  // corner. This is what the rounds of cutting were converging on, so a cut
-  // that stopped at its bound is judged by this count.
-  int numBelowClearance = 0, numBelowWall = 0;
+  // inside the other sheet's wall if the crossing was close to the corner,
+  // or inside a lumen. It is measured the way the bisection measured it:
+  // the same own-sheet exclusion, and the sign as well as the ratio.
+  //
+  // What counts against the surface is a cut point inside another wall or a
+  // lumen: that is the wall solid overlapping itself, and near a seam the
+  // other sheet is cut away there, so the crossing check has nothing to
+  // catch it on. A point between the wall and the clearance is short of the
+  // margin but outside every wall, so the surface still stands; it is
+  // reported, not refused. Points at the clearance to within rounding are
+  // not short of it.
+  int numBelowClearance = 0, numBelowWall = 0, numInLumenCut = 0;
   double worstStanding = std::numeric_limits<double>::max();
   vtkIdType worstCutPoint = -1;
+  const double clearanceTolerance = 1.0e-9*clearance;
   for (vtkIdType ptId = numKeptOriginal; ptId < numOuterPts; ptId++)
   {
     double x[3], closest[3], wall = 0.0;
     outerPoints->GetPoint(ptId, x);
     double f = standing(x, cutFrom[(size_t)ptId], cutTo[(size_t)ptId], &direction[(size_t)3*cutFrom[(size_t)ptId]],
         closest, wall);
-    if (f < clearance)
+    if (outwardSign*implicit->EvaluateFunction(x) < 0.0)
+    {
+      numInLumenCut++;
+      f = -1.0;
+    }
+    if (f < clearance - clearanceTolerance)
     {
       numBelowClearance++;
-      if (f < 1.0)
+      if (f >= 0.0 && f < 1.0)
       {
         numBelowWall++;
       }
@@ -6630,12 +6649,12 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   {
     double p[3];
     outerPoints->GetPoint(worstCutPoint, p);
-    fprintf(stdout,"  %d cut points stand inside the clearance of another sheet, %d of them inside its wall, the worst at %.4g of a wall at (%.5g, %.5g, %.5g); these are the cut points held off a corner at the edge floor\n",
-        numBelowClearance, numBelowWall, worstStanding, p[0], p[1], p[2]);
+    fprintf(stdout,"  %d cut points stand short of the clearance from another sheet: %d inside its wall and %d inside a lumen, which the volume mesher will refuse; the rest are outside every wall and are only short of the margin. The worst is at %.4g of a wall at (%.5g, %.5g, %.5g). These are the cut points held off a corner at the edge floor\n",
+        numBelowClearance, numBelowWall, numInLumenCut, worstStanding, p[0], p[1], p[2]);
   }
   else
   {
-    fprintf(stdout,"  every cut point stands at least the clearance from every other sheet\n");
+    fprintf(stdout,"  every cut point stands at least the clearance from every other sheet and outside every lumen\n");
   }
   for (size_t h = 0; h < numHoles; h++)
   {
@@ -6662,7 +6681,8 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   }
   fprintf(stdout,"  the outer wall is %lld points and %lld triangles, %.1f s\n",
       (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells(), seconds);
-  numUnresolved = foldedTriangles + numCrossing + numSheetCrossing + numDegenerateClosing;
+  numUnresolved = foldedTriangles + numCrossing + numSheetCrossing + numDegenerateClosing +
+      numBelowWall + numInLumenCut;
   cutConverged = converged;
   return SV_OK;
 }
@@ -6957,7 +6977,10 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
     return SV_ERROR;
   }
 
+  // Double, so that neither surface's points are rounded on the way in; the
+  // interface points in particular have to come out as they went in.
   auto points = vtkSmartPointer<vtkPoints>::New();
+  points->SetDataTypeToDouble();
   points->SetNumberOfPoints(numPts + numOuterPts);
   for (vtkIdType ptId = 0; ptId < numPts; ptId++)
   {
