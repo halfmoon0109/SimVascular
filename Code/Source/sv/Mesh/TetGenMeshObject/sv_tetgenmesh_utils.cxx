@@ -4793,10 +4793,28 @@ static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkId
     return SV_ERROR;
   }
   std::vector<double> xyz(3*n);
+  double loopBounds[6];
   for (size_t i = 0; i < n; i++)
   {
     points->GetPoint(loop[i], &xyz[3*i]);
+    for (int c = 0; c < 3; c++)
+    {
+      loopBounds[2*c] = (i == 0) ? xyz[c] : std::min(loopBounds[2*c], xyz[3*i+c]);
+      loopBounds[2*c+1] = (i == 0) ? xyz[c] : std::max(loopBounds[2*c+1], xyz[3*i+c]);
+    }
   }
+  // A triangle with no area is charged the whole loop's extent squared on
+  // top, so that the fill takes any triangulation without one before one
+  // with. The least-area choice alone does not avoid them: every
+  // triangulation of a flat loop has the same area, and a triangle of three
+  // points in a line, whose long edge passes through the middle point, then
+  // costs nothing.
+  double extent = 0.0;
+  for (int c = 0; c < 3; c++)
+  {
+    extent = std::max(extent, loopBounds[2*c+1] - loopBounds[2*c]);
+  }
+  const double degeneratePenalty = extent*extent;
   auto area = [&](size_t i, size_t k, size_t j)
   {
     double e1[3], e2[3], cross[3];
@@ -4806,7 +4824,14 @@ static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkId
       e2[c] = xyz[3*j+c] - xyz[3*i+c];
     }
     vtkMath::Cross(e1, e2, cross);
-    return 0.5*vtkMath::Norm(cross);
+    double a = 0.5*vtkMath::Norm(cross);
+    // Flat to within the length of its longest edge times a hair.
+    double longest2 = std::max(vtkMath::Dot(e1, e1), vtkMath::Dot(e2, e2));
+    if (a <= 1.0e-6*longest2)
+    {
+      a += degeneratePenalty;
+    }
+    return a;
   };
   std::vector<double> cost(n*n, 0.0);
   std::vector<int> split(n*n, -1);
