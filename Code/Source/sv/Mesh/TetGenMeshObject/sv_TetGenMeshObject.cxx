@@ -2817,8 +2817,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   std::vector<TGenUtilsCapRim> caps;
   int numUnresolved = 0;
+  bool cutConverged = false;
   if (TGenUtils_BuildTrimmedExtrudedOuterSurface(surface, thicknessArray,
-        clearanceFraction, offsetOuter, caps, numUnresolved) != SV_OK)
+        clearanceFraction, offsetOuter, caps, numUnresolved, cutConverged) != SV_OK)
   {
     fprintf(stderr,"Problem building the trimmed outer wall surface\n");
     return SV_ERROR;
@@ -2855,6 +2856,11 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   {
     fprintf(stderr,"The trimmed outer wall has %d triangles the volume mesher will refuse (turned over or passing through the surface); see the trim log above and wall_outer_trimmed.vtp\n",
         numUnresolved);
+    return SV_ERROR;
+  }
+  if (!cutConverged)
+  {
+    fprintf(stderr,"The trim's rounds of cutting hit their bound with cuts still pending, so the outer wall is not the surface the cut was converging on; see the trim log above\n");
     return SV_ERROR;
   }
 

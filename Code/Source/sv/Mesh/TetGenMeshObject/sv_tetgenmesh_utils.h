@@ -205,7 +205,8 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData
     double clearance,
     vtkPolyData *outer,
     std::vector<TGenUtilsCapRim> &caps,
-    int &numUnresolved);
+    int &numUnresolved,
+    bool &cutConverged);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_StitchCapAnnulus(vtkPoints *points,
     const std::vector<vtkIdType> &innerLoop,

@@ -5078,14 +5078,21 @@ static int BuildSeamBands(vtkPoints *points, const std::vector<vtkIdType> &first
  * the cut stopped, and triangles passing through the surface. The surface is
  * returned whatever this is, so that it can be measured and looked at; the
  * caller decides whether to go on.
+ * @param cutConverged Set to whether the rounds of cutting ended because
+ * nothing more was to be cut, rather than at their bound with cuts pending.
+ * At the bound the surface is still sound - the pending cuts are of corners
+ * whose cut points sit a twentieth of an edge from them - but it is not the
+ * surface the cut was converging on.
  * @return SV_OK if the outer surface was built and every hole closed.
  */
 
 int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
-    double clearance, vtkPolyData *outer, std::vector<TGenUtilsCapRim> &caps, int &numUnresolved)
+    double clearance, vtkPolyData *outer, std::vector<TGenUtilsCapRim> &caps, int &numUnresolved,
+    bool &cutConverged)
 {
   caps.clear();
   numUnresolved = 0;
+  cutConverged = false;
 
   if (surface == nullptr || array == nullptr || outer == nullptr)
   {
@@ -5640,6 +5647,10 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   vtkIdType numKeptOriginal = 0, numOuterPts = 0, numCutPts = 0;
   int numCutCells = 0, numDroppedCells = 0;
   int numPeninsula = 0, numDemoted = 0, numFolded = 0, numRounds = 0, lastFolded = 0;
+  // The triangles turned over in the last round are the ones the surface is
+  // left with. They are counted apart from the corners cut for them, because
+  // a corner on a cap rim is not cut and its triangle stays turned over.
+  int foldedTriangles = 0;
   int numRimHeld = 0;
   bool converged = false;
   const int maxRounds = 8;
@@ -5894,6 +5905,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     // at its kept corners. With nothing moved off the sheets this should not
     // happen, and it is counted so that the log says whether it did.
     lastFolded = 0;
+    foldedTriangles = 0;
     for (size_t outerCellId = 0; outerCellId < sourceCell.size(); outerCellId++)
     {
       const vtkIdType *pts = &outerTris[3*outerCellId];
@@ -5908,6 +5920,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       {
         continue;
       }
+      foldedTriangles++;
       for (int j = 0; j < 3; j++)
       {
         if (pts[j] >= numKeptOriginal)
@@ -6532,9 +6545,9 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   fprintf(stdout,"  %lld points extruded; %d cut: %d on a triangle the extrusion turned over (%d triangles), %d inside a lumen, %d within %.3g of another sheet's wall, %d left on no whole triangle, %d whose edges crossed the clearance within %.2g of their length, %d on a fragment that came out turned over, %d for having no thickness alone; %d had no thickness\n",
       (long long)numPts, numRemoved, numInvertedPts, numInvertedCells, numInLumen, numUnderWall,
       clearance, numPeninsula, numDemoted, edgeFloor, numFolded, numNoThicknessOnly, numNoThickness);
-  fprintf(stdout,"  %d rounds of cutting%s; the last left %d fragments turned over%s, and held %d cap rim corners that would otherwise have been cut\n",
+  fprintf(stdout,"  %d rounds of cutting%s; the last left %d triangles turned over%s (%d corners marked for cutting), and held %d cap rim corners that would otherwise have been cut\n",
       numRounds, converged ? ", converged" : " - the bound, not convergence: the last round's cuts were not made",
-      lastFolded, (lastFolded > 0) ? " - the volume mesher will refuse them" : "", numRimHeld);
+      foldedTriangles, (foldedTriangles > 0) ? " - the volume mesher will refuse them" : "", lastFolded, numRimHeld);
   fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges\n",
       numCutCells, numDroppedCells, (long long)numCutPts);
   fprintf(stdout,"  %lld standing queries over a %d x %d x %d grid of %.4g bins (reach %.4g), %.1f s for the first pass over every point\n",
@@ -6578,7 +6591,8 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   }
   fprintf(stdout,"  the outer wall is %lld points and %lld triangles, %.1f s\n",
       (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells(), seconds);
-  numUnresolved = lastFolded + numCrossing + numSheetCrossing;
+  numUnresolved = foldedTriangles + numCrossing + numSheetCrossing;
+  cutConverged = converged;
   return SV_OK;
 }
 
