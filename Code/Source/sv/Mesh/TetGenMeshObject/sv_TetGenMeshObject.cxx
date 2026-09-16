@@ -3002,6 +3002,12 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     // outer wall gets one new face past the end of the model's range. A side
     // wall is left at 9999, which the downstream pass replaces with the id of
     // the cap it closes against.
+    //
+    // The range is the whole model's, not the wall surface's: the wall
+    // surface has had the caps taken off it, and a cap numbered past the last
+    // wall face would otherwise share its id with the outer wall, and the
+    // export that writes one file per model face would put the outer wall in
+    // that cap's file.
     auto surfaceFaceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
     int outerWallFaceId = outerSurfaceCellId;
     if (surfaceFaceIds != nullptr)
@@ -3009,6 +3015,19 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       double faceIdRange[2];
       surfaceFaceIds->GetRange(faceIdRange, 0);
       outerWallFaceId = (int)faceIdRange[1] + 1;
+      std::vector<int> modelFaceIds;
+      if (originalpolydata_ != nullptr && GetModelFaceIDs(modelFaceIds) == SV_OK)
+      {
+        for (size_t f = 0; f < modelFaceIds.size(); f++)
+        {
+          outerWallFaceId = std::max(outerWallFaceId, modelFaceIds[f] + 1);
+        }
+      }
+      else
+      {
+        fprintf(stdout,"  the model's face ids could not be read, so the outer wall face id %d clears only the wall faces and may coincide with a cap\n",
+            outerWallFaceId);
+      }
     }
     else
     {
