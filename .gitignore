@@ -123,3 +123,5 @@ Code/Source/.cproject
 !BuildWithMake/Release/windows_installer_packages/.project
 !scripts/build.sh
 !scripts/build.ps1
+# 에이전트 간 소통 문서 — 로컬 전용, 커밋하지 않음
+handoff/
