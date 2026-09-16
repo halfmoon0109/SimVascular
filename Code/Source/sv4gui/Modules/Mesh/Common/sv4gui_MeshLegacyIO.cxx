@@ -37,6 +37,8 @@
 
 #include <QDir>
 
+#include <set>
+
 #include <vtkXMLPolyDataWriter.h>
 #include <vtkXMLUnstructuredGridWriter.h>
 #include <vtkAppendPolyData.h>
@@ -257,6 +259,7 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
     QDir mDir(meshDir);
     mDir.mkdir("mesh-surfaces");
     auto faces = modelElement->GetFaces();
+    std::set<int> modelFaceIdents;
 
     for (int i = 0; i < faces.size(); i++) {
       auto face = faces[i];
@@ -266,6 +269,7 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
 
       auto facepd = vtkSmartPointer<vtkPolyData>::New();
       int ident = modelElement->GetFaceIdentifierFromInnerSolid(face->id);
+      modelFaceIdents.insert(ident);
       PlyDtaUtils_GetFacePolyData(surfaceMesh.GetPointer(), &ident, facepd);
 
       ResetFaceSurfaceIds(facepd, node_map, elem_map);
@@ -279,6 +283,40 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
       if (face->type == "wall") {
         wallAppender->AddInputData(facepd);
         wallFound = true;
+      }
+    }
+
+    // A face id on the mesh that is no face of the model is one the mesher
+    // made: the solid wall mesh tags its free outer surface with an id past
+    // the model's, because the model has no face there. It is written under
+    // its own name so the solid domain has a boundary file for it too.
+    //
+    {
+      std::set<int> extraFaceIdents;
+      auto faceIds = vtkIntArray::SafeDownCast(surfaceMesh->GetCellData()->GetArray("ModelFaceID"));
+      if (faceIds != nullptr) {
+        for (vtkIdType cellId = 0; cellId < faceIds->GetNumberOfTuples(); cellId++) {
+          int ident = faceIds->GetValue(cellId);
+          if (modelFaceIdents.count(ident) == 0) {
+            extraFaceIdents.insert(ident);
+          }
+        }
+      }
+
+      for (auto ident : extraFaceIdents) {
+        auto facepd = vtkSmartPointer<vtkPolyData>::New();
+        PlyDtaUtils_GetFacePolyData(surfaceMesh.GetPointer(), &ident, facepd);
+        ResetFaceSurfaceIds(facepd, node_map, elem_map);
+
+        QString name = (extraFaceIdents.size() == 1) ? QString("wall_outer") :
+            QString("wall_outer_") + QString::number(ident);
+        vtpFilePath = meshDir + "/mesh-surfaces/" + name + ".vtp";
+        vtpFilePath = QDir::toNativeSeparators(vtpFilePath);
+        vtpWriter->SetInputData(facepd);
+        vtpWriter->SetFileName(vtpFilePath.toStdString().c_str());
+        vtpWriter->Write();
+        fprintf(stdout, "[sv4guiMeshLegacyIO::WriteFiles] Face id %d is not a face of the model; written as mesh-surfaces/%s.vtp\n",
+            ident, name.toStdString().c_str());
       }
     }
 
