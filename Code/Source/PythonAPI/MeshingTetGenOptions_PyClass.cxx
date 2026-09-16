@@ -928,9 +928,14 @@ PyTetGenOptionsAddSphereRefinement(PyMeshingTetGenOptions* options, std::vector<
 // Add options that are not processed in cvTetGenMeshObject::SetMeshOptions() and
 // used generate the mesh size data arrays.
 //
+//
+// The commands are a list, not a map keyed on the command name: localSize,
+// sphereRefinement and localWallThickness can each appear once per face or
+// sphere, and keying on the name kept only the last of them.
+//
 void
 PyTetGenOptionsAddMeshSizeOptions(PyMeshingTetGenOptions* options, std::map<std::string,int>& faceMap,
-    std::map<std::string,std::vector<std::string>>& meshSizeOptions)
+    std::vector<std::pair<std::string,std::vector<std::string>>>& meshSizeOptions)
 {
   //std::cout << "================ PyTetGenOptionsAddMeshSizeOptions ================" << std::endl;
   using namespace TetGenOption;
@@ -945,15 +950,18 @@ PyTetGenOptionsAddMeshSizeOptions(PyMeshingTetGenOptions* options, std::map<std:
       //    <command content="functionBasedMeshing 0.4 DistanceToCenterlines" />
       //
       if (name == CommandUseCenterlineRadius) {
-          std::vector<std::string> functionParams;
-          try {
-              functionParams = meshSizeOptions.at(CommandFunctionBasedMeshing);
-          } catch (const std::out_of_range& except) {
+          const std::vector<std::string>* functionParams = nullptr;
+          for (auto const& other : meshSizeOptions) {
+              if (other.first == CommandFunctionBasedMeshing) {
+                  functionParams = &other.second;
+              }
+          }
+          if (functionParams == nullptr || functionParams->empty()) {
              std::cout << "ERROR: No " << CommandFunctionBasedMeshing << " found in .msh file." << std::endl;
              return;
           }
           options->radius_meshing_on = 1;
-          options->radius_meshing_scale = std::stod(functionParams[0]);
+          options->radius_meshing_scale = std::stod((*functionParams)[0]);
           //std::cout << "[PyTetGenOptionsAddMeshSizeOptions] Set " << name << "  scale: " << options->radius_meshing_scale << std::endl;
 
       // Process local edge size.
@@ -1066,8 +1074,9 @@ PyTetGenOptionsCreateFromList(cvMeshObject* mesher, std::vector<std::string>& op
   auto optionsObj = CreateTetGenOptionsType(args, kwargs);
   auto options = (PyMeshingTetGenOptions*)optionsObj;
 
-  // Set option values given in the option list.
-  std::map<std::string,std::vector<std::string>> meshSizeOptions;
+  // Set option values given in the option list. Kept in file order, one
+  // entry per command, because several commands repeat once per face.
+  std::vector<std::pair<std::string,std::vector<std::string>>> meshSizeOptions;
   //std::cout << "[PyTetGenOptionsCreateFromList] List: " << std::endl;
   for (auto const& option : optionList) {
       std::regex regex{R"([\s,]+)"}; // split on space and comma
@@ -1102,7 +1111,7 @@ PyTetGenOptionsCreateFromList(cvMeshObject* mesher, std::vector<std::string>& op
           tokens.erase(tokens.begin());
           //auto tetGenMesher = dynamic_cast<cvTetGenMeshObject*>(mesher);
           //MeshingTetGenSetParameter(tetGenMesher, name, tokens);
-          meshSizeOptions[name] = tokens;
+          meshSizeOptions.push_back(std::make_pair(name, tokens));
       }
   }
 
