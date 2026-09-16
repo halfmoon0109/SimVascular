@@ -260,6 +260,7 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
     mDir.mkdir("mesh-surfaces");
     auto faces = modelElement->GetFaces();
     std::set<int> modelFaceIdents;
+    std::set<std::string> writtenNames;
 
     for (int i = 0; i < faces.size(); i++) {
       auto face = faces[i];
@@ -270,6 +271,7 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
       auto facepd = vtkSmartPointer<vtkPolyData>::New();
       int ident = modelElement->GetFaceIdentifierFromInnerSolid(face->id);
       modelFaceIdents.insert(ident);
+      writtenNames.insert(face->name);
       PlyDtaUtils_GetFacePolyData(surfaceMesh.GetPointer(), &ident, facepd);
 
       ResetFaceSurfaceIds(facepd, node_map, elem_map);
@@ -289,7 +291,10 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
     // A face id on the mesh that is no face of the model is one the mesher
     // made: the solid wall mesh tags its free outer surface with an id past
     // the model's, because the model has no face there. It is written under
-    // its own name so the solid domain has a boundary file for it too.
+    // its own name so the solid domain has a boundary file for it too. The
+    // name is wall_outer, with the id appended when there are several or
+    // when a model face already took the name, so nothing written above is
+    // overwritten.
     //
     {
       std::set<int> extraFaceIdents;
@@ -310,6 +315,13 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
 
         QString name = (extraFaceIdents.size() == 1) ? QString("wall_outer") :
             QString("wall_outer_") + QString::number(ident);
+        if (writtenNames.count(name.toStdString()) > 0) {
+          name = QString("wall_outer_") + QString::number(ident);
+          while (writtenNames.count(name.toStdString()) > 0) {
+            name += "_";
+          }
+        }
+        writtenNames.insert(name.toStdString());
         vtpFilePath = meshDir + "/mesh-surfaces/" + name + ".vtp";
         vtpFilePath = QDir::toNativeSeparators(vtpFilePath);
         vtpWriter->SetInputData(facepd);
