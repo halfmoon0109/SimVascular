@@ -1,3 +1,35 @@
+/* Copyright (c) Stanford University, The Regents of the University of
+ *               California, and others.
+ *
+ * All Rights Reserved.
+ *
+ * See Copyright-SimVascular.txt for additional details.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject
+ * to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
+ * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+
 // Standalone checks of sv_tetgenmesh_envelope on synthetic surfaces. Build and
 // run with a plain C++17 compiler, no VTK or SimVascular needed:
 //
@@ -688,6 +720,41 @@ int main(int argc, char **argv)
     std::vector<ll> tris3 = {0,1,2, 1,3,2};
     n = svenvelope::CountCrossingTriangles(pts3, tris3, crossing, at);
     Check(n == 0, "two triangles sharing an edge are not");
+  }
+
+  // 7. The same two spheres wound inward: the envelope is the same surface,
+  // wound the way the input was, so the result does not depend on the
+  // convention.
+  {
+    Surface s;
+    AddIcosphere(s, 0, 0, 0, 1.0, 4, 0.3);
+    AddIcosphere(s, 1.1, 0.2, -0.1, 1.0, 4, 0.7);
+    for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+    {
+      std::swap(s.triangles[i+1], s.triangles[i+2]);
+    }
+    s.numSheetTriangles = (ll)(s.triangles.size()/3);
+    Envelope e;
+    Report r;
+    RunAndCheckClosed("7. two spheres wound inward", s, e, r, 0);
+    Check(r.windingSense == -1, "wound inward, as read off the volume");
+    Check(r.numPiecesKept == 8600 && r.numWholeDropped == 2099, "the same pieces kept and dropped as when wound outward");
+    double v = EnclosedVolume(e);
+    Check(v < 0.0 && std::abs(v + 7.3308) < 0.01, "the same volume, with the input's sign");
+  }
+
+  // 8. A surface that is not consistently wound is refused.
+  {
+    Surface s;
+    AddIcosphere(s, 0, 0, 0, 1.0, 2, 0.3);
+    std::swap(s.triangles[1], s.triangles[2]);
+    s.numSheetTriangles = (ll)(s.triangles.size()/3);
+    Envelope e;
+    Report r;
+    std::string error;
+    int rc = svenvelope::BuildOuterEnvelope(s, e, r, error);
+    printf("8. inconsistent winding\n");
+    Check(rc != 0 && error.find("consistently wound") != std::string::npos, "refused with a message naming the winding");
   }
 
   if (perf)
