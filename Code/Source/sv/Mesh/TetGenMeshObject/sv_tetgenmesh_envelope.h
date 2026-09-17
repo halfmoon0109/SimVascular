@@ -67,6 +67,12 @@ namespace svenvelope {
  * taken from; the triangles after them close it (the fans over the vessel
  * ends) so that the winding number is defined, and are only ever crossed by a
  * ray - they are never cut and never part of the result.
+ *
+ * Consistently wound means every edge is traversed once each way by the two
+ * triangles on it; the build refuses a surface that is not. Whether the
+ * winding puts the geometric normals out of the solid or into it is not
+ * assumed: it is read off the surface's signed volume, and the envelope is
+ * the same either way, wound the way the input was.
  */
 struct Surface
 {
@@ -118,6 +124,8 @@ struct Report
   long long numMiswoundEdges = 0;      // edges of the kept surface traversed the same way twice
   long long numBoundaryEdges = 0;      // edges of the kept surface on one piece: the cap rims, if all is well
   double seconds = 0.0;
+  int windingSense = 1;                // +1 when the input's geometric normals point out of the solid, -1 when into it
+  double signedVolume = 0.0;           // of the closed input, by the divergence theorem; its sign is windingSense
   std::string firstFault;              // where and what the first fault was
   double firstFaultAt[3] = {0.0, 0.0, 0.0};
   std::vector<long long> windingHistogram; // pieces per winding number, index = winding + windingOffset

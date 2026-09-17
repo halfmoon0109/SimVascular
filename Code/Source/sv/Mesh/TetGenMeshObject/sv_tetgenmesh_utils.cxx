@@ -4640,12 +4640,21 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     double p[3], n[3];
     surface->GetPoint(ptId, p);
     normals->GetTuple(ptId, n);
-    vtkMath::Normalize(n);
     double t = array->GetValue(ptId);
     if (!(t > 0.0))
     {
       fprintf(stderr,"The wall thickness at (%.5g, %.5g, %.5g) is %.5g; every point has to be extruded by a positive thickness\n",
           p[0], p[1], p[2], t);
+      return SV_ERROR;
+    }
+    // A normal with no length or a non-finite one would leave the point
+    // where it is or put it nowhere, and the envelope would classify the
+    // triangles on it against a surface that is not the extrusion.
+    double length = vtkMath::Normalize(n);
+    if (!(length > 0.0) || !std::isfinite(n[0]) || !std::isfinite(n[1]) || !std::isfinite(n[2]))
+    {
+      fprintf(stderr,"The extrusion normal at (%.5g, %.5g, %.5g) has length %.5g; every point needs a finite unit normal to extrude along\n",
+          p[0], p[1], p[2], length);
       return SV_ERROR;
     }
     largestThickness = std::max(largestThickness, t);
@@ -4711,6 +4720,57 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       closed.triangles.push_back(b);
       closed.triangles.push_back(a);
       closed.triangles.push_back(centroidId);
+    }
+  }
+
+  // The extrusion has to go outward, which is the caller's normals' doing,
+  // not the envelope's: the envelope reads which way the closed extrusion
+  // is wound and takes the outer side accordingly, so an extrusion that
+  // went into the lumen would be enveloped just as faithfully and be wrong.
+  // Extruding outward makes the enclosed volume grow, so the closed inner
+  // surface and the closed extrusion are compared on that.
+  {
+    std::vector<double> innerClosed((size_t)3*numPts);
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      surface->GetPoint(ptId, &innerClosed[(size_t)3*ptId]);
+    }
+    for (size_t r = 0; r < rims.size(); r++)
+    {
+      double centroid[3] = {0.0, 0.0, 0.0};
+      for (size_t m = 0; m < rims[r].size(); m++)
+      {
+        for (int k = 0; k < 3; k++)
+        {
+          centroid[k] += innerClosed[(size_t)3*rims[r][m] + k];
+        }
+      }
+      for (int k = 0; k < 3; k++)
+      {
+        innerClosed.push_back(centroid[k]/(double)rims[r].size());
+      }
+    }
+    auto signedVolume = [&](const std::vector<double> &pts)
+    {
+      double volume = 0.0;
+      for (size_t c = 0; c + 2 < closed.triangles.size(); c += 3)
+      {
+        const double *a = &pts[(size_t)3*closed.triangles[c]];
+        const double *b = &pts[(size_t)3*closed.triangles[c+1]];
+        const double *cc = &pts[(size_t)3*closed.triangles[c+2]];
+        double bc[3];
+        vtkMath::Cross(b, cc, bc);
+        volume += vtkMath::Dot(a, bc)/6.0;
+      }
+      return volume;
+    };
+    double innerVolume = signedVolume(innerClosed);
+    double extrudedVolume = signedVolume(closed.points);
+    if (!(innerVolume*extrudedVolume > 0.0) || std::abs(extrudedVolume) <= std::abs(innerVolume))
+    {
+      fprintf(stderr,"The extrusion does not grow the wall: the closed inner surface encloses %.6g and the closed extrusion %.6g, so the normals point into the lumen or the surface is not consistently wound\n",
+          innerVolume, extrudedVolume);
+      return SV_ERROR;
     }
   }
 
@@ -4951,8 +5011,9 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
 
   double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
   fprintf(stdout,"Wall outer surface as the envelope of the extrusion, cut along the creases where its sheets cross:\n");
-  fprintf(stdout,"  %lld points extruded by %.4g to %.4g into %lld triangles, closed over %zu cap rims for the winding number\n",
-      (long long)numPts, smallestThickness, largestThickness, closed.numSheetTriangles, rims.size());
+  fprintf(stdout,"  %lld points extruded by %.4g to %.4g into %lld triangles, closed over %zu cap rims for the winding number; the closed extrusion is wound %s and encloses %.6g\n",
+      (long long)numPts, smallestThickness, largestThickness, closed.numSheetTriangles, rims.size(),
+      (report.windingSense > 0) ? "outward" : "inward", std::abs(report.signedVolume));
   fprintf(stdout,"  %lld triangle pairs within reach of each other, %lld crossing; %lld crease points on edges and %lld where creases cross; %lld triangles cut into %lld pieces\n",
       report.numPairsTested, report.numPairsCrossing, report.numCreasePoints, report.numTriplePoints,
       report.numTrianglesSplit, report.numPieces);

@@ -1136,6 +1136,64 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
     error = "there is no sheet to take the envelope of";
     return 1;
   }
+  // The winding number needs a consistently wound closed surface: every edge
+  // traversed once each way. Which way round the surface is wound - normals
+  // out of the solid or into it - is not assumed but read off its signed
+  // volume, and the rays below are shot to the outer side accordingly, so
+  // the classification does not depend on the convention the caller used.
+  {
+    std::map<EdgeKey, std::pair<int, int> > use;
+    for (ll t = 0; t < numTris; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        ll a = surface.triangles[(size_t)3*t + j], b = surface.triangles[(size_t)3*t + (j+1)%3];
+        std::pair<int, int> &u = use[EdgeKey(a, b)];
+        u.first++;
+        if (a < b)
+        {
+          u.second++;
+        }
+      }
+    }
+    ll numOpen = 0, numMiswound = 0;
+    for (std::map<EdgeKey, std::pair<int, int> >::iterator it = use.begin(); it != use.end(); ++it)
+    {
+      if (it->second.first != 2)
+      {
+        numOpen++;
+      }
+      else if (it->second.second != 1)
+      {
+        numMiswound++;
+      }
+    }
+    if (numOpen > 0 || numMiswound > 0)
+    {
+      char what[160];
+      snprintf(what, sizeof(what), "the closed surface is not a consistently wound closed surface: %lld edges are not on exactly two triangles and %lld are traversed the same way twice",
+          numOpen, numMiswound);
+      error = what;
+      return 1;
+    }
+    double volume = 0.0;
+    for (ll t = 0; t < numTris; t++)
+    {
+      const double *a = &surface.points[(size_t)3*surface.triangles[(size_t)3*t]];
+      const double *b = &surface.points[(size_t)3*surface.triangles[(size_t)3*t + 1]];
+      const double *c = &surface.points[(size_t)3*surface.triangles[(size_t)3*t + 2]];
+      double bc[3];
+      Cross(b, c, bc);
+      volume += Dot(a, bc)/6.0;
+    }
+    if (!(std::abs(volume) > 0.0))
+    {
+      error = "the closed surface encloses no volume, so which side is out cannot be told";
+      return 1;
+    }
+    report.windingSense = (volume > 0.0) ? 1 : -1;
+    report.signedVolume = volume;
+  }
 
   // The points grow with the crease points; the triangles do not.
   envelope.points = surface.points;
@@ -1583,7 +1641,10 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
     {
       centre[k] = (points[(size_t)3*pp[0] + k] + points[(size_t)3*pp[1] + k] + points[(size_t)3*pp[2] + k])/3.0;
     }
+    // The outer side of the piece is along its geometric normal when the
+    // surface is wound outward, and against it when wound inward.
     const double *n = &geometry.normal[(size_t)3*pieceSource[(size_t)p]];
+    const double sense = (double)report.windingSense;
     int winding = 0;
     bool ok = false;
     for (int attempt = 0; attempt < maxRayTries && !ok; attempt++)
@@ -1593,9 +1654,9 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
       double d[3];
       for (int k = 0; k < 3; k++)
       {
-        d[k] = n[k] + spread*scramble.Next();
+        d[k] = sense*n[k] + spread*scramble.Next();
       }
-      if (!Normalize(d) || !(Dot(d, n) > 0.2))
+      if (!Normalize(d) || !(sense*Dot(d, n) > 0.2))
       {
         continue;
       }
