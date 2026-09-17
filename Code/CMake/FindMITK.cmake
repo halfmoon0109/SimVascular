@@ -369,8 +369,19 @@ set(${proj}_POSSIBLE_INCLUDE_PATHS
 
 # Search for header
 #
-message(STATUS "${msg} Find headers ...") 
-#message(STATUS "${msg} headers: ${${proj}_HEADERS}") 
+# The include tree is read once and each header is looked up in that list.
+# Searching each header with find_path over the wildcard paths above walks
+# the whole tree again for every header and every pattern - 61 headers times
+# 7 patterns - and on a bind-mounted externals directory (Docker Desktop on
+# Windows) where each stat is a round trip, that took over a quarter of an
+# hour where one walk takes seconds. A header not in the list is still looked
+# for the old way, so nothing that was found before is lost.
+message(STATUS "${msg} Find headers ...")
+#message(STATUS "${msg} headers: ${${proj}_HEADERS}")
+
+file(GLOB_RECURSE ${proj}_INCLUDE_TREE_HEADERS LIST_DIRECTORIES false "${${proj}_DIR}/include/*.h")
+list(LENGTH ${proj}_INCLUDE_TREE_HEADERS ${proj}_NUM_INCLUDE_TREE_HEADERS)
+message(STATUS "${msg} ${${proj}_NUM_INCLUDE_TREE_HEADERS} headers under ${${proj}_DIR}/include")
 
 set(${proj}_HEADERS_MISSING ${${proj}_HEADERS})
 list(REMOVE_DUPLICATES ${proj}_HEADERS_MISSING)
@@ -378,16 +389,38 @@ set(${proj}_HEADERS_WORK "")
 
 foreach(header ${${proj}_HEADERS})
   unset(${proj}_${header}_HEADER CACHE)
-  #message(STATUS "${msg} ------------------------") 
-  #message(STATUS "${msg} header: ${header}") 
 
-  find_path(${proj}_${header}_HEADER
-    NAMES
-    ${header}
-    PATHS
-    ${${proj}_POSSIBLE_INCLUDE_PATHS}
-    NO_DEFAULT_PATH
-    )
+  # The shallowest directory holding the header, as the wildcard search
+  # found it (its patterns run from the shallowest down), and the first in
+  # sorted order among those at the same depth.
+  string(REPLACE "." "\\." _header_pattern "${header}")
+  set(_header_matches ${${proj}_INCLUDE_TREE_HEADERS})
+  list(FILTER _header_matches INCLUDE REGEX "/${_header_pattern}$")
+  set(_header_dir "")
+  if(_header_matches)
+    list(SORT _header_matches)
+    set(_header_depth 1000000)
+    foreach(_match ${_header_matches})
+      string(REGEX REPLACE "[^/]" "" _slashes "${_match}")
+      string(LENGTH "${_slashes}" _depth)
+      if(_depth LESS _header_depth)
+        set(_header_depth ${_depth})
+        get_filename_component(_header_dir "${_match}" DIRECTORY)
+      endif()
+    endforeach()
+  endif()
+
+  if(_header_dir)
+    set(${proj}_${header}_HEADER "${_header_dir}" CACHE PATH "Directory holding ${header}")
+  else()
+    find_path(${proj}_${header}_HEADER
+      NAMES
+      ${header}
+      PATHS
+      ${${proj}_POSSIBLE_INCLUDE_PATHS}
+      NO_DEFAULT_PATH
+      )
+  endif()
 
   mark_as_advanced(${proj}_${header}_HEADER)
   set(${proj}_HEADER_FULLNAMES ${${proj}_HEADER_FULLNAMES} ${proj}_${header}_HEADER)
@@ -395,11 +428,11 @@ foreach(header ${${proj}_HEADERS})
   if(${proj}_${header}_HEADER)
     set(${proj}_HEADERS_WORK ${${proj}_HEADERS_WORK} "${${proj}_${header}_HEADER}")
     list(REMOVE_ITEM ${proj}_HEADERS_MISSING ${header})
-    #message(STATUS "${msg} Found ${header}") 
+    message(STATUS "${msg} Found ${header} in ${${proj}_${header}_HEADER}")
   else()
-    message(STATUS "${msg} ---------------------------------") 
-    message(STATUS "${msg} header: ${header}") 
-    message(FATAL_ERROR "${msg} *** Not found ${header}") 
+    message(STATUS "${msg} ---------------------------------")
+    message(STATUS "${msg} header: ${header}")
+    message(FATAL_ERROR "${msg} *** Not found ${header}")
   endif()
 
 endforeach()
