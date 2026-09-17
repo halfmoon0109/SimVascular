@@ -5489,6 +5489,12 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   std::vector<int> seenStamp((size_t)numWallCells, 0);
   std::vector<vtkIdType> walk;
   long long numQueries = 0, numWalkSteps = 0;
+  // How the walks for the cut points ended, and where the kept corners cut
+  // for a crossing near them stood, so that a log with many such corners
+  // says whether they were barely clear or clear and cut anyway.
+  long long numWalkFar = 0, numWalkStopped = 0, numWalkNoRoom = 0, numWalkCapped = 0;
+  std::vector<double> demotedStanding;
+  std::vector<int> demotedPerRound;
   auto markOwn = [&](vtkIdType seedPt, double radius)
   {
     double seed[3];
@@ -5850,6 +5856,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       const double sResolution = 1.0e-3*edgeLength;
       const int maxSteps = 4096;
       double sClear = -1.0, sAt = 0.0;
+      enum { walkCapped, walkStopped, walkFar, walkNoRoom } ending = walkCapped;
       for (int step = 0; step < maxSteps && edgeLength > 0.0; step++)
       {
         double x[3], closest[3], wall = 0.0, slack = 0.0;
@@ -5862,15 +5869,29 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
         if (lumen <= 0.0 ||
             standingWithin(x, kept, cut, along, closest, wall, sFar - sAt, slack) < clearance)
         {
+          ending = walkStopped;
           break;
         }
         sClear = sAt;
         slack = std::min(slack, lumen);
-        if (sAt >= sFar || slack <= sResolution)
+        if (sAt >= sFar)
         {
+          ending = walkFar;
+          break;
+        }
+        if (slack <= sResolution)
+        {
+          ending = walkNoRoom;
           break;
         }
         sAt = std::min(sFar, sAt + slack);
+      }
+      switch (ending)
+      {
+        case walkFar: numWalkFar++; break;
+        case walkStopped: numWalkStopped++; break;
+        case walkNoRoom: numWalkNoRoom++; break;
+        default: numWalkCapped++; break;
       }
       double u = (sClear < 0.0) ? 0.0 : sClear/edgeLength;
       if (u < edgeFloor)
@@ -5887,6 +5908,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
         {
           demote[(size_t)kept] = true;
           demotedThisRound++;
+          demotedStanding.push_back(std::min(standingOf[(size_t)kept], 9.99));
         }
         u = edgeFloor;
       }
@@ -6001,6 +6023,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     }
     numFolded += lastFolded;
     numDemoted += demotedThisRound;
+    demotedPerRound.push_back(demotedThisRound);
     converged = (lastFolded == 0 && demotedThisRound == 0);
     if (converged || numRounds >= maxRounds)
     {
@@ -6536,7 +6559,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   // another sheet is a fold the cut did not reach - the cut only looks at
   // where the points stand, and a triangle whose three points all stand
   // clear can still run through a wall between them.
-  int numCrossing = 0, numSheetCrossing = 0, numDegenerateClosing = 0;
+  int numCrossing = 0, numSheetCrossing = 0, numSheetFold = 0, numDegenerateClosing = 0;
   vtkIdType firstSheetCrossing = -1, firstDegenerate = -1;
   std::vector<int> cellCrossing(cellRole.size(), 0);
   std::vector<int> holeCrossing(numHoles, 0);
@@ -6581,9 +6604,21 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       if (cellId < numBaseCells)
       {
         numSheetCrossing++;
-        if (firstSheetCrossing < 0)
+        // Crossing another sheet triangle is a fold the cut did not reach;
+        // crossing only closing triangles is the closure's fault, counted
+        // there as well from the other side.
+        bool fold = false;
+        for (size_t c = 0; c < hits.size() && !fold; c++)
         {
-          firstSheetCrossing = cellId;
+          fold = hits[c] < numBaseCells;
+        }
+        if (fold)
+        {
+          numSheetFold++;
+          if (firstSheetCrossing < 0)
+          {
+            firstSheetCrossing = cellId;
+          }
         }
         continue;
       }
@@ -6675,6 +6710,22 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       foldedTriangles, (foldedTriangles > 0) ? " - the volume mesher will refuse them" : "", lastFolded, numRimHeld);
   fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges, walked to in %lld steps\n",
       numCutCells, numDroppedCells, (long long)numCutPts, numWalkSteps);
+  fprintf(stdout,"  over every round the walks ended: %lld at the far end of the edge, %lld at the first point not clear, %lld with no room left to step, %lld at the step bound\n",
+      numWalkFar, numWalkStopped, numWalkNoRoom, numWalkCapped);
+  if (!demotedStanding.empty())
+  {
+    std::vector<double> sorted(demotedStanding);
+    std::sort(sorted.begin(), sorted.end());
+    std::string perRound;
+    for (size_t r = 0; r < demotedPerRound.size(); r++)
+    {
+      char item[32];
+      snprintf(item, sizeof(item), "%s%d", (r == 0) ? "" : ", ", demotedPerRound[r]);
+      perRound += item;
+    }
+    fprintf(stdout,"  the kept corners cut for a crossing within %.2g of an edge stood at %.4g to %.4g of a wall (median %.4g) when cut, %s per round\n",
+        edgeFloor, sorted.front(), sorted.back(), sorted[sorted.size()/2], perRound.c_str());
+  }
   fprintf(stdout,"  %lld standing queries over a %d x %d x %d grid of %.4g bins (reach %.4g), %.1f s for the first pass over every point\n",
       numQueries, gridSize[0], gridSize[1], gridSize[2], binSize, reach, firstPassSeconds);
   fprintf(stdout,"  %zu cap rims kept whole; %zu holes: %d zipped across a crease, %d pairs joined as the two sides of a seam, the largest %zu points around; %d closed by a fallback because the preferred closure crossed the surface more\n",
@@ -6687,9 +6738,14 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       numCrossing, numSheetCrossing, (numCrossing + numSheetCrossing > 0) ? " - the volume mesher will refuse them" : "");
   if (numSheetCrossing > 0)
   {
-    const double *f = &tri[(size_t)9*firstSheetCrossing];
-    fprintf(stdout,"    a sheet triangle crossing the surface is a fold the cut did not reach, the first at (%.5g, %.5g, %.5g)\n",
-        (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
+    fprintf(stdout,"    of the sheet triangles crossing, %d cross another sheet triangle - a fold the cut did not reach - and %d cross only closing triangles, which is the closure's crossing seen from the sheet\n",
+        numSheetFold, numSheetCrossing - numSheetFold);
+    if (numSheetFold > 0)
+    {
+      const double *f = &tri[(size_t)9*firstSheetCrossing];
+      fprintf(stdout,"    the first fold is at (%.5g, %.5g, %.5g)\n",
+          (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
+    }
   }
   if (numDegenerateClosing > 0)
   {
