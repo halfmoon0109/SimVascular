@@ -5767,49 +5767,46 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       const double *qk = &extruded[(size_t)3*kept];
       const double *qc = &extruded[(size_t)3*cut];
       const double *along = &direction[(size_t)3*kept];
-      double u = 0.5;
-      // A point cut for its distance has the clearance crossing somewhere on
-      // the edge; one cut for another reason (turned over, or left on no
-      // whole triangle) need not, and the middle of the edge does for it.
-      if (standingOf[(size_t)cut] >= 0.0 && standingOf[(size_t)cut] < clearance)
+      // The cut point goes as far along the edge from the kept end as the
+      // edge is clear: outside every lumen and at least the clearance from
+      // every other sheet. A point cut for its distance has the crossing
+      // somewhere on the edge, and the far end is the cut point itself, held
+      // off it by the edge floor. One cut for another reason (turned over, or
+      // left on no whole triangle) need not have a crossing on the edge, and
+      // the middle of the edge does for it - but only if the edge is clear
+      // that far. Both ends can stand clear of every other sheet with a sheet
+      // bulging through the edge between them, and the crossing can sit
+      // beyond a part of the edge that is not clear, so the edge is walked
+      // from the kept end and the cut point stops at the first place that is
+      // not clear, wherever the far end is. A bisection assumes the edge is
+      // clear up to one crossing, and a cut point placed on that assumption
+      // has stood inside another wall.
+      const bool cutForDistance = standingOf[(size_t)cut] < clearance;
+      const double uFar = cutForDistance ? 1.0 - edgeFloor : 0.5;
+      auto clearAt = [&](double t)
       {
-        double lo = 0.0, hi = 1.0;
-        for (int step = 0; step < 8; step++)
+        double x[3], closest[3], wall = 0.0;
+        for (int k = 0; k < 3; k++)
         {
-          double mid = 0.5*(lo + hi);
-          double x[3], closest[3], wall = 0.0;
-          for (int k = 0; k < 3; k++)
-          {
-            x[k] = (1.0 - mid)*qk[k] + mid*qc[k];
-          }
-          if (standing(x, kept, cut, along, closest, wall) >= clearance)
-          {
-            lo = mid;
-          }
-          else
-          {
-            hi = mid;
-          }
+          x[k] = (1.0 - t)*qk[k] + t*qc[k];
         }
-        u = lo;
-      }
-      else if (standingOf[(size_t)cut] < 0.0)
+        return outwardSign*implicit->EvaluateFunction(x) > 0.0 &&
+            standing(x, kept, cut, along, closest, wall) >= clearance;
+      };
+      const int numSamples = 16;
+      int lastClear = 0;
+      while (lastClear < numSamples && clearAt(uFar*(lastClear + 1)/numSamples))
       {
-        // Inside a lumen: the wall between is crossed somewhere on the edge,
-        // and the clearance beyond it. Bisect on the sign first, then stand
-        // clear of that wall.
-        double lo = 0.0, hi = 1.0;
+        lastClear++;
+      }
+      double u = uFar;
+      if (lastClear < numSamples)
+      {
+        double lo = uFar*lastClear/numSamples, hi = uFar*(lastClear + 1)/numSamples;
         for (int step = 0; step < 8; step++)
         {
           double mid = 0.5*(lo + hi);
-          double x[3], closest[3], wall = 0.0;
-          for (int k = 0; k < 3; k++)
-          {
-            x[k] = (1.0 - mid)*qk[k] + mid*qc[k];
-          }
-          bool clear = outwardSign*implicit->EvaluateFunction(x) > 0.0 &&
-              standing(x, kept, cut, along, closest, wall) >= clearance;
-          if (clear)
+          if (clearAt(mid))
           {
             lo = mid;
           }
@@ -5837,7 +5834,6 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
         }
         u = edgeFloor;
       }
-      u = std::min(u, 1.0 - edgeFloor);
       double x[3];
       for (int k = 0; k < 3; k++)
       {
@@ -6548,9 +6544,9 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     }
   }
 
-  // Where the cut points actually stand. A cut point found by bisection is
-  // at the clearance by construction; one held off a kept corner at the edge
-  // floor is not, and stands wherever that put it - inside the clearance,
+  // Where the cut points actually stand. A cut point placed by the walk
+  // along its edge is clear by construction; one held off a kept corner at
+  // the edge floor is not, and stands wherever that put it - inside the clearance,
   // inside the other sheet's wall if the crossing was close to the corner,
   // or inside a lumen. It is measured the way the bisection measured it:
   // the same own-sheet exclusion, and the sign as well as the ratio.

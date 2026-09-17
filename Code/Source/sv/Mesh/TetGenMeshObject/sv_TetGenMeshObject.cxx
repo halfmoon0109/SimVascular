@@ -2854,7 +2854,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // less.
   if (numUnresolved > 0)
   {
-    fprintf(stderr,"The trimmed outer wall has %d triangles the volume mesher will refuse (turned over or passing through the surface); see the trim log above and wall_outer_trimmed.vtp\n",
+    fprintf(stderr,"The trimmed outer wall has %d faults the volume mesher will refuse (triangles turned over, passing through the surface or with no area, and cut points inside another wall or a lumen); see the trim log above and wall_outer_trimmed.vtp\n",
         numUnresolved);
     return SV_ERROR;
   }
