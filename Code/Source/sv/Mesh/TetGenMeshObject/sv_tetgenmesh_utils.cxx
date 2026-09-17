@@ -5387,17 +5387,24 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   size_t numBins = (size_t)gridSize[0]*gridSize[1]*gridSize[2];
   std::vector<double> cellBox((size_t)6*numWallCells, 0.0);
   std::vector<double> cellReach2((size_t)numWallCells, 0.0);
+  // How steeply the clearance a triangle asks for can change across it: the
+  // clearance times its wall's change over its shortest altitude, which
+  // bounds the gradient of the wall interpolated over it. A point moving a
+  // distance towards it loses at most that distance plus this times it.
+  std::vector<double> cellThickest((size_t)numWallCells, 0.0);
+  std::vector<double> cellSlope((size_t)numWallCells, -1.0);
   std::vector<int> binStart(numBins + 1, 0);
   for (vtkIdType cellId = 0; cellId < numWallCells; cellId++)
   {
     double *box = &cellBox[(size_t)6*cellId];
     box[0] = box[2] = box[4] = std::numeric_limits<double>::max();
     box[1] = box[3] = box[5] = -std::numeric_limits<double>::max();
-    double thickest = 0.0;
+    double thickest = 0.0, thinnest = std::numeric_limits<double>::max();
+    double corner[3][3];
     for (int j = 0; j < 3; j++)
     {
       vtkIdType ptId = wallCellPts[(size_t)3*cellId + j];
-      double p[3];
+      double *p = corner[j];
       surface->GetPoint(ptId, p);
       for (int k = 0; k < 3; k++)
       {
@@ -5405,9 +5412,27 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
         box[2*k+1] = std::max(box[2*k+1], p[k]);
       }
       thickest = std::max(thickest, array->GetValue(ptId));
+      thinnest = std::min(thinnest, array->GetValue(ptId));
     }
     double r = clearance*thickest;
     cellReach2[(size_t)cellId] = r*r;
+    cellThickest[(size_t)cellId] = thickest;
+    {
+      double ab[3], ac[3], cross[3];
+      vtkMath::Subtract(corner[1], corner[0], ab);
+      vtkMath::Subtract(corner[2], corner[0], ac);
+      vtkMath::Cross(ab, ac, cross);
+      double longest = 0.0;
+      for (int j = 0; j < 3; j++)
+      {
+        longest = std::max(longest, std::sqrt(vtkMath::Distance2BetweenPoints(corner[j], corner[(j+1)%3])));
+      }
+      double altitude = (longest > 0.0) ? vtkMath::Norm(cross)/longest : 0.0;
+      if (altitude > 0.0)
+      {
+        cellSlope[(size_t)cellId] = clearance*(thickest - thinnest)/altitude;
+      }
+    }
     for (int k = binOf(box[4], 2); k <= binOf(box[5], 2); k++)
     {
       for (int j = binOf(box[2], 1); j <= binOf(box[3], 1); j++)
@@ -5463,7 +5488,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   std::vector<int> ownStamp((size_t)numWallCells, 0);
   std::vector<int> seenStamp((size_t)numWallCells, 0);
   std::vector<vtkIdType> walk;
-  long long numQueries = 0;
+  long long numQueries = 0, numWalkSteps = 0;
   auto markOwn = [&](vtkIdType seedPt, double radius)
   {
     double seed[3];
@@ -5504,8 +5529,15 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       }
     }
   };
-  auto standing = [&](const double x[3], vtkIdType ownA, vtkIdType ownB,
-      const double along[3], double closest[3], double &wall)
+  // Along with the standing, how far the point can move in any direction and
+  // still stand at least the clearance from every triangle counted, as a
+  // lower bound: the distance to a triangle falls no faster than the point
+  // moves, and the wall it asks for rises no faster than the triangle's slope.
+  // The triangles looked at are those within the reach plus the horizon, so
+  // any triangle not looked at is at least the horizon away from mattering,
+  // and the slack is never more than the horizon.
+  auto standingWithin = [&](const double x[3], vtkIdType ownA, vtkIdType ownB,
+      const double along[3], double closest[3], double &wall, double horizon, double &slack)
   {
     numQueries++;
     stamp++;
@@ -5523,11 +5555,13 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     }
     double best = std::numeric_limits<double>::max();
     wall = 0.0;
-    for (int k = binOf(x[2] - reach, 2); k <= binOf(x[2] + reach, 2); k++)
+    slack = horizon;
+    const double window = reach + horizon;
+    for (int k = binOf(x[2] - window, 2); k <= binOf(x[2] + window, 2); k++)
     {
-      for (int j = binOf(x[1] - reach, 1); j <= binOf(x[1] + reach, 1); j++)
+      for (int j = binOf(x[1] - window, 1); j <= binOf(x[1] + window, 1); j++)
       {
-        for (int i = binOf(x[0] - reach, 0); i <= binOf(x[0] + reach, 0); i++)
+        for (int i = binOf(x[0] - window, 0); i <= binOf(x[0] + window, 0); i++)
         {
           size_t bin = binIndex(i, j, k);
           for (int c = binStart[bin]; c < binStart[bin + 1]; c++)
@@ -5558,6 +5592,9 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
             }
             if (boxDistance2 > cellReach2[(size_t)cellId])
             {
+              // Out of this triangle's reach here; the box is a lower bound
+              // on the distance, so this much nearer it could start to count.
+              slack = std::min(slack, std::sqrt(boxDistance2) - std::sqrt(cellReach2[(size_t)cellId]));
               continue;
             }
             double a[3], b[3], cc[3], foot[3], weights[3];
@@ -5571,7 +5608,17 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
             {
               continue;
             }
-            double ratio = std::sqrt(d2)/t;
+            double d = std::sqrt(d2);
+            double ratio = d/t;
+            // The room before this triangle's clearance: against its thickest
+            // wall outright, or against the wall at the foot as it can grow
+            // along the triangle, whichever leaves more.
+            double room = d - clearance*cellThickest[(size_t)cellId];
+            if (cellSlope[(size_t)cellId] >= 0.0)
+            {
+              room = std::max(room, (d - clearance*t)/(1.0 + cellSlope[(size_t)cellId]));
+            }
+            slack = std::min(slack, room);
             if (ratio < best)
             {
               best = ratio;
@@ -5586,6 +5633,12 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       }
     }
     return best;
+  };
+  auto standing = [&](const double x[3], vtkIdType ownA, vtkIdType ownB,
+      const double along[3], double closest[3], double &wall)
+  {
+    double slack = 0.0;
+    return standingWithin(x, ownA, ownB, along, closest, wall, 0.0, slack);
   };
 
   std::vector<double> standingOf((size_t)numPts, 1.0);
@@ -5778,45 +5831,48 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       // bulging through the edge between them, and the crossing can sit
       // beyond a part of the edge that is not clear, so the edge is walked
       // from the kept end and the cut point stops at the first place that is
-      // not clear, wherever the far end is. A bisection assumes the edge is
-      // clear up to one crossing, and a cut point placed on that assumption
-      // has stood inside another wall.
+      // not clear, wherever the far end is.
+      //
+      // The walk steps by the slack: how far the point can move before it
+      // could stop being clear, which the standing query bounds from the
+      // triangles it looks at, and the lumen from its distance. Every point
+      // stepped over is clear by that bound, so the walk cannot step across
+      // a part of the edge that is not clear however narrow it is, which
+      // sampling at any fixed spacing can. It ends where it reaches the far
+      // end, or where the slack is down to a thousandth of the edge, which is
+      // as near the first crossing as the cut point is placed; an edge that
+      // runs along another sheet just inside the clearance ends the walk
+      // early, which cuts the fragment a little short and never long.
       const bool cutForDistance = standingOf[(size_t)cut] < clearance;
       const double uFar = cutForDistance ? 1.0 - edgeFloor : 0.5;
-      auto clearAt = [&](double t)
+      const double edgeLength = std::sqrt(vtkMath::Distance2BetweenPoints(qk, qc));
+      const double sFar = uFar*edgeLength;
+      const double sResolution = 1.0e-3*edgeLength;
+      const int maxSteps = 4096;
+      double sClear = -1.0, sAt = 0.0;
+      for (int step = 0; step < maxSteps && edgeLength > 0.0; step++)
       {
-        double x[3], closest[3], wall = 0.0;
+        double x[3], closest[3], wall = 0.0, slack = 0.0;
         for (int k = 0; k < 3; k++)
         {
-          x[k] = (1.0 - t)*qk[k] + t*qc[k];
+          x[k] = qk[k] + (sAt/edgeLength)*(qc[k] - qk[k]);
         }
-        return outwardSign*implicit->EvaluateFunction(x) > 0.0 &&
-            standing(x, kept, cut, along, closest, wall) >= clearance;
-      };
-      const int numSamples = 16;
-      int lastClear = 0;
-      while (lastClear < numSamples && clearAt(uFar*(lastClear + 1)/numSamples))
-      {
-        lastClear++;
-      }
-      double u = uFar;
-      if (lastClear < numSamples)
-      {
-        double lo = uFar*lastClear/numSamples, hi = uFar*(lastClear + 1)/numSamples;
-        for (int step = 0; step < 8; step++)
+        numWalkSteps++;
+        const double lumen = outwardSign*implicit->EvaluateFunction(x);
+        if (lumen <= 0.0 ||
+            standingWithin(x, kept, cut, along, closest, wall, sFar - sAt, slack) < clearance)
         {
-          double mid = 0.5*(lo + hi);
-          if (clearAt(mid))
-          {
-            lo = mid;
-          }
-          else
-          {
-            hi = mid;
-          }
+          break;
         }
-        u = lo;
+        sClear = sAt;
+        slack = std::min(slack, lumen);
+        if (sAt >= sFar || slack <= sResolution)
+        {
+          break;
+        }
+        sAt = std::min(sFar, sAt + slack);
       }
+      double u = (sClear < 0.0) ? 0.0 : sClear/edgeLength;
       if (u < edgeFloor)
       {
         // The crossing is at the kept end: the fragment there would be a
@@ -6617,8 +6673,8 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   fprintf(stdout,"  %d rounds of cutting%s; the last left %d triangles turned over%s (%d corners marked for cutting), and held %d cap rim corners that would otherwise have been cut\n",
       numRounds, converged ? ", converged" : " - the bound, not convergence: the last round's cuts were not made",
       foldedTriangles, (foldedTriangles > 0) ? " - the volume mesher will refuse them" : "", lastFolded, numRimHeld);
-  fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges\n",
-      numCutCells, numDroppedCells, (long long)numCutPts);
+  fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges, walked to in %lld steps\n",
+      numCutCells, numDroppedCells, (long long)numCutPts, numWalkSteps);
   fprintf(stdout,"  %lld standing queries over a %d x %d x %d grid of %.4g bins (reach %.4g), %.1f s for the first pass over every point\n",
       numQueries, gridSize[0], gridSize[1], gridSize[2], binSize, reach, firstPassSeconds);
   fprintf(stdout,"  %zu cap rims kept whole; %zu holes: %d zipped across a crease, %d pairs joined as the two sides of a seam, the largest %zu points around; %d closed by a fallback because the preferred closure crossed the surface more\n",
