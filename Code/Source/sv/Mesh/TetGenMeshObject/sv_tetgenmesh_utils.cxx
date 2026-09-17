@@ -75,6 +75,7 @@
 #include "sv_polydatasolid_utils.h"
 #include "sv_misc_utils.h"
 #include "sv_vtk_utils.h"
+#include "sv_tetgenmesh_envelope.h"
 
 #include <algorithm>
 #include <chrono>
@@ -4552,559 +4553,65 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
 }
 
 // -------------------------------------
-// ClosestPointOnTriangle
-// -------------------------------------
-/**
- * @brief The point of a triangle nearest to a point, with its barycentric
- * weights.
- * @note Region by region over the triangle's Voronoi diagram (Ericson,
- * Real-Time Collision Detection, 5.1.5), so it never divides by the area of a
- * sliver.
- * @return The squared distance.
- */
-
-static double ClosestPointOnTriangle(const double p[3], const double a[3],
-    const double b[3], const double c[3], double closest[3], double weights[3])
-{
-  double ab[3], ac[3], ap[3], bp[3], cp[3];
-  vtkMath::Subtract(b, a, ab);
-  vtkMath::Subtract(c, a, ac);
-  vtkMath::Subtract(p, a, ap);
-  double d1 = vtkMath::Dot(ab, ap);
-  double d2 = vtkMath::Dot(ac, ap);
-  double u = 0.0, v = 0.0, w = 0.0;
-  if (d1 <= 0.0 && d2 <= 0.0)
-  {
-    u = 1.0;
-  }
-  else
-  {
-    vtkMath::Subtract(p, b, bp);
-    double d3 = vtkMath::Dot(ab, bp);
-    double d4 = vtkMath::Dot(ac, bp);
-    if (d3 >= 0.0 && d4 <= d3)
-    {
-      v = 1.0;
-    }
-    else
-    {
-      double vc = d1*d4 - d3*d2;
-      if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0)
-      {
-        v = (d1 - d3 != 0.0) ? d1/(d1 - d3) : 0.0;
-        u = 1.0 - v;
-      }
-      else
-      {
-        vtkMath::Subtract(p, c, cp);
-        double d5 = vtkMath::Dot(ab, cp);
-        double d6 = vtkMath::Dot(ac, cp);
-        if (d6 >= 0.0 && d5 <= d6)
-        {
-          w = 1.0;
-        }
-        else
-        {
-          double vb = d5*d2 - d1*d6;
-          if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0)
-          {
-            w = (d2 - d6 != 0.0) ? d2/(d2 - d6) : 0.0;
-            u = 1.0 - w;
-          }
-          else
-          {
-            double va = d3*d6 - d5*d4;
-            if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0)
-            {
-              double denom = (d4 - d3) + (d5 - d6);
-              w = (denom != 0.0) ? (d4 - d3)/denom : 0.0;
-              v = 1.0 - w;
-            }
-            else
-            {
-              double denom = 1.0/(va + vb + vc);
-              v = vb*denom;
-              w = vc*denom;
-              u = 1.0 - v - w;
-            }
-          }
-        }
-      }
-    }
-  }
-  for (int k = 0; k < 3; k++)
-  {
-    closest[k] = u*a[k] + v*b[k] + w*c[k];
-  }
-  weights[0] = u;
-  weights[1] = v;
-  weights[2] = w;
-  return vtkMath::Distance2BetweenPoints(p, closest);
-}
-
-// -------------------------------------
-// SegmentCrossesTriangle
-// -------------------------------------
-/**
- * @brief Whether an open segment passes through the interior of a triangle.
- * @note Moller-Trumbore. Touching at an end of the segment or on the edge of
- * the triangle does not count, so triangles that share a corner or an edge
- * are not reported against each other by this alone; the caller leaves those
- * out anyway.
- */
-
-static bool SegmentCrossesTriangle(const double p0[3], const double p1[3],
-    const double a[3], const double b[3], const double c[3])
-{
-  double d[3], e1[3], e2[3], pvec[3], tvec[3], qvec[3];
-  vtkMath::Subtract(p1, p0, d);
-  vtkMath::Subtract(b, a, e1);
-  vtkMath::Subtract(c, a, e2);
-  vtkMath::Cross(d, e2, pvec);
-  double det = vtkMath::Dot(e1, pvec);
-  if (std::abs(det) < 1.0e-14)
-  {
-    return false;
-  }
-  double inv = 1.0/det;
-  vtkMath::Subtract(p0, a, tvec);
-  double u = vtkMath::Dot(tvec, pvec)*inv;
-  if (u <= 1.0e-9 || u >= 1.0 - 1.0e-9)
-  {
-    return false;
-  }
-  vtkMath::Cross(tvec, e1, qvec);
-  double v = vtkMath::Dot(d, qvec)*inv;
-  if (v <= 1.0e-9 || u + v >= 1.0 - 1.0e-9)
-  {
-    return false;
-  }
-  double t = vtkMath::Dot(e2, qvec)*inv;
-  return t > 1.0e-9 && t < 1.0 - 1.0e-9;
-}
-
-// -------------------------------------
-// TrianglesCross
-// -------------------------------------
-/**
- * @brief Whether two triangles pass through each other.
- * @note Two triangles that share no corner cross when an edge of either
- * passes through the other. Two that share one corner can still cross, with
- * the edge opposite the shared corner of one passing through the other - a
- * fan folded over at its apex does this - and that edge is the only one
- * tested for them, because the two edges at the shared corner touch the other
- * triangle there by construction. Two that share an edge are not tested:
- * they can only overlap, coplanar, which the wall has no reason to produce.
- * @param f The corners of one triangle, nine values.
- * @param fp Its three point ids.
- * @param g The corners of the other, nine values.
- * @param gp Its three point ids.
- */
-
-static bool TrianglesCross(const double *f, const vtkIdType *fp,
-    const double *g, const vtkIdType *gp)
-{
-  int sharedF = -1, sharedG = -1, numShared = 0;
-  for (int m = 0; m < 3; m++)
-  {
-    for (int n = 0; n < 3; n++)
-    {
-      if (fp[m] == gp[n])
-      {
-        sharedF = m;
-        sharedG = n;
-        numShared++;
-      }
-    }
-  }
-  if (numShared >= 2)
-  {
-    return false;
-  }
-  if (numShared == 1)
-  {
-    int f1 = (sharedF+1)%3, f2 = (sharedF+2)%3;
-    int g1 = (sharedG+1)%3, g2 = (sharedG+2)%3;
-    return SegmentCrossesTriangle(&f[3*f1], &f[3*f2], &g[0], &g[3], &g[6]) ||
-        SegmentCrossesTriangle(&g[3*g1], &g[3*g2], &f[0], &f[3], &f[6]);
-  }
-  for (int k = 0; k < 3; k++)
-  {
-    if (SegmentCrossesTriangle(&f[3*k], &f[3*((k+1)%3)], &g[0], &g[3], &g[6]) ||
-        SegmentCrossesTriangle(&g[3*k], &g[3*((k+1)%3)], &f[0], &f[3], &f[6]))
-    {
-      return true;
-    }
-  }
-  return false;
-}
-
-// -------------------------------------
-// TriangulateLoopByLeastArea
-// -------------------------------------
-/**
- * @brief Fills a closed loop of points with the triangulation of least total
- * area.
- * @note The loop is the edge of the hole left where a fold was cut out of the
- * outer wall, and the hole is thin: the two sides of the loop are the cut
- * edges of the two sheets that met at the crease, and they run alongside each
- * other a few percent of a wall apart. The least-area triangulation of a loop
- * like that is the one that steps back and forth across the gap, which is the
- * zipper wanted, and it needs no notion of which side is which - which matters,
- * because at a junction the two sides are one loop joined at the ends of the
- * crease. It is the textbook cubic dynamic programme over the loop order, so
- * the loop has to be short enough for that; a crease is.
- *
- * The triangles are wound against the loop's own order, which is the order
- * the surface's boundary walk gives, so they face the same way as the surface
- * they close.
- * @param points The points the loop indexes into.
- * @param loop The loop, in boundary walk order.
- * @param triangles The triangles are appended here, three ids each.
- * @param quiet Whether to say nothing when the loop cannot be filled, for a
- * caller trying this as one of several closures.
- * @return SV_OK if the loop was filled.
- */
-
-static int TriangulateLoopByLeastArea(vtkPoints *points, const std::vector<vtkIdType> &loop,
-    std::vector<vtkIdType> &triangles, bool quiet)
-{
-  size_t n = loop.size();
-  if (n < 3)
-  {
-    if (!quiet)
-    {
-      fprintf(stderr,"Cannot fill a loop of %zu points\n", n);
-    }
-    return SV_ERROR;
-  }
-  // The cost is cubic in the loop, and this is the loop a crease reaches
-  // before the cost is seconds.
-  const size_t maxLoop = 1500;
-  if (n > maxLoop)
-  {
-    if (!quiet)
-    {
-      double p[3];
-      points->GetPoint(loop[0], p);
-      fprintf(stderr,"A hole in the outer wall at (%.5g, %.5g, %.5g) has a %zu point edge, more than the %zu the least-area fill is bounded to\n",
-          p[0], p[1], p[2], n, maxLoop);
-    }
-    return SV_ERROR;
-  }
-  std::vector<double> xyz(3*n);
-  double loopBounds[6];
-  for (size_t i = 0; i < n; i++)
-  {
-    points->GetPoint(loop[i], &xyz[3*i]);
-    for (int c = 0; c < 3; c++)
-    {
-      loopBounds[2*c] = (i == 0) ? xyz[c] : std::min(loopBounds[2*c], xyz[3*i+c]);
-      loopBounds[2*c+1] = (i == 0) ? xyz[c] : std::max(loopBounds[2*c+1], xyz[3*i+c]);
-    }
-  }
-  // A triangle with no area is charged more than any triangulation's whole
-  // area on top - the loop's extent squared per triangle, times the number
-  // of triangles - so that the fill takes any triangulation without one
-  // before one with, whatever the areas: the sum is then ordered first on
-  // how many flat triangles it has and only then on area. The least-area
-  // choice alone does not avoid them: every triangulation of a flat loop has
-  // the same area, and a triangle of three points in a line, whose long edge
-  // passes through the middle point, then costs nothing.
-  double extent = 0.0;
-  for (int c = 0; c < 3; c++)
-  {
-    extent = std::max(extent, loopBounds[2*c+1] - loopBounds[2*c]);
-  }
-  const double degeneratePenalty = (double)n*extent*extent;
-  auto area = [&](size_t i, size_t k, size_t j)
-  {
-    double e1[3], e2[3], cross[3];
-    for (int c = 0; c < 3; c++)
-    {
-      e1[c] = xyz[3*k+c] - xyz[3*i+c];
-      e2[c] = xyz[3*j+c] - xyz[3*i+c];
-    }
-    vtkMath::Cross(e1, e2, cross);
-    double a = 0.5*vtkMath::Norm(cross);
-    // Flat to within the length of its longest edge times a hair.
-    double longest2 = std::max(vtkMath::Dot(e1, e1), vtkMath::Dot(e2, e2));
-    if (a <= 1.0e-6*longest2)
-    {
-      a += degeneratePenalty;
-    }
-    return a;
-  };
-  std::vector<double> cost(n*n, 0.0);
-  std::vector<int> split(n*n, -1);
-  for (size_t len = 2; len < n; len++)
-  {
-    for (size_t i = 0; i + len < n; i++)
-    {
-      size_t j = i + len;
-      double best = std::numeric_limits<double>::max();
-      int bestK = -1;
-      for (size_t k = i+1; k < j; k++)
-      {
-        double c = cost[i*n+k] + cost[k*n+j] + area(i, k, j);
-        if (c < best)
-        {
-          best = c;
-          bestK = (int)k;
-        }
-      }
-      cost[i*n+j] = best;
-      split[i*n+j] = bestK;
-    }
-  }
-  std::vector<std::pair<size_t,size_t> > pending;
-  pending.push_back(std::make_pair((size_t)0, n-1));
-  while (!pending.empty())
-  {
-    size_t i = pending.back().first;
-    size_t j = pending.back().second;
-    pending.pop_back();
-    if (j - i < 2)
-    {
-      continue;
-    }
-    size_t k = (size_t)split[i*n+j];
-    triangles.push_back(loop[j]);
-    triangles.push_back(loop[k]);
-    triangles.push_back(loop[i]);
-    pending.push_back(std::make_pair(i, k));
-    pending.push_back(std::make_pair(k, j));
-  }
-  return SV_OK;
-}
-
-// -------------------------------------
-// BuildSeamBands
-// -------------------------------------
-/**
- * @brief Builds the two bands of triangles that join two closed loops running
- * alongside each other, one for each way round the second loop, the way two
- * rims are joined.
- * @note Where two vessels run closer than twice the wall, or a branch leaves a
- * vessel whose wall is thicker than the branch is wide, the wall of one
- * crosses the wall of the other along a closed curve, and cutting both back
- * leaves a loop on each sheet with nothing between them. Those two loops have
- * to be joined to each other. Filling either one on its own would seal its
- * sheet shut along the seam, which is a surface inside the wall and not its
- * boundary.
- *
- * The loops are walked together from their closest pair of points, advancing
- * whichever loop leaves the shorter diagonal, which is the merge that suits two
- * curves a small fraction of a wall apart. Which way round the second loop has
- * to be walked cannot be told from the neighbours of the closest pair alone,
- * so both bands are built and handed back with their areas; the caller
- * chooses. Each triangle is wound against the loop edge it uses, so the band
- * faces the way the sheets do.
- * @param points The points both loops index into.
- * @param first One loop, in boundary walk order.
- * @param second The other loop, in boundary walk order.
- * @param bands Set to the two bands, three ids per triangle: the second loop
- * walked forwards in the first, backwards in the second.
- * @param areas Set to the total area of each band.
- * @return SV_OK if the bands were built.
- */
-
-static int BuildSeamBands(vtkPoints *points, const std::vector<vtkIdType> &first,
-    const std::vector<vtkIdType> &second, std::vector<vtkIdType> bands[2], double areas[2])
-{
-  size_t n = first.size();
-  size_t m = second.size();
-  if (n < 3 || m < 3)
-  {
-    fprintf(stderr,"Cannot join loops of %zu and %zu points\n", n, m);
-    return SV_ERROR;
-  }
-  auto distance2 = [&](vtkIdType a, vtkIdType b)
-  {
-    double p[3], q[3];
-    points->GetPoint(a, p);
-    points->GetPoint(b, q);
-    return vtkMath::Distance2BetweenPoints(p, q);
-  };
-  size_t i0 = 0, j0 = 0;
-  double closest = std::numeric_limits<double>::max();
-  for (size_t i = 0; i < n; i++)
-  {
-    for (size_t j = 0; j < m; j++)
-    {
-      double d2 = distance2(first[i], second[j]);
-      if (d2 < closest)
-      {
-        closest = d2;
-        i0 = i;
-        j0 = j;
-      }
-    }
-  }
-  auto F = [&](size_t step) { return first[(i0 + step) % n]; };
-  // Deciding the direction from the neighbours of the closest pair alone is
-  // wrong when that pair sits at the end of a seam, where the loop turns
-  // round and both neighbours are equally close; the band then joins one side
-  // of the seam to the other and crosses everything between. So both are
-  // built.
-  auto band = [&](int dir, std::vector<vtkIdType> &triangles)
-  {
-    triangles.clear();
-    auto S = [&](size_t step)
-    {
-      size_t offset = step % m;
-      return (dir > 0) ? second[(j0 + offset) % m] : second[(j0 + m - offset) % m];
-    };
-    double area = 0.0;
-    size_t i = 0, j = 0;
-    while (i < n || j < m)
-    {
-      bool advanceFirst;
-      if (i >= n)
-      {
-        advanceFirst = false;
-      }
-      else if (j >= m)
-      {
-        advanceFirst = true;
-      }
-      else
-      {
-        advanceFirst = distance2(F(i+1), S(j)) <= distance2(F(i), S(j+1));
-      }
-      vtkIdType triangle[3];
-      if (advanceFirst)
-      {
-        triangle[0] = F(i+1);
-        triangle[1] = F(i);
-        triangle[2] = S(j);
-        i++;
-      }
-      else if (dir < 0)
-      {
-        triangle[0] = S(j);
-        triangle[1] = S(j+1);
-        triangle[2] = F(i);
-        j++;
-      }
-      else
-      {
-        triangle[0] = S(j+1);
-        triangle[1] = S(j);
-        triangle[2] = F(i);
-        j++;
-      }
-      if (triangle[0] == triangle[1] || triangle[1] == triangle[2] || triangle[0] == triangle[2])
-      {
-        continue;
-      }
-      double p0[3], p1[3], p2[3], e1[3], e2[3], cross[3];
-      points->GetPoint(triangle[0], p0);
-      points->GetPoint(triangle[1], p1);
-      points->GetPoint(triangle[2], p2);
-      vtkMath::Subtract(p1, p0, e1);
-      vtkMath::Subtract(p2, p0, e2);
-      vtkMath::Cross(e1, e2, cross);
-      area += 0.5*vtkMath::Norm(cross);
-      for (int k = 0; k < 3; k++)
-      {
-        triangles.push_back(triangle[k]);
-      }
-    }
-    return area;
-  };
-  areas[0] = band(1, bands[0]);
-  areas[1] = band(-1, bands[1]);
-  return SV_OK;
-}
-
-// -------------------------------------
 // TGenUtils_BuildTrimmedExtrudedOuterSurface
 // -------------------------------------
 /**
- * @brief Builds the outer wall surface by extruding the inner surface along its
- * normals and cutting out every part of the result that lies inside the wall.
- * @note Dilating the solid by the wall thickness rounds its convex features and
- * creases its concave ones. Pushing every surface point out along its normal
- * gives the same surface everywhere except at the creases, where the extruded
- * sheets of the two sides run on through each other, and the parts that run on
- * are not on the boundary of the dilated solid: every one of them lies within
- * the wall of some other part of the inner surface. That is a test that can be
- * made at each extruded point alone, against the triangles of the inner
- * surface around it, so this is the offset surface without a distance field
- * over a grid. A grid has to resolve the thinnest wall in the model over the
- * whole model, and on a model whose walls span an order of magnitude it cannot
- * afford to; this resolves everything at the resolution of the surface.
+ * @brief Builds the outer surface of the wall as the envelope of the inner
+ * surface extruded along its normals: the extrusion with everything that runs
+ * inside the wall cut away along the creases where its sheets cross.
+ * @note The extrusion of a concave junction runs through itself. The sheets
+ * extruded from the two vessels cross along a crease, and past the crease
+ * each sheet is inside the other vessel's wall; the boundary of the solid the
+ * extrusion encloses is the two sheets up to the crease and nothing beyond it.
  *
- * An extruded point is measured against every inner triangle within the
- * largest wall of it, other than its own sheet - the triangles at its own
- * point, and those facing within a few degrees of its own extrusion direction,
- * which a sheet cannot have folded through at that angle. Each such triangle
- * carries its own wall, and the point is cut if it stands closer to any of
- * them than that wall and a small clearance. It is measured against each triangle's own
- * wall rather than against the wall at the nearest point because the nearest
- * point is the wrong one where a thin vessel leaves a thick one: the thin
- * wall is nearest, and the thick wall is the one the point is inside. A point
- * inside a lumen, or on a triangle the extrusion turned inside out, is cut
- * whatever the distances say.
+ * Earlier builds of this cut each sheet where it stood within a margin of the
+ * other sheet's inner surface, which is not where the sheets cross: each sheet
+ * was cut on its own curve, the two curves ran a few percent of a wall apart,
+ * and the gap between them had to be closed by a band or a zip guessed from
+ * the two rims. Every failure the fill then met - closing triangles through a
+ * sheet, cut points inside a wall, slivers where a cut ran near a corner,
+ * rounds of cutting that did not settle - was that guess going wrong, and no
+ * choice of margin or walk could make two independently placed curves meet.
  *
- * The cut runs through the triangles between kept and cut points, with the
- * cut point on each edge put where the edge crosses the clearance, so the
- * surface is left with holes whose edges stand a small clearance off the
- * sheet they ran into, and the two sheets stop short of each other instead of
- * crossing. The holes are then closed: a hole on its
- * own is the gap at a crease and is zipped shut across it, and two holes that
- * run alongside each other are the two sides of a seam where one vessel's wall
- * crosses another's, and are joined to each other. Every closure is tested
- * for passing through the surface, which is what the volume mesher refuses,
- * and a pair whose band does so is closed the other way round, or each on its
- * own, whichever crosses least.
+ * The envelope is computed instead (sv_tetgenmesh_envelope.h): every pair of
+ * extruded triangles that cross is intersected, the crossing points are
+ * shared by id between the triangles that meet at them, each crossed triangle
+ * is split along its crease, and each piece is kept when the winding number
+ * of the closed extrusion on its outer side is zero - nothing of the solid on
+ * top of it. The two sides of a crease end on the same points, so there is no
+ * gap and nothing to close, and no margin: the crease is where the sheets
+ * cross, to rounding.
  *
- * The extruded rim of each cap is kept as the outer rim of that vessel end, so
- * the two rims are one to one. A cap whose rim is cut into by a neighbouring
- * wall is refused, because the end face of that vessel would no longer be an
- * annulus.
+ * The extrusion is closed for the winding number by a fan over each extruded
+ * cap rim; the fans are not part of the result. A cap rim has to survive
+ * whole for the vessel end to be closed by an annulus, and it does unless
+ * another vessel's wall reaches the vessel end, which is reported.
  *
- * The inner surface is never touched. Its points are the fluid/wall interface.
+ * Nothing of the inner surface is touched; its points are carried into the
+ * outer surface's construction only as the base of the extrusion.
  * @param surface The inner surface with its 'Normals' point data.
- * @param array The wall thickness per point of the inner surface.
- * @param clearance An extruded point standing less than this fraction of
- * another sheet's wall from that sheet's surface is cut, and the cut points
- * on the edges are put where the edge crosses this fraction. Above one, so
- * the sheets that met end short of each other.
- * @param outer Set to the trimmed and closed outer surface.
- * @param caps Set to one entry per vessel end, pairing its inner rim with its
- * extruded rim.
- * @param numUnresolved Set to the number of triangles the surface is left
- * with that the volume mesher will refuse: fragments still turned over when
- * the cut stopped, triangles passing through the surface, closing triangles
- * with no area, and cut points inside another wall or a lumen. The surface is
- * returned whatever this is, so that it can be measured and looked at; the
- * caller decides whether to go on.
- * @param cutConverged Set to whether the rounds of cutting ended because
- * nothing more was to be cut, rather than at their bound with cuts pending.
- * At the bound the surface is still sound - the pending cuts are of corners
- * whose cut points sit a twentieth of an edge from them - but it is not the
- * surface the cut was converging on.
- * @return SV_OK if the outer surface was built and every hole closed.
+ * @param array The extrusion length per point, all positive.
+ * @param outer Set to the envelope, with 'TrimRole' (0 an uncut triangle, 1 a
+ * piece of a cut one) and 'TrimCrossing' on its cells; it is also written to
+ * wall_outer_trimmed.vtp, and the pieces cut away to wall_outer_dropped.vtp
+ * with the winding number that dropped them.
+ * @param caps Set to the rim pairs of the vessel ends.
+ * @param numUnresolved Set to the number of faults that would make the volume
+ * mesher refuse the surface: triangles crossing, holes, edges on more than
+ * two triangles or wound against each other, and pieces that could not be
+ * classified.
+ * @return SV_OK if the surface was built; its faults are counted, not failed.
  */
 
 int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
-    double clearance, vtkPolyData *outer, std::vector<TGenUtilsCapRim> &caps, int &numUnresolved,
-    bool &cutConverged)
+    vtkPolyData *outer, std::vector<TGenUtilsCapRim> &caps, int &numUnresolved)
 {
   caps.clear();
   numUnresolved = 0;
-  cutConverged = false;
 
   if (surface == nullptr || array == nullptr || outer == nullptr)
   {
     fprintf(stderr,"Cannot build the extruded outer surface without a surface, a thickness array and an output\n");
-    return SV_ERROR;
-  }
-  if (!(clearance > 1.0))
-  {
-    fprintf(stderr,"The extrusion trim needs a clearance above one, not %.5g\n", clearance);
     return SV_ERROR;
   }
   vtkIdType numPts = surface->GetNumberOfPoints();
@@ -5122,30 +4629,32 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   }
   auto start = std::chrono::steady_clock::now();
 
-  double largestThickness = 0.0;
+  // The extrusion. A point with no thickness would extrude onto the inner
+  // surface itself and make triangles that lie in it; that is an input
+  // fault, not something to trim around.
+  svenvelope::Surface closed;
+  closed.points.resize((size_t)3*numPts);
+  double largestThickness = 0.0, smallestThickness = std::numeric_limits<double>::max();
   for (vtkIdType ptId = 0; ptId < numPts; ptId++)
   {
-    largestThickness = std::max(largestThickness, array->GetValue(ptId));
+    double p[3], n[3];
+    surface->GetPoint(ptId, p);
+    normals->GetTuple(ptId, n);
+    vtkMath::Normalize(n);
+    double t = array->GetValue(ptId);
+    if (!(t > 0.0))
+    {
+      fprintf(stderr,"The wall thickness at (%.5g, %.5g, %.5g) is %.5g; every point has to be extruded by a positive thickness\n",
+          p[0], p[1], p[2], t);
+      return SV_ERROR;
+    }
+    largestThickness = std::max(largestThickness, t);
+    smallestThickness = std::min(smallestThickness, t);
+    for (int k = 0; k < 3; k++)
+    {
+      closed.points[(size_t)3*ptId + k] = p[k] + t*n[k];
+    }
   }
-  if (largestThickness <= 0.0)
-  {
-    fprintf(stderr,"Every wall thickness is zero or negative, so there is no wall to extrude\n");
-    return SV_ERROR;
-  }
-
-  // Close the cap openings with a fan each so the distance can be signed. The
-  // fans are not walls: nothing is measured against them.
-  std::vector<std::vector<vtkIdType> > rims;
-  if (TGenUtils_ExtractBoundaryLoops(surface, rims) != SV_OK)
-  {
-    fprintf(stderr,"Problem extracting the cap rims of the wall surface\n");
-    return SV_ERROR;
-  }
-  auto closedPoints = vtkSmartPointer<vtkPoints>::New();
-  closedPoints->DeepCopy(surface->GetPoints());
-  auto closedCells = vtkSmartPointer<vtkCellArray>::New();
-  std::vector<vtkIdType> wallCellPts;
-  std::vector<double> wallCellNormal;
   for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
   {
     vtkIdType npts;
@@ -5155,23 +4664,28 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     {
       continue;
     }
-    vtkIdType triangle[3] = {pts[0], pts[1], pts[2]};
-    closedCells->InsertNextCell(3, triangle);
-    double p0[3], p1[3], p2[3], e1[3], e2[3], n[3];
-    surface->GetPoint(pts[0], p0);
-    surface->GetPoint(pts[1], p1);
-    surface->GetPoint(pts[2], p2);
-    vtkMath::Subtract(p1, p0, e1);
-    vtkMath::Subtract(p2, p0, e2);
-    vtkMath::Cross(e1, e2, n);
-    vtkMath::Normalize(n);
     for (int j = 0; j < 3; j++)
     {
-      wallCellPts.push_back(pts[j]);
-      wallCellNormal.push_back(n[j]);
+      closed.triangles.push_back((long long)pts[j]);
     }
   }
-  vtkIdType numWallCells = (vtkIdType)(wallCellPts.size()/3);
+  closed.numSheetTriangles = (long long)(closed.triangles.size()/3);
+  if (closed.numSheetTriangles == 0)
+  {
+    fprintf(stderr,"The surface has no triangles to extrude\n");
+    return SV_ERROR;
+  }
+
+  // Close the extrusion over each cap rim with a fan, wound against the rim
+  // as the wall triangles traverse it, so that the closed surface is
+  // consistently wound and has a winding number. The fans are not walls:
+  // they are never cut and never kept.
+  std::vector<std::vector<vtkIdType> > rims;
+  if (TGenUtils_ExtractBoundaryLoops(surface, rims) != SV_OK)
+  {
+    fprintf(stderr,"Problem extracting the cap rims of the wall surface\n");
+    return SV_ERROR;
+  }
   std::vector<int> rimOfPoint((size_t)numPts, -1);
   for (size_t r = 0; r < rims.size(); r++)
   {
@@ -5179,886 +4693,171 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     double centroid[3] = {0.0, 0.0, 0.0};
     for (size_t m = 0; m < rim.size(); m++)
     {
-      double p[3];
-      closedPoints->GetPoint(rim[m], p);
       for (int k = 0; k < 3; k++)
       {
-        centroid[k] += p[k];
+        centroid[k] += closed.points[(size_t)3*rim[m] + k];
       }
       rimOfPoint[(size_t)rim[m]] = (int)r;
     }
+    long long centroidId = (long long)(closed.points.size()/3);
     for (int k = 0; k < 3; k++)
     {
-      centroid[k] /= (double)rim.size();
+      closed.points.push_back(centroid[k]/(double)rim.size());
     }
-    vtkIdType centroidId = closedPoints->InsertNextPoint(centroid);
     for (size_t m = 0; m < rim.size(); m++)
     {
-      vtkIdType a = rim[m];
-      vtkIdType b = rim[(m+1)%rim.size()];
-      vtkIdType fan[3] = {b, a, centroidId};
-      closedCells->InsertNextCell(3, fan);
+      long long a = (long long)rim[m];
+      long long b = (long long)rim[(m+1)%rim.size()];
+      closed.triangles.push_back(b);
+      closed.triangles.push_back(a);
+      closed.triangles.push_back(centroidId);
     }
   }
-  auto closed = vtkSmartPointer<vtkPolyData>::New();
-  closed->SetPoints(closedPoints);
-  closed->SetPolys(closedCells);
-  closed->BuildLinks();
 
-  auto implicit = vtkSmartPointer<vtkImplicitPolyDataDistance>::New();
-  implicit->SetInput(closed);
-  // Which side is negative is the filter's convention; a corner well outside
-  // the model says which, and its magnitude says the reading is a distance.
-  double bounds[6];
-  closed->GetBounds(bounds);
-  double margin = 0.0;
-  for (int k = 0; k < 3; k++)
+  svenvelope::Envelope envelope;
+  svenvelope::Report report;
+  std::string error;
+  if (svenvelope::BuildOuterEnvelope(closed, envelope, report, error) != 0)
   {
-    margin = std::max(margin, bounds[2*k+1] - bounds[2*k]);
-  }
-  margin = 0.5*margin + 1.0;
-  double corner[3] = {bounds[0] - margin, bounds[2] - margin, bounds[4] - margin};
-  double cornerDistance = implicit->EvaluateFunction(corner);
-  if (std::abs(cornerDistance) < 0.9*margin)
-  {
-    fprintf(stderr,"The signed distance at a corner %.5g outside the model reads %.5g, so the distance is not measuring what the trim needs\n",
-        margin, cornerDistance);
+    fprintf(stderr,"Problem taking the envelope of the extruded wall: %s\n", error.c_str());
     return SV_ERROR;
   }
-  double outwardSign = (cornerDistance > 0.0) ? 1.0 : -1.0;
 
-  // Extrude.
-  std::vector<double> extruded((size_t)3*numPts, 0.0);
-  std::vector<double> direction((size_t)3*numPts, 0.0);
-  int numNoThickness = 0;
-  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
-  {
-    double p[3], n[3];
-    surface->GetPoint(ptId, p);
-    normals->GetTuple(ptId, n);
-    vtkMath::Normalize(n);
-    double t = array->GetValue(ptId);
-    if (t <= 0.0)
-    {
-      numNoThickness++;
-      t = 0.0;
-    }
-    for (int k = 0; k < 3; k++)
-    {
-      extruded[(size_t)3*ptId + k] = p[k] + t*n[k];
-      direction[(size_t)3*ptId + k] = n[k];
-    }
-  }
-
-  // A triangle the extrusion turned over is a fold whatever the distances at
-  // its corners say, so its corners are cut.
-  std::vector<bool> inverted((size_t)numPts, false);
-  int numInvertedCells = 0;
-  for (vtkIdType cellId = 0; cellId < numWallCells; cellId++)
-  {
-    const vtkIdType *pts = &wallCellPts[(size_t)3*cellId];
-    const double *q0 = &extruded[(size_t)3*pts[0]];
-    const double *q1 = &extruded[(size_t)3*pts[1]];
-    const double *q2 = &extruded[(size_t)3*pts[2]];
-    double e1[3], e2[3], outerNormal[3];
-    for (int k = 0; k < 3; k++)
-    {
-      e1[k] = q1[k] - q0[k];
-      e2[k] = q2[k] - q0[k];
-    }
-    vtkMath::Cross(e1, e2, outerNormal);
-    if (vtkMath::Dot(&wallCellNormal[(size_t)3*cellId], outerNormal) <= 0.0)
-    {
-      numInvertedCells++;
-      for (int j = 0; j < 3; j++)
-      {
-        inverted[(size_t)pts[j]] = true;
-      }
-    }
-  }
-
-  // The surface's own structure: the triangles at each point, and the
-  // neighbour of each triangle across each of its edges. Both are what "the
-  // same sheet" is measured on.
-  std::vector<int> pointCellStart((size_t)numPts + 1, 0);
-  for (vtkIdType cellId = 0; cellId < numWallCells; cellId++)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      pointCellStart[(size_t)wallCellPts[(size_t)3*cellId + j] + 1]++;
-    }
-  }
-  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
-  {
-    pointCellStart[(size_t)ptId + 1] += pointCellStart[(size_t)ptId];
-  }
-  std::vector<vtkIdType> pointCells((size_t)pointCellStart[(size_t)numPts], -1);
-  {
-    std::vector<int> cursor(pointCellStart.begin(), pointCellStart.end() - 1);
-    for (vtkIdType cellId = 0; cellId < numWallCells; cellId++)
-    {
-      for (int j = 0; j < 3; j++)
-      {
-        vtkIdType ptId = wallCellPts[(size_t)3*cellId + j];
-        pointCells[(size_t)cursor[(size_t)ptId]++] = cellId;
-      }
-    }
-  }
-  std::vector<vtkIdType> cellNeighbor((size_t)3*numWallCells, -1);
-  {
-    struct EdgeSide
-    {
-      vtkIdType a, b, cell;
-      int side;
-    };
-    std::vector<EdgeSide> edges;
-    edges.reserve((size_t)3*numWallCells);
-    for (vtkIdType cellId = 0; cellId < numWallCells; cellId++)
-    {
-      for (int j = 0; j < 3; j++)
-      {
-        vtkIdType a = wallCellPts[(size_t)3*cellId + j];
-        vtkIdType b = wallCellPts[(size_t)3*cellId + (j+1)%3];
-        EdgeSide e = {std::min(a, b), std::max(a, b), cellId, j};
-        edges.push_back(e);
-      }
-    }
-    std::sort(edges.begin(), edges.end(), [](const EdgeSide &l, const EdgeSide &r)
-    {
-      return (l.a != r.a) ? (l.a < r.a) : (l.b < r.b);
-    });
-    for (size_t e = 0; e + 1 < edges.size(); e++)
-    {
-      if (edges[e].a == edges[e+1].a && edges[e].b == edges[e+1].b)
-      {
-        cellNeighbor[(size_t)3*edges[e].cell + edges[e].side] = edges[e+1].cell;
-        cellNeighbor[(size_t)3*edges[e+1].cell + edges[e+1].side] = edges[e].cell;
-        e++;
-      }
-    }
-  }
-
-  // Bin the triangles on a grid at the reach, so the triangles within reach
-  // of a point are the ones in the bins around it. Each triangle also carries
-  // how far it can matter - the clearance times the largest wall at its
-  // corners - so the thin-walled triangles that fill most of a model are
-  // dismissed on their box before any distance is worked out.
-  const double reach = clearance*largestThickness;
-  double gridOrigin[3], gridDims[3];
-  int gridSize[3];
-  // The bins are the reach across, so that the triangles within reach of a
-  // point are in the bins around it, but never more of them than this: the
-  // grid covers the bounding box, empty space included, and a thin wall on a
-  // large model would otherwise ask for bounding box over reach cubed of
-  // them, which is memory in the tens of gigabytes. A bin wider than the
-  // reach just holds more triangles per bin, and the box test on each
-  // triangle still dismisses them cheaply.
-  const double maxBins = 4.0e6;
-  double binSize = reach;
-  {
-    double volume = 1.0;
-    for (int k = 0; k < 3; k++)
-    {
-      volume *= bounds[2*k+1] - bounds[2*k] + 2.0*reach;
-    }
-    binSize = std::max(reach, std::cbrt(volume/maxBins));
-  }
-  for (int k = 0; k < 3; k++)
-  {
-    gridOrigin[k] = bounds[2*k] - reach;
-    gridDims[k] = bounds[2*k+1] + reach - gridOrigin[k];
-    gridSize[k] = std::max(1, (int)std::ceil(gridDims[k]/binSize));
-  }
-  if ((double)gridSize[0]*gridSize[1]*gridSize[2] > 2.0*maxBins)
-  {
-    fprintf(stderr,"The trim grid would be %d x %d x %d bins over a %.5g x %.5g x %.5g box, more than it is bounded to\n",
-        gridSize[0], gridSize[1], gridSize[2], gridDims[0], gridDims[1], gridDims[2]);
-    return SV_ERROR;
-  }
-  auto binOf = [&](double value, int axis)
-  {
-    int bin = (int)std::floor((value - gridOrigin[axis])/binSize);
-    return std::min(std::max(bin, 0), gridSize[axis] - 1);
-  };
-  auto binIndex = [&](int i, int j, int k)
-  {
-    return ((size_t)k*gridSize[1] + (size_t)j)*gridSize[0] + (size_t)i;
-  };
-  size_t numBins = (size_t)gridSize[0]*gridSize[1]*gridSize[2];
-  std::vector<double> cellBox((size_t)6*numWallCells, 0.0);
-  std::vector<double> cellReach2((size_t)numWallCells, 0.0);
-  // How steeply the clearance a triangle asks for can change across it: the
-  // clearance times its wall's change over its shortest altitude, which
-  // bounds the gradient of the wall interpolated over it. A point moving a
-  // distance towards it loses at most that distance plus this times it.
-  std::vector<double> cellThickest((size_t)numWallCells, 0.0);
-  std::vector<double> cellSlope((size_t)numWallCells, -1.0);
-  std::vector<int> binStart(numBins + 1, 0);
-  for (vtkIdType cellId = 0; cellId < numWallCells; cellId++)
-  {
-    double *box = &cellBox[(size_t)6*cellId];
-    box[0] = box[2] = box[4] = std::numeric_limits<double>::max();
-    box[1] = box[3] = box[5] = -std::numeric_limits<double>::max();
-    double thickest = 0.0, thinnest = std::numeric_limits<double>::max();
-    double corner[3][3];
-    for (int j = 0; j < 3; j++)
-    {
-      vtkIdType ptId = wallCellPts[(size_t)3*cellId + j];
-      double *p = corner[j];
-      surface->GetPoint(ptId, p);
-      for (int k = 0; k < 3; k++)
-      {
-        box[2*k] = std::min(box[2*k], p[k]);
-        box[2*k+1] = std::max(box[2*k+1], p[k]);
-      }
-      thickest = std::max(thickest, array->GetValue(ptId));
-      thinnest = std::min(thinnest, array->GetValue(ptId));
-    }
-    double r = clearance*thickest;
-    cellReach2[(size_t)cellId] = r*r;
-    cellThickest[(size_t)cellId] = thickest;
-    {
-      double ab[3], ac[3], cross[3];
-      vtkMath::Subtract(corner[1], corner[0], ab);
-      vtkMath::Subtract(corner[2], corner[0], ac);
-      vtkMath::Cross(ab, ac, cross);
-      double longest = 0.0;
-      for (int j = 0; j < 3; j++)
-      {
-        longest = std::max(longest, std::sqrt(vtkMath::Distance2BetweenPoints(corner[j], corner[(j+1)%3])));
-      }
-      double altitude = (longest > 0.0) ? vtkMath::Norm(cross)/longest : 0.0;
-      if (altitude > 0.0)
-      {
-        cellSlope[(size_t)cellId] = clearance*(thickest - thinnest)/altitude;
-      }
-    }
-    for (int k = binOf(box[4], 2); k <= binOf(box[5], 2); k++)
-    {
-      for (int j = binOf(box[2], 1); j <= binOf(box[3], 1); j++)
-      {
-        for (int i = binOf(box[0], 0); i <= binOf(box[1], 0); i++)
-        {
-          binStart[binIndex(i, j, k) + 1]++;
-        }
-      }
-    }
-  }
-  for (size_t b = 0; b < numBins; b++)
-  {
-    binStart[b + 1] += binStart[b];
-  }
-  std::vector<vtkIdType> binCells((size_t)binStart[numBins], -1);
-  {
-    std::vector<int> cursor(binStart.begin(), binStart.end() - 1);
-    for (vtkIdType cellId = 0; cellId < numWallCells; cellId++)
-    {
-      const double *box = &cellBox[(size_t)6*cellId];
-      for (int k = binOf(box[4], 2); k <= binOf(box[5], 2); k++)
-      {
-        for (int j = binOf(box[2], 1); j <= binOf(box[3], 1); j++)
-        {
-          for (int i = binOf(box[0], 0); i <= binOf(box[1], 0); i++)
-          {
-            binCells[(size_t)cursor[binIndex(i, j, k)]++] = cellId;
-          }
-        }
-      }
-    }
-  }
-
-  // How far a point stands inside the wall of another sheet, as the smallest
-  // ratio of its distance to an inner triangle over that triangle's own wall,
-  // taken over every triangle within reach of it that is not its own sheet.
-  //
-  // Its own sheet is the part of the surface it was extruded from, and that is
-  // a matter of connection, not of distance: the triangles reached from its
-  // own point by walking across edges without leaving a ball around it. A
-  // wall standing behind the sheet is not reached that way however close it
-  // is, which is what cuts a sheet that has run through the vessel behind it.
-  // But connection alone is too generous where the walk crosses a junction,
-  // because at a junction the other vessel's wall is connected too, so the
-  // walk's triangles count as own only while they face within an angle of the
-  // extrusion direction; the other side of a crotch faces away by the angle
-  // of the crotch. The angle is what a sheet cannot have folded through: its
-  // own facets lean away from a vertex normal by the warp smoothing's ten
-  // degrees and a little curvature, and two vessels meet at more than this.
-  const double cosOwnSheet = std::cos(vtkMath::RadiansFromDegrees(30.0));
-  int stamp = 0;
-  std::vector<int> ownStamp((size_t)numWallCells, 0);
-  std::vector<int> seenStamp((size_t)numWallCells, 0);
-  std::vector<vtkIdType> walk;
-  long long numQueries = 0, numWalkSteps = 0;
-  // How the walks for the cut points ended, and where the kept corners cut
-  // for a crossing near them stood, so that a log with many such corners
-  // says whether they were barely clear or clear and cut anyway.
-  long long numWalkFar = 0, numWalkStopped = 0, numWalkNoRoom = 0, numWalkCapped = 0;
-  std::vector<double> demotedStanding;
-  std::vector<int> demotedPerRound;
-  auto markOwn = [&](vtkIdType seedPt, double radius)
-  {
-    double seed[3];
-    surface->GetPoint(seedPt, seed);
-    double radius2 = radius*radius;
-    walk.clear();
-    for (int c = pointCellStart[(size_t)seedPt]; c < pointCellStart[(size_t)seedPt + 1]; c++)
-    {
-      vtkIdType cellId = pointCells[(size_t)c];
-      if (ownStamp[(size_t)cellId] != stamp)
-      {
-        ownStamp[(size_t)cellId] = stamp;
-        walk.push_back(cellId);
-      }
-    }
-    for (size_t w = 0; w < walk.size(); w++)
-    {
-      vtkIdType cellId = walk[w];
-      for (int j = 0; j < 3; j++)
-      {
-        vtkIdType next = cellNeighbor[(size_t)3*cellId + j];
-        if (next < 0 || ownStamp[(size_t)next] == stamp)
-        {
-          continue;
-        }
-        bool inside = false;
-        for (int m = 0; m < 3 && !inside; m++)
-        {
-          double p[3];
-          surface->GetPoint(wallCellPts[(size_t)3*next + m], p);
-          inside = vtkMath::Distance2BetweenPoints(p, seed) <= radius2;
-        }
-        if (inside)
-        {
-          ownStamp[(size_t)next] = stamp;
-          walk.push_back(next);
-        }
-      }
-    }
-  };
-  // Along with the standing, how far the point can move in any direction and
-  // still stand at least the clearance from every triangle counted, as a
-  // lower bound: the distance to a triangle falls no faster than the point
-  // moves, and the wall it asks for rises no faster than the triangle's slope.
-  // The triangles looked at are those within the reach plus the horizon, so
-  // any triangle not looked at is at least the horizon away from mattering,
-  // and the slack is never more than the horizon.
-  auto standingWithin = [&](const double x[3], vtkIdType ownA, vtkIdType ownB,
-      const double along[3], double closest[3], double &wall, double horizon, double &slack)
-  {
-    numQueries++;
-    stamp++;
-    // A triangle within reach of the point is within the point's extrusion
-    // plus the reach of its own point, plus the edge a cut point sits on.
-    double pa[3], pb[3];
-    surface->GetPoint(ownA, pa);
-    surface->GetPoint(ownB, pb);
-    double ownRadius = reach + clearance*std::max(array->GetValue(ownA), array->GetValue(ownB)) +
-        std::sqrt(vtkMath::Distance2BetweenPoints(pa, pb));
-    markOwn(ownA, ownRadius);
-    if (ownB != ownA)
-    {
-      markOwn(ownB, ownRadius);
-    }
-    double best = std::numeric_limits<double>::max();
-    wall = 0.0;
-    slack = horizon;
-    const double window = reach + horizon;
-    for (int k = binOf(x[2] - window, 2); k <= binOf(x[2] + window, 2); k++)
-    {
-      for (int j = binOf(x[1] - window, 1); j <= binOf(x[1] + window, 1); j++)
-      {
-        for (int i = binOf(x[0] - window, 0); i <= binOf(x[0] + window, 0); i++)
-        {
-          size_t bin = binIndex(i, j, k);
-          for (int c = binStart[bin]; c < binStart[bin + 1]; c++)
-          {
-            vtkIdType cellId = binCells[(size_t)c];
-            if (seenStamp[(size_t)cellId] == stamp)
-            {
-              continue;
-            }
-            seenStamp[(size_t)cellId] = stamp;
-            const vtkIdType *pts = &wallCellPts[(size_t)3*cellId];
-            if (pts[0] == ownA || pts[1] == ownA || pts[2] == ownA ||
-                pts[0] == ownB || pts[1] == ownB || pts[2] == ownB)
-            {
-              continue;
-            }
-            if (ownStamp[(size_t)cellId] == stamp &&
-                vtkMath::Dot(&wallCellNormal[(size_t)3*cellId], along) >= cosOwnSheet)
-            {
-              continue;
-            }
-            const double *box = &cellBox[(size_t)6*cellId];
-            double boxDistance2 = 0.0;
-            for (int m = 0; m < 3; m++)
-            {
-              double d = (x[m] < box[2*m]) ? box[2*m] - x[m] : ((x[m] > box[2*m+1]) ? x[m] - box[2*m+1] : 0.0);
-              boxDistance2 += d*d;
-            }
-            if (boxDistance2 > cellReach2[(size_t)cellId])
-            {
-              // Out of this triangle's reach here; the box is a lower bound
-              // on the distance, so this much nearer it could start to count.
-              slack = std::min(slack, std::sqrt(boxDistance2) - std::sqrt(cellReach2[(size_t)cellId]));
-              continue;
-            }
-            double a[3], b[3], cc[3], foot[3], weights[3];
-            closedPoints->GetPoint(pts[0], a);
-            closedPoints->GetPoint(pts[1], b);
-            closedPoints->GetPoint(pts[2], cc);
-            double d2 = ClosestPointOnTriangle(x, a, b, cc, foot, weights);
-            double t = weights[0]*array->GetValue(pts[0]) + weights[1]*array->GetValue(pts[1]) +
-                weights[2]*array->GetValue(pts[2]);
-            if (t <= 0.0)
-            {
-              continue;
-            }
-            double d = std::sqrt(d2);
-            double ratio = d/t;
-            // The room before this triangle's clearance: against its thickest
-            // wall outright, or against the wall at the foot as it can grow
-            // along the triangle, whichever leaves more.
-            double room = d - clearance*cellThickest[(size_t)cellId];
-            if (cellSlope[(size_t)cellId] >= 0.0)
-            {
-              room = std::max(room, (d - clearance*t)/(1.0 + cellSlope[(size_t)cellId]));
-            }
-            slack = std::min(slack, room);
-            if (ratio < best)
-            {
-              best = ratio;
-              wall = t;
-              for (int m = 0; m < 3; m++)
-              {
-                closest[m] = foot[m];
-              }
-            }
-          }
-        }
-      }
-    }
-    return best;
-  };
-  auto standing = [&](const double x[3], vtkIdType ownA, vtkIdType ownB,
-      const double along[3], double closest[3], double &wall)
-  {
-    double slack = 0.0;
-    return standingWithin(x, ownA, ownB, along, closest, wall, 0.0, slack);
-  };
-
-  std::vector<double> standingOf((size_t)numPts, 1.0);
-  std::vector<bool> removed((size_t)numPts, false);
-  int numInLumen = 0, numUnderWall = 0, numInvertedPts = 0, numNoThicknessOnly = 0;
-  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
-  {
-    double x[3] = {extruded[(size_t)3*ptId], extruded[(size_t)3*ptId+1], extruded[(size_t)3*ptId+2]};
-    double closest[3], wall = 0.0;
-    double f = standing(x, ptId, ptId, &direction[(size_t)3*ptId], closest, wall);
-    // A point can be deep inside a lumen whose wall is thin, well over a wall
-    // from that wall, so the sign is a separate question from the ratio.
-    if (outwardSign*implicit->EvaluateFunction(x) < 0.0)
-    {
-      f = -1.0;
-    }
-    standingOf[(size_t)ptId] = f;
-    if (inverted[(size_t)ptId])
-    {
-      removed[(size_t)ptId] = true;
-      numInvertedPts++;
-    }
-    else if (f < 0.0)
-    {
-      removed[(size_t)ptId] = true;
-      numInLumen++;
-    }
-    else if (f < clearance)
-    {
-      removed[(size_t)ptId] = true;
-      numUnderWall++;
-    }
-    else if (array->GetValue(ptId) <= 0.0)
-    {
-      removed[(size_t)ptId] = true;
-      numNoThicknessOnly++;
-    }
-  }
-  double firstPassSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-
-  // Cut, and look at what that made. Nothing is moved off the extruded
-  // sheets: a cut point is put where its edge crosses the clearance, found by
-  // bisection on the standing measure along the edge, so every outer point
-  // is on a sheet or on an edge of one and stands at least the clearance from
-  // every other sheet. Moving points off the sheets instead, measured, fanned
-  // slivers over each other at a point whose neighbours were all cut, and
-  // where the other wall stood beyond the sheet rather than across it the
-  // move away from that wall went into the sheet's own solid.
-  //
-  // A kept point on no whole triangle is left holding a fan of slivers
-  // between cut points, and a kept point whose edges cross the clearance
-  // within a twentieth of their length would leave slivers of that size; both
-  // are cut in turn and the cut made again, until the cut is stable. A cap
-  // rim point is never cut this way: the rim has to survive whole for the
-  // vessel end to be closed, and cutting one would fail the build outright
-  // where holding the cut point off it leaves a sliver at worst.
-  // The cut points are found to double precision, and the points are kept
-  // at that: vtkPoints' default is float, which would round them by a few
-  // parts in ten million and put them off the clearance they were found on.
+  // The envelope as the outer surface, on the points it uses. The input
+  // points keep their ids in the envelope, so a point below numPts is an
+  // extruded inner point and the rest are crease points.
+  vtkIdType numEnvelopePts = (vtkIdType)(envelope.points.size()/3);
+  std::vector<vtkIdType> newId((size_t)numEnvelopePts, -1);
   auto outerPoints = vtkSmartPointer<vtkPoints>::New();
   outerPoints->SetDataTypeToDouble();
   auto outerCells = vtkSmartPointer<vtkCellArray>::New();
-  std::vector<vtkIdType> newId((size_t)numPts, -1);
-  std::vector<double> scale;
-  std::vector<vtkIdType> cutFrom, cutTo, sourceCell, outerTris;
-  vtkIdType numKeptOriginal = 0, numOuterPts = 0, numCutPts = 0;
-  int numCutCells = 0, numDroppedCells = 0;
-  int numPeninsula = 0, numDemoted = 0, numFolded = 0, numRounds = 0, lastFolded = 0;
-  // The triangles turned over in the last round are the ones the surface is
-  // left with. They are counted apart from the corners cut for them, because
-  // a corner on a cap rim is not cut and its triangle stays turned over.
-  int foldedTriangles = 0;
-  int numRimHeld = 0;
-  bool converged = false;
-  const int maxRounds = 8;
-  const double edgeFloor = 0.05;
-  while (true)
+  std::vector<long long> outerToEnvelope;
+  size_t numOuterCells = envelope.triangles.size()/3;
+  for (size_t c = 0; c < numOuterCells; c++)
   {
-    numRounds++;
-    numRimHeld = 0;
-    // Peninsulas: kept points on no whole triangle.
-    while (true)
+    vtkIdType triangle[3];
+    for (int j = 0; j < 3; j++)
     {
-      int found = 0;
-      for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+      long long id = envelope.triangles[3*c + j];
+      if (newId[(size_t)id] < 0)
       {
-        if (removed[(size_t)ptId])
-        {
-          continue;
-        }
-        bool onWhole = false;
-        for (int c = pointCellStart[(size_t)ptId]; c < pointCellStart[(size_t)ptId + 1] && !onWhole; c++)
-        {
-          const vtkIdType *pts = &wallCellPts[(size_t)3*pointCells[(size_t)c]];
-          onWhole = !removed[(size_t)pts[0]] && !removed[(size_t)pts[1]] && !removed[(size_t)pts[2]];
-        }
-        if (!onWhole)
-        {
-          removed[(size_t)ptId] = true;
-          found++;
-        }
+        newId[(size_t)id] = outerPoints->InsertNextPoint(&envelope.points[(size_t)3*id]);
+        outerToEnvelope.push_back(id);
       }
-      numPeninsula += found;
-      if (found == 0)
-      {
-        break;
-      }
+      triangle[j] = newId[(size_t)id];
     }
-
-    // Every cap rim has to survive whole: its extruded rim is the outer rim of
-    // the vessel end, and the end face is the annulus between the two.
-    for (size_t r = 0; r < rims.size(); r++)
+    outerCells->InsertNextCell(3, triangle);
+  }
+  vtkIdType numOuterPts = outerPoints->GetNumberOfPoints();
+  vtkIdType numKeptOriginal = 0, numCreasePts = 0;
+  for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
+  {
+    if (outerToEnvelope[(size_t)ptId] < (long long)numPts)
     {
-      int numCut = 0;
-      double where[3] = {0.0, 0.0, 0.0};
-      for (size_t m = 0; m < rims[r].size(); m++)
-      {
-        if (removed[(size_t)rims[r][m]])
-        {
-          if (numCut == 0)
-          {
-            surface->GetPoint(rims[r][m], where);
-          }
-          numCut++;
-        }
-      }
-      if (numCut > 0)
-      {
-        fprintf(stderr,"The wall of a neighbouring vessel cuts into the rim of the cap at (%.5g, %.5g, %.5g): %d of its %zu extruded rim points lie inside another wall, so the end face of that vessel is not an annulus and the wall cannot be closed there\n",
-            where[0], where[1], where[2], numCut, rims[r].size());
-        return SV_ERROR;
-      }
+      numKeptOriginal++;
     }
-
-    // Cut the triangles between kept and cut points, keeping the kept side.
-    // The cut point on an edge is shared by the two triangles on that edge,
-    // which is what keeps the cut edges a closed chain.
-    outerPoints = vtkSmartPointer<vtkPoints>::New();
-    outerPoints->SetDataTypeToDouble();
-    outerCells = vtkSmartPointer<vtkCellArray>::New();
-    std::fill(newId.begin(), newId.end(), -1);
-    scale.clear();
-    cutFrom.clear();
-    cutTo.clear();
-    sourceCell.clear();
-    outerTris.clear();
-    auto addOuterTriangle = [&](const vtkIdType triangle[3], vtkIdType source)
+    else
     {
-      outerCells->InsertNextCell(3, triangle);
-      for (int j = 0; j < 3; j++)
-      {
-        outerTris.push_back(triangle[j]);
-      }
-      sourceCell.push_back(source);
-    };
-    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
-    {
-      if (removed[(size_t)ptId])
-      {
-        continue;
-      }
-      newId[(size_t)ptId] = outerPoints->InsertNextPoint(&extruded[(size_t)3*ptId]);
-      scale.push_back(array->GetValue(ptId));
-      cutFrom.push_back(ptId);
-      cutTo.push_back(ptId);
-    }
-    numKeptOriginal = outerPoints->GetNumberOfPoints();
-    std::vector<bool> demote((size_t)numPts, false);
-    int demotedThisRound = 0;
-    std::map<std::pair<vtkIdType,vtkIdType>, vtkIdType> cutPoints;
-    auto cutPointOn = [&](vtkIdType kept, vtkIdType cut)
-    {
-      std::pair<vtkIdType,vtkIdType> key(std::min(kept, cut), std::max(kept, cut));
-      std::map<std::pair<vtkIdType,vtkIdType>, vtkIdType>::iterator found = cutPoints.find(key);
-      if (found != cutPoints.end())
-      {
-        return found->second;
-      }
-      const double *qk = &extruded[(size_t)3*kept];
-      const double *qc = &extruded[(size_t)3*cut];
-      const double *along = &direction[(size_t)3*kept];
-      // The cut point goes as far along the edge from the kept end as the
-      // edge is clear: outside every lumen and at least the clearance from
-      // every other sheet. A point cut for its distance has the crossing
-      // somewhere on the edge, and the far end is the cut point itself, held
-      // off it by the edge floor. One cut for another reason (turned over, or
-      // left on no whole triangle) need not have a crossing on the edge, and
-      // the middle of the edge does for it - but only if the edge is clear
-      // that far. Both ends can stand clear of every other sheet with a sheet
-      // bulging through the edge between them, and the crossing can sit
-      // beyond a part of the edge that is not clear, so the edge is walked
-      // from the kept end and the cut point stops at the first place that is
-      // not clear, wherever the far end is.
-      //
-      // The walk steps by the slack: how far the point can move before it
-      // could stop being clear, which the standing query bounds from the
-      // triangles it looks at, and the lumen from its distance. Every point
-      // stepped over is clear by that bound, so the walk cannot step across
-      // a part of the edge that is not clear however narrow it is, which
-      // sampling at any fixed spacing can. It ends where it reaches the far
-      // end, or where the slack is down to a thousandth of the edge, which is
-      // as near the first crossing as the cut point is placed; an edge that
-      // runs along another sheet just inside the clearance ends the walk
-      // early, which cuts the fragment a little short and never long.
-      const bool cutForDistance = standingOf[(size_t)cut] < clearance;
-      const double uFar = cutForDistance ? 1.0 - edgeFloor : 0.5;
-      const double edgeLength = std::sqrt(vtkMath::Distance2BetweenPoints(qk, qc));
-      const double sFar = uFar*edgeLength;
-      const double sResolution = 1.0e-3*edgeLength;
-      const int maxSteps = 4096;
-      double sClear = -1.0, sAt = 0.0;
-      enum { walkCapped, walkStopped, walkFar, walkNoRoom } ending = walkCapped;
-      for (int step = 0; step < maxSteps && edgeLength > 0.0; step++)
-      {
-        double x[3], closest[3], wall = 0.0, slack = 0.0;
-        for (int k = 0; k < 3; k++)
-        {
-          x[k] = qk[k] + (sAt/edgeLength)*(qc[k] - qk[k]);
-        }
-        numWalkSteps++;
-        const double lumen = outwardSign*implicit->EvaluateFunction(x);
-        if (lumen <= 0.0 ||
-            standingWithin(x, kept, cut, along, closest, wall, sFar - sAt, slack) < clearance)
-        {
-          ending = walkStopped;
-          break;
-        }
-        sClear = sAt;
-        slack = std::min(slack, lumen);
-        if (sAt >= sFar)
-        {
-          ending = walkFar;
-          break;
-        }
-        if (slack <= sResolution)
-        {
-          ending = walkNoRoom;
-          break;
-        }
-        sAt = std::min(sFar, sAt + slack);
-      }
-      switch (ending)
-      {
-        case walkFar: numWalkFar++; break;
-        case walkStopped: numWalkStopped++; break;
-        case walkNoRoom: numWalkNoRoom++; break;
-        default: numWalkCapped++; break;
-      }
-      double u = (sClear < 0.0) ? 0.0 : sClear/edgeLength;
-      if (u < edgeFloor)
-      {
-        // The crossing is at the kept end: the fragment there would be a
-        // sliver a twentieth of an edge across. The kept point goes next
-        // round, unless it is on a cap rim; for this one the cut point is
-        // held off it either way.
-        if (rimOfPoint[(size_t)kept] >= 0)
-        {
-          numRimHeld++;
-        }
-        else if (!demote[(size_t)kept])
-        {
-          demote[(size_t)kept] = true;
-          demotedThisRound++;
-          demotedStanding.push_back(std::min(standingOf[(size_t)kept], 9.99));
-        }
-        u = edgeFloor;
-      }
-      double x[3];
-      for (int k = 0; k < 3; k++)
-      {
-        x[k] = (1.0 - u)*qk[k] + u*qc[k];
-      }
-      vtkIdType id = outerPoints->InsertNextPoint(x);
-      scale.push_back(0.5*(array->GetValue(kept) + array->GetValue(cut)));
-      cutFrom.push_back(kept);
-      cutTo.push_back(cut);
-      cutPoints[key] = id;
-      return id;
-    };
-    numCutCells = 0;
-    numDroppedCells = 0;
-    for (vtkIdType cellId = 0; cellId < numWallCells; cellId++)
-    {
-      const vtkIdType *pts = &wallCellPts[(size_t)3*cellId];
-      int numKept = 0;
-      for (int j = 0; j < 3; j++)
-      {
-        if (!removed[(size_t)pts[j]])
-        {
-          numKept++;
-        }
-      }
-      if (numKept == 3)
-      {
-        vtkIdType triangle[3] = {newId[(size_t)pts[0]], newId[(size_t)pts[1]], newId[(size_t)pts[2]]};
-        addOuterTriangle(triangle, cellId);
-        continue;
-      }
-      if (numKept == 0)
-      {
-        numDroppedCells++;
-        continue;
-      }
-      numCutCells++;
-      // Rotate so the odd one out is first: the one kept corner, or the one
-      // cut corner. Rotation keeps the winding.
-      vtkIdType a = pts[0], b = pts[1], c = pts[2];
-      for (int j = 0; j < 3; j++)
-      {
-        bool odd = (numKept == 1) ? !removed[(size_t)pts[j]] : removed[(size_t)pts[j]];
-        if (odd)
-        {
-          a = pts[j];
-          b = pts[(j+1)%3];
-          c = pts[(j+2)%3];
-          break;
-        }
-      }
-      if (numKept == 1)
-      {
-        vtkIdType ab = cutPointOn(a, b);
-        vtkIdType ac = cutPointOn(a, c);
-        vtkIdType triangle[3] = {newId[(size_t)a], ab, ac};
-        addOuterTriangle(triangle, cellId);
-      }
-      else
-      {
-        vtkIdType ba = cutPointOn(b, a);
-        vtkIdType ca = cutPointOn(c, a);
-        vtkIdType first[3] = {ba, newId[(size_t)b], newId[(size_t)c]};
-        vtkIdType second[3] = {ba, newId[(size_t)c], ca};
-        addOuterTriangle(first, cellId);
-        addOuterTriangle(second, cellId);
-      }
-    }
-    numOuterPts = outerPoints->GetNumberOfPoints();
-    numCutPts = numOuterPts - numKeptOriginal;
-
-    // Anything that came out turned over against its source triangle is cut
-    // at its kept corners. With nothing moved off the sheets this should not
-    // happen, and it is counted so that the log says whether it did.
-    lastFolded = 0;
-    foldedTriangles = 0;
-    for (size_t outerCellId = 0; outerCellId < sourceCell.size(); outerCellId++)
-    {
-      const vtkIdType *pts = &outerTris[3*outerCellId];
-      double q0[3], q1[3], q2[3], e1[3], e2[3], normal[3];
-      outerPoints->GetPoint(pts[0], q0);
-      outerPoints->GetPoint(pts[1], q1);
-      outerPoints->GetPoint(pts[2], q2);
-      vtkMath::Subtract(q1, q0, e1);
-      vtkMath::Subtract(q2, q0, e2);
-      vtkMath::Cross(e1, e2, normal);
-      if (vtkMath::Dot(normal, &wallCellNormal[(size_t)3*sourceCell[outerCellId]]) > 0.0)
-      {
-        continue;
-      }
-      foldedTriangles++;
-      for (int j = 0; j < 3; j++)
-      {
-        if (pts[j] >= numKeptOriginal)
-        {
-          continue;
-        }
-        vtkIdType corner = cutFrom[(size_t)pts[j]];
-        if (rimOfPoint[(size_t)corner] >= 0)
-        {
-          numRimHeld++;
-        }
-        else if (!demote[(size_t)corner])
-        {
-          demote[(size_t)corner] = true;
-          lastFolded++;
-        }
-      }
-    }
-    numFolded += lastFolded;
-    numDemoted += demotedThisRound;
-    demotedPerRound.push_back(demotedThisRound);
-    converged = (lastFolded == 0 && demotedThisRound == 0);
-    if (converged || numRounds >= maxRounds)
-    {
-      break;
-    }
-    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
-    {
-      if (demote[(size_t)ptId])
-      {
-        removed[(size_t)ptId] = true;
-      }
+      numCreasePts++;
     }
   }
-  int numRemoved = numInvertedPts + numInLumen + numUnderWall + numPeninsula + numDemoted + numFolded +
-      numNoThicknessOnly;
+  outer->Initialize();
+  outer->SetPoints(outerPoints);
+  outer->SetPolys(outerCells);
 
-  // The boundary of what is left: the extruded cap rims, and the holes. The
-  // walk builds links, so it is given a surface that is not added to after.
-  auto clipped = vtkSmartPointer<vtkPolyData>::New();
-  clipped->SetPoints(outerPoints);
-  clipped->SetPolys(outerCells);
-  std::vector<std::vector<vtkIdType> > loops;
-  if (TGenUtils_ExtractBoundaryLoops(clipped, loops) != SV_OK)
+  // What the volume mesher would refuse. The envelope's own accounting
+  // first, then its triangles against each other, which is the check the
+  // mesher makes.
+  int numFaults = (int)(report.numArrangementFaults + report.numUndecided +
+      report.numNonManifoldEdges + report.numMiswoundEdges);
+  std::vector<unsigned char> crossing;
+  double firstCrossingAt[3];
+  long long numCrossing = svenvelope::CountCrossingTriangles(envelope.points, envelope.triangles,
+      crossing, firstCrossingAt);
+
+  // The surface with its tags, and the pieces cut away with the winding
+  // number that cut them, for looking at what the log can only list.
   {
-    fprintf(stderr,"Problem walking the edges of the trimmed outer surface\n");
-    return SV_ERROR;
+    auto roleArray = vtkSmartPointer<vtkIntArray>::New();
+    roleArray->SetName("TrimRole");
+    auto crossingArray = vtkSmartPointer<vtkIntArray>::New();
+    crossingArray->SetName("TrimCrossing");
+    auto sourceArray = vtkSmartPointer<vtkIntArray>::New();
+    sourceArray->SetName("TrimSource");
+    for (size_t c = 0; c < numOuterCells; c++)
+    {
+      roleArray->InsertNextValue(envelope.whole[c] ? 0 : 1);
+      crossingArray->InsertNextValue(crossing[c] ? 1 : 0);
+      sourceArray->InsertNextValue((int)envelope.source[c]);
+    }
+    outer->GetCellData()->AddArray(roleArray);
+    outer->GetCellData()->AddArray(crossingArray);
+    outer->GetCellData()->AddArray(sourceArray);
+    char trimmedFile[] = "wall_outer_trimmed.vtp";
+    TGenUtils_WriteVTP(trimmedFile, outer);
+
+    auto droppedPoints = vtkSmartPointer<vtkPoints>::New();
+    droppedPoints->SetDataTypeToDouble();
+    auto droppedCells = vtkSmartPointer<vtkCellArray>::New();
+    auto windingArray = vtkSmartPointer<vtkIntArray>::New();
+    windingArray->SetName("TrimWinding");
+    auto droppedSourceArray = vtkSmartPointer<vtkIntArray>::New();
+    droppedSourceArray->SetName("TrimSource");
+    std::vector<vtkIdType> droppedId((size_t)numEnvelopePts, -1);
+    size_t numDroppedCells = envelope.droppedTriangles.size()/3;
+    for (size_t c = 0; c < numDroppedCells; c++)
+    {
+      vtkIdType triangle[3];
+      for (int j = 0; j < 3; j++)
+      {
+        long long id = envelope.droppedTriangles[3*c + j];
+        if (droppedId[(size_t)id] < 0)
+        {
+          droppedId[(size_t)id] = droppedPoints->InsertNextPoint(&envelope.points[(size_t)3*id]);
+        }
+        triangle[j] = droppedId[(size_t)id];
+      }
+      droppedCells->InsertNextCell(3, triangle);
+      windingArray->InsertNextValue(envelope.droppedWinding[c]);
+      droppedSourceArray->InsertNextValue((int)envelope.droppedSource[c]);
+    }
+    auto dropped = vtkSmartPointer<vtkPolyData>::New();
+    dropped->SetPoints(droppedPoints);
+    dropped->SetPolys(droppedCells);
+    dropped->GetCellData()->AddArray(windingArray);
+    dropped->GetCellData()->AddArray(droppedSourceArray);
+    char droppedFile[] = "wall_outer_dropped.vtp";
+    TGenUtils_WriteVTP(droppedFile, dropped);
+  }
+
+  // The boundary of the envelope has to be the extruded cap rims and nothing
+  // else: a rim with a cut in it, or a loop through a rim and a crease, is
+  // another vessel's wall reaching the vessel end, where the annulus cannot
+  // be built; any other loop is a hole the envelope should not have.
+  std::vector<std::vector<vtkIdType> > loops;
+  {
+    auto clipped = vtkSmartPointer<vtkPolyData>::New();
+    clipped->SetPoints(outerPoints);
+    clipped->SetPolys(outerCells);
+    if (TGenUtils_ExtractBoundaryLoops(clipped, loops) != SV_OK)
+    {
+      fprintf(stderr,"Problem walking the edges of the outer wall envelope\n");
+      return SV_ERROR;
+    }
   }
   std::vector<int> rimOfOuter((size_t)numOuterPts, -1);
-  for (vtkIdType ptId = 0; ptId < numKeptOriginal; ptId++)
+  for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
   {
-    rimOfOuter[(size_t)ptId] = rimOfPoint[(size_t)cutFrom[(size_t)ptId]];
+    long long id = outerToEnvelope[(size_t)ptId];
+    if (id < (long long)numPts)
+    {
+      rimOfOuter[(size_t)ptId] = rimOfPoint[(size_t)id];
+    }
   }
   caps.resize(rims.size());
   std::vector<bool> capFound(rims.size(), false);
-  std::vector<std::vector<vtkIdType> > holes;
+  int numHoles = 0;
+  double firstHoleAt[3] = {0.0, 0.0, 0.0};
   for (size_t l = 0; l < loops.size(); l++)
   {
     const std::vector<vtkIdType> &loop = loops[l];
@@ -6080,7 +4879,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     {
       double p[3];
       outerPoints->GetPoint(loop[0], p);
-      fprintf(stderr,"A boundary loop of the trimmed outer surface at (%.5g, %.5g, %.5g) runs through a cap rim and a cut, so a neighbouring wall reaches a vessel end and the wall cannot be closed there\n",
+      fprintf(stderr,"A boundary loop of the outer wall envelope at (%.5g, %.5g, %.5g) runs through a cap rim and a crease, so a neighbouring wall reaches a vessel end and the wall cannot be closed there\n",
           p[0], p[1], p[2]);
       return SV_ERROR;
     }
@@ -6091,14 +4890,18 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     }
     else
     {
-      holes.push_back(loop);
+      if (numHoles == 0)
+      {
+        outerPoints->GetPoint(loop[0], firstHoleAt);
+      }
+      numHoles++;
     }
   }
   for (size_t r = 0; r < rims.size(); r++)
   {
     if (!capFound[r])
     {
-      fprintf(stderr,"The extruded rim of a cap did not come out as a boundary loop of the outer surface\n");
+      fprintf(stderr,"The extruded rim of a cap did not come out as a boundary loop of the outer wall envelope\n");
       return SV_ERROR;
     }
     TGenUtilsCapRim &cap = caps[r];
@@ -6144,654 +4947,53 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     }
   }
 
-  // Pair the holes that run alongside each other. Two loops are a pair when
-  // most of the points of each have a point of the other within a wall and a
-  // half - the two edges of a seam are a few percent of a wall apart across
-  // the seam, more where the sheets cross at a shallow angle, and nothing else
-  // comes that close along most of its length.
-  size_t numHoles = holes.size();
-  std::vector<double> holeBounds(6*numHoles, 0.0);
-  std::vector<double> holeReach(numHoles, 0.0);
-  for (size_t h = 0; h < numHoles; h++)
-  {
-    double *hb = &holeBounds[6*h];
-    hb[0] = hb[2] = hb[4] = std::numeric_limits<double>::max();
-    hb[1] = hb[3] = hb[5] = -std::numeric_limits<double>::max();
-    for (size_t m = 0; m < holes[h].size(); m++)
-    {
-      double p[3];
-      outerPoints->GetPoint(holes[h][m], p);
-      for (int k = 0; k < 3; k++)
-      {
-        hb[2*k] = std::min(hb[2*k], p[k]);
-        hb[2*k+1] = std::max(hb[2*k+1], p[k]);
-      }
-      holeReach[h] = std::max(holeReach[h], 1.5*scale[(size_t)holes[h][m]]);
-    }
-  }
-  auto nearFraction = [&](size_t a, size_t b)
-  {
-    int numNear = 0;
-    for (size_t i = 0; i < holes[a].size(); i++)
-    {
-      double p[3];
-      outerPoints->GetPoint(holes[a][i], p);
-      double within = 1.5*scale[(size_t)holes[a][i]];
-      double within2 = within*within;
-      for (size_t j = 0; j < holes[b].size(); j++)
-      {
-        double q[3];
-        outerPoints->GetPoint(holes[b][j], q);
-        if (vtkMath::Distance2BetweenPoints(p, q) <= within2)
-        {
-          numNear++;
-          break;
-        }
-      }
-    }
-    return (double)numNear/(double)holes[a].size();
-  };
-  std::vector<int> partner(numHoles, -1);
-  std::vector<double> partnerScore(numHoles, 0.0);
-  for (size_t a = 0; a < numHoles; a++)
-  {
-    for (size_t b = a+1; b < numHoles; b++)
-    {
-      bool apart = false;
-      double gap = std::max(holeReach[a], holeReach[b]);
-      for (int k = 0; k < 3 && !apart; k++)
-      {
-        apart = holeBounds[6*a+2*k] > holeBounds[6*b+2*k+1] + gap ||
-                holeBounds[6*b+2*k] > holeBounds[6*a+2*k+1] + gap;
-      }
-      if (apart)
-      {
-        continue;
-      }
-      double score = std::min(nearFraction(a, b), nearFraction(b, a));
-      if (score < 0.5)
-      {
-        continue;
-      }
-      if (score > partnerScore[a] && score > partnerScore[b])
-      {
-        if (partner[a] >= 0)
-        {
-          partnerScore[(size_t)partner[a]] = 0.0;
-          partner[(size_t)partner[a]] = -1;
-        }
-        if (partner[b] >= 0)
-        {
-          partnerScore[(size_t)partner[b]] = 0.0;
-          partner[(size_t)partner[b]] = -1;
-        }
-        partner[a] = (int)b;
-        partner[b] = (int)a;
-        partnerScore[a] = partnerScore[b] = score;
-      }
-    }
-  }
-
-  // Close the holes. Each outer triangle is tagged with what it is - whole,
-  // fragment, crease zip or seam band - and which hole it closes, for the
-  // crossing check and for the surface written out after it.
-  const int roleWhole = 0, roleFragment = 1, roleZip = 2, roleSeam = 3;
-  std::vector<int> cellRole, cellHole;
-  for (size_t outerCellId = 0; outerCellId < sourceCell.size(); outerCellId++)
-  {
-    const vtkIdType *pts = &outerTris[3*outerCellId];
-    bool whole = pts[0] < numKeptOriginal && pts[1] < numKeptOriginal && pts[2] < numKeptOriginal;
-    cellRole.push_back(whole ? roleWhole : roleFragment);
-    cellHole.push_back(-1);
-  }
-
-  // Whether a triangle passes through the surface as it stands, which is what
-  // the volume mesher refuses. The whole and fragment triangles are binned on
-  // the same grid as the inner surface; the closing triangles accepted so far
-  // are kept in a sparse map over the same bins, since they are few and are
-  // added one hole at a time.
-  vtkIdType numBaseCells = outerCells->GetNumberOfCells();
-  std::vector<double> tri;
-  std::vector<vtkIdType> triPts;
-  std::vector<int> testedStamp;
-  tri.reserve((size_t)9*numBaseCells);
-  triPts.reserve((size_t)3*numBaseCells);
-  auto appendTri = [&](const vtkIdType pts[3])
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      triPts.push_back(pts[j]);
-      double p[3];
-      outerPoints->GetPoint(pts[j], p);
-      tri.insert(tri.end(), p, p + 3);
-    }
-    testedStamp.push_back(0);
-    return (vtkIdType)(triPts.size()/3) - 1;
-  };
-  for (vtkIdType cellId = 0; cellId < numBaseCells; cellId++)
-  {
-    appendTri(&outerTris[(size_t)3*cellId]);
-  }
-  auto binRange = [&](const double *t, int lo[3], int hi[3])
-  {
-    for (int k = 0; k < 3; k++)
-    {
-      double low = std::min(t[k], std::min(t[3+k], t[6+k]));
-      double high = std::max(t[k], std::max(t[3+k], t[6+k]));
-      lo[k] = binOf(low, k);
-      hi[k] = binOf(high, k);
-    }
-  };
-  std::vector<int> outerBinStart(numBins + 1, 0);
-  for (vtkIdType cellId = 0; cellId < numBaseCells; cellId++)
-  {
-    int lo[3], hi[3];
-    binRange(&tri[(size_t)9*cellId], lo, hi);
-    for (int k = lo[2]; k <= hi[2]; k++)
-    {
-      for (int j = lo[1]; j <= hi[1]; j++)
-      {
-        for (int i = lo[0]; i <= hi[0]; i++)
-        {
-          outerBinStart[binIndex(i, j, k) + 1]++;
-        }
-      }
-    }
-  }
-  for (size_t b = 0; b < numBins; b++)
-  {
-    outerBinStart[b + 1] += outerBinStart[b];
-  }
-  std::vector<vtkIdType> outerBinCells((size_t)outerBinStart[numBins], -1);
-  {
-    std::vector<int> cursor(outerBinStart.begin(), outerBinStart.end() - 1);
-    for (vtkIdType cellId = 0; cellId < numBaseCells; cellId++)
-    {
-      int lo[3], hi[3];
-      binRange(&tri[(size_t)9*cellId], lo, hi);
-      for (int k = lo[2]; k <= hi[2]; k++)
-      {
-        for (int j = lo[1]; j <= hi[1]; j++)
-        {
-          for (int i = lo[0]; i <= hi[0]; i++)
-          {
-            outerBinCells[(size_t)cursor[binIndex(i, j, k)]++] = cellId;
-          }
-        }
-      }
-    }
-  }
-  std::map<size_t, std::vector<vtkIdType> > extraBins;
-  auto insertExtra = [&](vtkIdType cellId)
-  {
-    int lo[3], hi[3];
-    binRange(&tri[(size_t)9*cellId], lo, hi);
-    for (int k = lo[2]; k <= hi[2]; k++)
-    {
-      for (int j = lo[1]; j <= hi[1]; j++)
-      {
-        for (int i = lo[0]; i <= hi[0]; i++)
-        {
-          extraBins[binIndex(i, j, k)].push_back(cellId);
-        }
-      }
-    }
-  };
-  int testStamp = 0;
-  // How many triangles of the surface a triangle passes through; the ids of
-  // those are appended to hits when it is given. A triangle already in the
-  // surface is skipped by its own index.
-  auto crossings = [&](const double *f, const vtkIdType *fp, vtkIdType self,
-      std::vector<vtkIdType> *hits)
-  {
-    testStamp++;
-    int count = 0;
-    int lo[3], hi[3];
-    binRange(f, lo, hi);
-    auto test = [&](vtkIdType other)
-    {
-      if (other == self || testedStamp[(size_t)other] == testStamp)
-      {
-        return;
-      }
-      testedStamp[(size_t)other] = testStamp;
-      if (TrianglesCross(f, fp, &tri[(size_t)9*other], &triPts[(size_t)3*other]))
-      {
-        count++;
-        if (hits != nullptr)
-        {
-          hits->push_back(other);
-        }
-      }
-    };
-    for (int k = lo[2]; k <= hi[2]; k++)
-    {
-      for (int j = lo[1]; j <= hi[1]; j++)
-      {
-        for (int i = lo[0]; i <= hi[0]; i++)
-        {
-          size_t bin = binIndex(i, j, k);
-          for (int c = outerBinStart[bin]; c < outerBinStart[bin + 1]; c++)
-          {
-            test(outerBinCells[(size_t)c]);
-          }
-          std::map<size_t, std::vector<vtkIdType> >::const_iterator found = extraBins.find(bin);
-          if (found != extraBins.end())
-          {
-            for (size_t c = 0; c < found->second.size(); c++)
-            {
-              test(found->second[c]);
-            }
-          }
-        }
-      }
-    }
-    return count;
-  };
-  // How many crossings a candidate closure would make: its triangles against
-  // the surface, and against each other, since a fill can fold over itself.
-  auto closureCrossings = [&](const std::vector<vtkIdType> &triangles)
-  {
-    size_t numTriangles = triangles.size()/3;
-    std::vector<double> xyz(9*numTriangles);
-    for (size_t t = 0; t < 3*numTriangles; t++)
-    {
-      outerPoints->GetPoint(triangles[t], &xyz[3*t]);
-    }
-    int total = 0;
-    for (size_t t = 0; t < numTriangles; t++)
-    {
-      total += crossings(&xyz[9*t], &triangles[3*t], -1, nullptr);
-    }
-    for (size_t t = 0; t < numTriangles; t++)
-    {
-      for (size_t u = t+1; u < numTriangles; u++)
-      {
-        if (TrianglesCross(&xyz[9*t], &triangles[3*t], &xyz[9*u], &triangles[3*u]))
-        {
-          total++;
-        }
-      }
-    }
-    return total;
-  };
-
-  // Each hole is closed by whichever of its closures passes through the
-  // surface least. A hole on its own is the gap at a crease and has one
-  // closure, the zip. A pair of holes are the two sides of a seam, and have
-  // three: the band with the second loop walked forwards, the band with it
-  // walked backwards, and - when the pairing was wrong and they are two
-  // creases that happen to run close - each zipped on its own. Preference
-  // among equals is the band of less area, then the other band, then the
-  // zips.
-  struct Closure
-  {
-    std::vector<vtkIdType> triangles;
-    std::vector<int> holeOf;
-    int role;
-    const char *how;
-    int crossings;
-  };
-  int numZipped = 0, numJoined = 0, numFellBack = 0;
-  size_t largestHole = 0;
-  std::vector<std::pair<double,vtkIdType> > holeSeeds;
-  std::vector<std::string> closureLines;
-  for (size_t h = 0; h < numHoles; h++)
-  {
-    largestHole = std::max(largestHole, holes[h].size());
-    holeSeeds.push_back(std::make_pair(-(double)holes[h].size(), holes[h][0]));
-    if (partner[h] >= 0 && (size_t)partner[h] < h)
-    {
-      continue;
-    }
-    std::vector<Closure> options;
-    if (partner[h] < 0)
-    {
-      Closure zip;
-      if (TriangulateLoopByLeastArea(outerPoints, holes[h], zip.triangles, false) != SV_OK)
-      {
-        fprintf(stderr,"Problem zipping a crease in the outer wall\n");
-        return SV_ERROR;
-      }
-      zip.holeOf.assign(zip.triangles.size()/3, (int)h);
-      zip.role = roleZip;
-      zip.how = "zipped";
-      options.push_back(zip);
-    }
-    else
-    {
-      size_t g = (size_t)partner[h];
-      std::vector<vtkIdType> bands[2];
-      double areas[2];
-      if (BuildSeamBands(outerPoints, holes[h], holes[g], bands, areas) != SV_OK)
-      {
-        fprintf(stderr,"Problem joining the two sides of a seam in the outer wall\n");
-        return SV_ERROR;
-      }
-      int lesser = (areas[0] <= areas[1]) ? 0 : 1;
-      for (int which = 0; which < 2; which++)
-      {
-        Closure band;
-        int b = (which == 0) ? lesser : 1 - lesser;
-        band.triangles = bands[b];
-        band.holeOf.assign(band.triangles.size()/3, (int)h);
-        band.role = roleSeam;
-        band.how = (which == 0) ? "seam band" : "seam band the other way round";
-        options.push_back(band);
-      }
-      Closure zips;
-      std::vector<vtkIdType> second;
-      if (TriangulateLoopByLeastArea(outerPoints, holes[h], zips.triangles, true) == SV_OK &&
-          TriangulateLoopByLeastArea(outerPoints, holes[g], second, true) == SV_OK)
-      {
-        zips.holeOf.assign(zips.triangles.size()/3, (int)h);
-        zips.holeOf.insert(zips.holeOf.end(), second.size()/3, (int)g);
-        zips.triangles.insert(zips.triangles.end(), second.begin(), second.end());
-        zips.role = roleZip;
-        zips.how = "zipped each on its own";
-        options.push_back(zips);
-      }
-    }
-    size_t chosen = 0;
-    for (size_t o = 0; o < options.size(); o++)
-    {
-      options[o].crossings = closureCrossings(options[o].triangles);
-      if (options[o].crossings < options[chosen].crossings)
-      {
-        chosen = o;
-      }
-    }
-    const Closure &closure = options[chosen];
-    if (chosen > 0)
-    {
-      numFellBack++;
-    }
-    if (chosen > 0 || closure.crossings > 0)
-    {
-      double p[3];
-      outerPoints->GetPoint(holes[h][0], p);
-      std::string line;
-      char head[256];
-      snprintf(head, sizeof(head), "    hole %zu (%zu points) at (%.5g, %.5g, %.5g): %s, %d triangles crossing the surface",
-          h, holes[h].size(), p[0], p[1], p[2], closure.how, closure.crossings);
-      line = head;
-      int numOthers = 0;
-      for (size_t o = 0; o < options.size(); o++)
-      {
-        if (o == chosen)
-        {
-          continue;
-        }
-        char other[128];
-        snprintf(other, sizeof(other), "%s %s would cross %d", (numOthers == 0) ? ";" : ",",
-            options[o].how, options[o].crossings);
-        line += other;
-        numOthers++;
-      }
-      closureLines.push_back(line);
-    }
-    if (closure.role == roleSeam)
-    {
-      numJoined++;
-    }
-    else
-    {
-      numZipped += (partner[h] < 0) ? 1 : 2;
-    }
-    for (size_t t = 0; t < closure.triangles.size()/3; t++)
-    {
-      const vtkIdType *pts = &closure.triangles[3*t];
-      outerCells->InsertNextCell(3, pts);
-      cellRole.push_back(closure.role);
-      cellHole.push_back(closure.holeOf[t]);
-      insertExtra(appendTri(pts));
-    }
-  }
-  outer->Initialize();
-  outer->SetPoints(outerPoints);
-  outer->SetPolys(outerCells);
-
-  // What is left crossing once every hole is closed: every triangle is
-  // tested against the whole surface, and what it crosses is marked with it.
-  // The closing triangles are counted per hole, so that the log says which
-  // holes the volume mesher will refuse and how they were closed; the whole
-  // and fragment triangles are counted on their own, because a sheet crossing
-  // another sheet is a fold the cut did not reach - the cut only looks at
-  // where the points stand, and a triangle whose three points all stand
-  // clear can still run through a wall between them.
-  int numCrossing = 0, numSheetCrossing = 0, numSheetFold = 0, numDegenerateClosing = 0;
-  vtkIdType firstSheetCrossing = -1, firstDegenerate = -1;
-  std::vector<int> cellCrossing(cellRole.size(), 0);
-  std::vector<int> holeCrossing(numHoles, 0);
-  std::vector<vtkIdType> holeFirstCrossing(numHoles, -1);
-  {
-    vtkIdType numOuterCells = (vtkIdType)cellRole.size();
-    std::vector<vtkIdType> hits;
-    for (vtkIdType cellId = 0; cellId < numOuterCells; cellId++)
-    {
-      // A closing triangle with no area is one a fill could not avoid - a
-      // loop with no triangulation free of them - and the volume mesher
-      // refuses it as it does a crossing.
-      if (cellId >= numBaseCells)
-      {
-        const double *f = &tri[(size_t)9*cellId];
-        double e1[3], e2[3], cross[3];
-        vtkMath::Subtract(f + 3, f, e1);
-        vtkMath::Subtract(f + 6, f, e2);
-        vtkMath::Cross(e1, e2, cross);
-        double longest2 = std::max(vtkMath::Dot(e1, e1), vtkMath::Dot(e2, e2));
-        if (0.5*vtkMath::Norm(cross) <= 1.0e-6*longest2)
-        {
-          numDegenerateClosing++;
-          cellCrossing[(size_t)cellId] = 1;
-          if (firstDegenerate < 0)
-          {
-            firstDegenerate = cellId;
-          }
-        }
-      }
-      hits.clear();
-      int count = crossings(&tri[(size_t)9*cellId], &triPts[(size_t)3*cellId], cellId, &hits);
-      if (count == 0)
-      {
-        continue;
-      }
-      cellCrossing[(size_t)cellId] = 1;
-      for (size_t c = 0; c < hits.size(); c++)
-      {
-        cellCrossing[(size_t)hits[c]] = 1;
-      }
-      if (cellId < numBaseCells)
-      {
-        numSheetCrossing++;
-        // Crossing another sheet triangle is a fold the cut did not reach;
-        // crossing only closing triangles is the closure's fault, counted
-        // there as well from the other side.
-        bool fold = false;
-        for (size_t c = 0; c < hits.size() && !fold; c++)
-        {
-          fold = hits[c] < numBaseCells;
-        }
-        if (fold)
-        {
-          numSheetFold++;
-          if (firstSheetCrossing < 0)
-          {
-            firstSheetCrossing = cellId;
-          }
-        }
-        continue;
-      }
-      numCrossing++;
-      int hole = cellHole[(size_t)cellId];
-      if (hole >= 0)
-      {
-        holeCrossing[(size_t)hole]++;
-        if (holeFirstCrossing[(size_t)hole] < 0)
-        {
-          holeFirstCrossing[(size_t)hole] = cellId;
-        }
-      }
-    }
-  }
-
-  // Where the cut points actually stand. A cut point placed by the walk
-  // along its edge is clear by construction; one held off a kept corner at
-  // the edge floor is not, and stands wherever that put it - inside the clearance,
-  // inside the other sheet's wall if the crossing was close to the corner,
-  // or inside a lumen. It is measured the way the bisection measured it:
-  // the same own-sheet exclusion, and the sign as well as the ratio.
-  //
-  // What counts against the surface is a cut point inside another wall or a
-  // lumen: that is the wall solid overlapping itself, and near a seam the
-  // other sheet is cut away there, so the crossing check has nothing to
-  // catch it on. A point between the wall and the clearance is short of the
-  // margin but outside every wall, so the surface still stands; it is
-  // reported, not refused. Points at the clearance to within rounding are
-  // not short of it.
-  int numBelowClearance = 0, numBelowWall = 0, numInLumenCut = 0;
-  double worstStanding = std::numeric_limits<double>::max();
-  vtkIdType worstCutPoint = -1;
-  const double clearanceTolerance = 1.0e-9*clearance;
-  for (vtkIdType ptId = numKeptOriginal; ptId < numOuterPts; ptId++)
-  {
-    double x[3], closest[3], wall = 0.0;
-    outerPoints->GetPoint(ptId, x);
-    double f = standing(x, cutFrom[(size_t)ptId], cutTo[(size_t)ptId], &direction[(size_t)3*cutFrom[(size_t)ptId]],
-        closest, wall);
-    if (outwardSign*implicit->EvaluateFunction(x) < 0.0)
-    {
-      numInLumenCut++;
-      f = -1.0;
-    }
-    if (f < clearance - clearanceTolerance)
-    {
-      numBelowClearance++;
-      if (f >= 0.0 && f < 1.0)
-      {
-        numBelowWall++;
-      }
-      if (f < worstStanding)
-      {
-        worstStanding = f;
-        worstCutPoint = ptId;
-      }
-    }
-  }
-
-  // The surface with its tags, for looking at what the log can only list.
-  {
-    auto roleArray = vtkSmartPointer<vtkIntArray>::New();
-    roleArray->SetName("TrimRole");
-    auto holeArray = vtkSmartPointer<vtkIntArray>::New();
-    holeArray->SetName("TrimHole");
-    auto crossingArray = vtkSmartPointer<vtkIntArray>::New();
-    crossingArray->SetName("TrimCrossing");
-    for (size_t cellId = 0; cellId < cellRole.size(); cellId++)
-    {
-      roleArray->InsertNextValue(cellRole[cellId]);
-      holeArray->InsertNextValue(cellHole[cellId]);
-      crossingArray->InsertNextValue(cellCrossing[cellId]);
-    }
-    outer->GetCellData()->AddArray(roleArray);
-    outer->GetCellData()->AddArray(holeArray);
-    outer->GetCellData()->AddArray(crossingArray);
-    char trimmedFile[] = "wall_outer_trimmed.vtp";
-    TGenUtils_WriteVTP(trimmedFile, outer);
-  }
+  numUnresolved = numFaults + (int)numCrossing + numHoles;
 
   double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-  fprintf(stdout,"Wall outer surface by extrusion, trimmed where it runs inside the wall:\n");
-  fprintf(stdout,"  %lld points extruded; %d cut: %d on a triangle the extrusion turned over (%d triangles), %d inside a lumen, %d within %.3g of another sheet's wall, %d left on no whole triangle, %d whose edges crossed the clearance within %.2g of their length, %d on a fragment that came out turned over, %d for having no thickness alone; %d had no thickness\n",
-      (long long)numPts, numRemoved, numInvertedPts, numInvertedCells, numInLumen, numUnderWall,
-      clearance, numPeninsula, numDemoted, edgeFloor, numFolded, numNoThicknessOnly, numNoThickness);
-  fprintf(stdout,"  %d rounds of cutting%s; the last left %d triangles turned over%s (%d corners marked for cutting), and held %d cap rim corners that would otherwise have been cut\n",
-      numRounds, converged ? ", converged" : " - the bound, not convergence: the last round's cuts were not made",
-      foldedTriangles, (foldedTriangles > 0) ? " - the volume mesher will refuse them" : "", lastFolded, numRimHeld);
-  fprintf(stdout,"  %d triangles cut through, %d dropped whole, %lld cut points added on the clearance crossing of their edges, walked to in %lld steps\n",
-      numCutCells, numDroppedCells, (long long)numCutPts, numWalkSteps);
-  fprintf(stdout,"  over every round the walks ended: %lld at the far end of the edge, %lld at the first point not clear, %lld with no room left to step, %lld at the step bound\n",
-      numWalkFar, numWalkStopped, numWalkNoRoom, numWalkCapped);
-  if (!demotedStanding.empty())
+  fprintf(stdout,"Wall outer surface as the envelope of the extrusion, cut along the creases where its sheets cross:\n");
+  fprintf(stdout,"  %lld points extruded by %.4g to %.4g into %lld triangles, closed over %zu cap rims for the winding number\n",
+      (long long)numPts, smallestThickness, largestThickness, closed.numSheetTriangles, rims.size());
+  fprintf(stdout,"  %lld triangle pairs within reach of each other, %lld crossing; %lld crease points on edges and %lld where creases cross; %lld triangles cut into %lld pieces\n",
+      report.numPairsTested, report.numPairsCrossing, report.numCreasePoints, report.numTriplePoints,
+      report.numTrianglesSplit, report.numPieces);
+  fprintf(stdout,"  %lld rays cast (%lld shot again off an edge); pieces by the winding number on their outer side:",
+      report.numRays, report.numRayRetries);
+  for (size_t w = 0; w < report.windingHistogram.size(); w++)
   {
-    std::vector<double> sorted(demotedStanding);
-    std::sort(sorted.begin(), sorted.end());
-    std::string perRound;
-    for (size_t r = 0; r < demotedPerRound.size(); r++)
+    if (report.windingHistogram[w] > 0)
     {
-      char item[32];
-      snprintf(item, sizeof(item), "%s%d", (r == 0) ? "" : ", ", demotedPerRound[r]);
-      perRound += item;
-    }
-    fprintf(stdout,"  the kept corners cut for a crossing within %.2g of an edge stood at %.4g to %.4g of a wall (median %.4g) when cut, %s per round\n",
-        edgeFloor, sorted.front(), sorted.back(), sorted[sorted.size()/2], perRound.c_str());
-  }
-  fprintf(stdout,"  %lld standing queries over a %d x %d x %d grid of %.4g bins (reach %.4g), %.1f s for the first pass over every point\n",
-      numQueries, gridSize[0], gridSize[1], gridSize[2], binSize, reach, firstPassSeconds);
-  fprintf(stdout,"  %zu cap rims kept whole; %zu holes: %d zipped across a crease, %d pairs joined as the two sides of a seam, the largest %zu points around; %d closed by a fallback because the preferred closure crossed the surface more\n",
-      rims.size(), numHoles, numZipped, numJoined, largestHole, numFellBack);
-  for (size_t l = 0; l < closureLines.size(); l++)
-  {
-    fprintf(stdout,"%s\n", closureLines[l].c_str());
-  }
-  fprintf(stdout,"  %d closing triangles and %d sheet triangles pass through the surface%s; the surface is written to wall_outer_trimmed.vtp with TrimRole (0 whole, 1 fragment, 2 zip, 3 seam band), TrimHole and TrimCrossing on its cells\n",
-      numCrossing, numSheetCrossing, (numCrossing + numSheetCrossing > 0) ? " - the volume mesher will refuse them" : "");
-  if (numSheetCrossing > 0)
-  {
-    fprintf(stdout,"    of the sheet triangles crossing, %d cross another sheet triangle - a fold the cut did not reach - and %d cross only closing triangles, which is the closure's crossing seen from the sheet\n",
-        numSheetFold, numSheetCrossing - numSheetFold);
-    if (numSheetFold > 0)
-    {
-      const double *f = &tri[(size_t)9*firstSheetCrossing];
-      fprintf(stdout,"    the first fold is at (%.5g, %.5g, %.5g)\n",
-          (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
+      fprintf(stdout," %d: %lld", (int)w - report.windingOffset, report.windingHistogram[w]);
     }
   }
-  if (numDegenerateClosing > 0)
+  fprintf(stdout,"; %lld could not be classified\n", report.numUndecided);
+  fprintf(stdout,"  kept %lld whole triangles and %lld pieces, dropped %lld whole triangles inside the wall; %lld triangles had turned over in the extrusion\n",
+      report.numWholeKept, report.numPiecesKept - report.numWholeKept, report.numWholeDropped, report.numInverted);
+  fprintf(stdout,"  the envelope has %lld points (%lld extruded, %lld on creases) and %zu triangles; %.1f s\n",
+      (long long)numOuterPts, (long long)numKeptOriginal, (long long)numCreasePts, numOuterCells, seconds);
+  if (report.numArrangementFaults > 0)
   {
-    const double *f = &tri[(size_t)9*firstDegenerate];
-    fprintf(stdout,"  %d closing triangles have no area - a hole with no triangulation free of them - the first at (%.5g, %.5g, %.5g); the volume mesher will refuse them\n",
-        numDegenerateClosing, (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
+    fprintf(stdout,"  %lld faults in the arrangement of the creases, the first %s at (%.5g, %.5g, %.5g)\n",
+        report.numArrangementFaults, report.firstFault.c_str(),
+        report.firstFaultAt[0], report.firstFaultAt[1], report.firstFaultAt[2]);
   }
-  if (numBelowClearance > 0)
+  if (report.numNonManifoldEdges > 0 || report.numMiswoundEdges > 0)
   {
-    double p[3];
-    outerPoints->GetPoint(worstCutPoint, p);
-    fprintf(stdout,"  %d cut points stand short of the clearance from another sheet: %d inside its wall and %d inside a lumen, which the volume mesher will refuse; the rest are outside every wall and are only short of the margin. The worst is at %.4g of a wall at (%.5g, %.5g, %.5g). These are the cut points held off a corner at the edge floor\n",
-        numBelowClearance, numBelowWall, numInLumenCut, worstStanding, p[0], p[1], p[2]);
+    fprintf(stdout,"  %lld edges of the envelope lie on more than two triangles and %lld are traversed the same way by both of theirs%s\n",
+        report.numNonManifoldEdges, report.numMiswoundEdges,
+        report.firstFault.empty() ? "" : (std::string("; the first fault is ") + report.firstFault).c_str());
   }
-  else
+  if (numHoles > 0)
   {
-    fprintf(stdout,"  every cut point stands at least the clearance from every other sheet and outside every lumen\n");
+    fprintf(stdout,"  %d holes in the envelope besides the cap rims, the first at (%.5g, %.5g, %.5g)\n",
+        numHoles, firstHoleAt[0], firstHoleAt[1], firstHoleAt[2]);
   }
-  for (size_t h = 0; h < numHoles; h++)
+  fprintf(stdout,"  %lld triangles of the envelope pass through another%s; the surface is written to wall_outer_trimmed.vtp with TrimRole (0 whole, 1 piece), TrimCrossing and TrimSource on its cells, and the pieces cut away to wall_outer_dropped.vtp with TrimWinding\n",
+      numCrossing, (numCrossing > 0) ? " - the volume mesher will refuse them" : "");
+  if (numCrossing > 0)
   {
-    if (holeCrossing[h] == 0)
-    {
-      continue;
-    }
-    const double *f = &tri[(size_t)9*holeFirstCrossing[h]];
-    fprintf(stdout,"    hole %zu (%s, %zu points): %d of its closing triangles cross the surface, the first at (%.5g, %.5g, %.5g)\n",
-        h, (cellRole[(size_t)holeFirstCrossing[h]] == roleZip) ? "zipped" : "seam band", holes[h].size(),
-        holeCrossing[h], (f[0]+f[3]+f[6])/3.0, (f[1]+f[4]+f[7])/3.0, (f[2]+f[5]+f[8])/3.0);
+    fprintf(stdout,"    the first is at (%.5g, %.5g, %.5g)\n", firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
   }
-  if (!holeSeeds.empty())
-  {
-    std::sort(holeSeeds.begin(), holeSeeds.end());
-    size_t shown = std::min(holeSeeds.size(), (size_t)8);
-    for (size_t h = 0; h < shown; h++)
-    {
-      double p[3];
-      outerPoints->GetPoint(holeSeeds[h].second, p);
-      fprintf(stdout,"    hole of %d points at (%.5g, %.5g, %.5g)\n",
-          (int)(-holeSeeds[h].first), p[0], p[1], p[2]);
-    }
-  }
-  fprintf(stdout,"  the outer wall is %lld points and %lld triangles, %.1f s\n",
-      (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells(), seconds);
-  numUnresolved = foldedTriangles + numCrossing + numSheetCrossing + numDegenerateClosing +
-      numBelowWall + numInLumenCut;
-  cutConverged = converged;
+
   return SV_OK;
 }
 

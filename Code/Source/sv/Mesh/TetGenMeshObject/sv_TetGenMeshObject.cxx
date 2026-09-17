@@ -2771,8 +2771,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
  * it, which is what thins the wall there. Filling the volume between the two
  * surfaces has no such correspondence, so the mesher is free to put whatever
  * nodes it needs where the two vessels merge. The outer surface is the
- * extrusion with its folds cut out and the cuts closed, which is the boundary
- * of the dilated solid.
+ * envelope of the extrusion - the extrusion cut along the creases where it
+ * runs through itself - which is the boundary of the solid it encloses.
  *
  * The inner surface is passed through unchanged. It is the fluid/wall
  * interface, and the solver matches its nodes one to one against the fluid
@@ -2787,44 +2787,34 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
 
 int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleArray* thicknessArray)
 {
-  // The outer surface is the true offset of the inner one at the requested
-  // thickness, not the inner one pushed along its normals and left there.
-  // Dilating a solid by t rounds its convex features and creases its concave
-  // ones, and the parts of the naive extrusion that run past that crease are
-  // not on the boundary at all; the points whose extrusion lands there have no
-  // outer point, which is why every pass that insisted on giving them one had
-  // to pay in thickness.
+  // The outer surface is the envelope of the extrusion: the inner surface
+  // pushed along its normals, with everything that runs inside the wall cut
+  // away along the creases where its sheets cross. Dilating a solid by t
+  // rounds its convex features and creases its concave ones, and the parts of
+  // the naive extrusion that run past a crease are not on the boundary at
+  // all; the points whose extrusion lands there have no outer point, which is
+  // why every pass that insisted on giving them one had to pay in thickness.
   //
-  // The offset is built by extruding and then cutting away every part of the
-  // extrusion that lies inside the wall of another sheet. The first build of
-  // this fill contoured a distance field over a grid instead, and measured, the
-  // grid could not afford the model: to hold the field in memory its spacing
-  // had to be four and a half times the thinnest wall, at which the offset of
-  // the thin vessels collapsed onto their inner surface (offset thickness read
-  // 0.000 at their ends), the ends of neighbouring thin vessels fused, and the
-  // wall over the interface came out short at five percent of the interface
-  // against under one for the extrusion it was meant to replace. A grid pays
-  // for the whole bounding box at the resolution of the thinnest wall; cutting
-  // the extrusion pays per surface point.
-  //
-  // The clearance is what the two sheets that met at a crease are held apart
-  // by once cut, so that they end short of each other rather than crossing:
-  // a point is cut when it stands within this fraction of another sheet's
-  // wall from that sheet's surface, and the cut edge is put exactly at the
-  // crossing. A sheet's own facets do not count against it, so this need not
-  // allow for a vertex normal leaning against them.
-  const double clearanceFraction = 1.03;
+  // The first build of this fill contoured a distance field over a grid
+  // instead, and measured, the grid could not afford the model: to hold the
+  // field in memory its spacing had to be four and a half times the thinnest
+  // wall, at which the offset of the thin vessels collapsed onto their inner
+  // surface. The second cut the extrusion where each sheet stood within a
+  // margin of the other sheet's inner surface and closed the gap that left
+  // between the two cut edges with a guessed band, and every failure it met
+  // was that guess going wrong. The envelope cuts the sheets where they
+  // actually cross, so the two sides of a crease share their points and there
+  // is no gap, no margin and nothing to close.
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   std::vector<TGenUtilsCapRim> caps;
   int numUnresolved = 0;
-  bool cutConverged = false;
   if (TGenUtils_BuildTrimmedExtrudedOuterSurface(surface, thicknessArray,
-        clearanceFraction, offsetOuter, caps, numUnresolved, cutConverged) != SV_OK)
+        offsetOuter, caps, numUnresolved) != SV_OK)
   {
-    fprintf(stderr,"Problem building the trimmed outer wall surface\n");
+    fprintf(stderr,"Problem building the outer wall envelope\n");
     return SV_ERROR;
   }
-  TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "trimmed outer wall");
+  TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "outer wall envelope");
 
   // Measure the wall the outer surface actually makes, now that it is the
   // surface the fill will use. Both directions are reported because they answer
@@ -2847,20 +2837,15 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   }
   surface->GetPointData()->RemoveArray("OffsetThicknessRatio");
 
-  // The reports above are what the trim is judged by, so they run whatever
-  // state the surface is in; but a surface with folds or crossings left in it
-  // is one the volume mesher refuses, and the trim log has already said where
-  // they are, so this stops here rather than let the mesher say it again with
-  // less.
+  // The reports above are what the envelope is judged by, so they run
+  // whatever state the surface is in; but a surface with holes, crossings or
+  // edges on the wrong number of triangles is one the volume mesher refuses,
+  // and the envelope log has already said where they are, so this stops here
+  // rather than let the mesher say it again with less.
   if (numUnresolved > 0)
   {
-    fprintf(stderr,"The trimmed outer wall has %d faults the volume mesher will refuse (triangles turned over, passing through the surface or with no area, and cut points inside another wall or a lumen); see the trim log above and wall_outer_trimmed.vtp\n",
+    fprintf(stderr,"The outer wall envelope has %d faults the volume mesher will refuse (triangles passing through another, holes, edges on more than two triangles or wound against each other, and pieces that could not be classified); see the envelope log above and wall_outer_trimmed.vtp\n",
         numUnresolved);
-    return SV_ERROR;
-  }
-  if (!cutConverged)
-  {
-    fprintf(stderr,"The trim's rounds of cutting hit their bound with cuts still pending, so the outer wall is not the surface the cut was converging on; see the trim log above\n");
     return SV_ERROR;
   }
 
@@ -2941,14 +2926,14 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   catch (int r)
   {
     fprintf(stderr,"ERROR: TetGen quit with error code %d while filling the wall. The shell it was\
- given is the inner surface, the trimmed outer surface, and the annulus closing the two at each vessel\
+ given is the inner surface, the outer wall envelope, and the annulus closing the two at each vessel\
  end; TetGen prints the coordinates of the intersection above, so look them up to see which it is in.\
- An intersection on the outer surface near a hole listed above is a crease or seam the trim left\
- crossing: either a fold shallower than the cut margin that the cut did not reach, or two sheets that\
- met at under the own-sheet angle and were taken for one, or a fragment at a cap rim that came out\
- turned over and could not be cut without cutting the rim - the trim log counts those as held rim\
- corners. Otherwise the inner surface is self-intersecting and the wall has inherited it - see the\
- interface triangle quality report\n", r);
+ The envelope was checked against itself for crossings, holes and edges on the wrong number of\
+ triangles before this, so an intersection on it is one that check missed - look at the envelope\
+ log and at wall_outer_trimmed.vtp and wall_outer_dropped.vtp there. An intersection between the\
+ envelope and the inner surface is a piece kept inside another vessel, which its winding number\
+ should have dropped - the envelope log's winding counts say what the rays saw. Otherwise the inner\
+ surface is self-intersecting and the wall has inherited it - see the interface triangle quality report\n", r);
     delete shellBehavior;
     delete shellInMesh;
     delete shellOutMesh;

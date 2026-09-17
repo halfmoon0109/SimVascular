@@ -37,8 +37,8 @@ set(export_file_name svTetGenMeshExports.h)
 LIST(APPEND PLUGINLIBS ${lib})
 include_directories(${TETGEN_INCLUDE_DIR})
 
-SET(CXXSRCS sv_TetGenMeshObject.cxx sv_TetGenMeshSystem.cxx sv_tetgenmesh_utils.cxx)
-SET(HDRS sv_TetGenMeshObject.h sv_TetGenMeshSystem.h sv_tetgenmesh_utils.h)
+SET(CXXSRCS sv_TetGenMeshObject.cxx sv_TetGenMeshSystem.cxx sv_tetgenmesh_utils.cxx sv_tetgenmesh_envelope.cxx)
+SET(HDRS sv_TetGenMeshObject.h sv_TetGenMeshSystem.h sv_tetgenmesh_utils.h sv_tetgenmesh_envelope.h)
 
 add_library(${lib} ${SV_LIBRARY_TYPE} ${CXXSRCS} )
 
