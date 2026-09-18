@@ -43,6 +43,7 @@
 #include "sv_tetgenmesh_envelope.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -857,16 +858,45 @@ int main(int argc, char **argv)
     double worstCreaseBefore = 0.0, worstCreaseAfter = 0.0;
     ll creaseSliversBefore = creaseSlivers(e, worstCreaseBefore);
     double vBefore = EnclosedVolume(e);
-    std::vector<double> creaseBefore;
-    for (size_t p = 0; p < e.pointKind.size(); p++)
+    std::vector<double> creaseBefore(e.points);
+    std::vector<int> kindBefore(e.pointKind);
+    // The crease edges going in, as segments: both ends crease points and the
+    // two pieces on the edge from different sheet triangles.
+    std::vector<std::pair<ll, ll> > creaseIdsBefore;
+    auto creaseEdges = [&](const Envelope &env, std::vector<std::array<double, 6> > &segs, std::vector<std::pair<ll, ll> > *ids)
     {
-      if (e.pointKind[p] != 0)
+      if (ids) ids->clear();
+      std::map<std::pair<ll, ll>, std::vector<size_t> > on;
+      for (size_t i = 0; i + 2 < env.triangles.size(); i += 3)
+        for (int j = 0; j < 3; j++)
+        {
+          ll a = env.triangles[i + j], b = env.triangles[i + (j+1)%3];
+          on[std::make_pair(std::min(a, b), std::max(a, b))].push_back(i/3);
+        }
+      segs.clear();
+      for (auto &kv : on)
       {
-        creaseBefore.push_back(e.points[3*p]);
-        creaseBefore.push_back(e.points[3*p + 1]);
-        creaseBefore.push_back(e.points[3*p + 2]);
+        ll a = kv.first.first, b = kv.first.second;
+        // The envelope marks its crease edges; take the edge if any piece on
+        // it says so.
+        bool isCrease = false;
+        for (size_t k = 0; k < kv.second.size(); k++)
+        {
+          size_t tri = kv.second[k];
+          for (int j = 0; j < 3; j++)
+          {
+            ll p = env.triangles[3*tri + j], q = env.triangles[3*tri + (j+1)%3];
+            if (((p == a && q == b) || (p == b && q == a)) && env.creaseEdge[3*tri + j]) isCrease = true;
+          }
+        }
+        if (!isCrease) continue;
+        std::array<double, 6> s = {{env.points[3*a], env.points[3*a+1], env.points[3*a+2], env.points[3*b], env.points[3*b+1], env.points[3*b+2]}};
+        segs.push_back(s);
+        if (ids) ids->push_back(std::make_pair(a, b));
       }
-    }
+    };
+    std::vector<std::array<double, 6> > creaseSegsBefore;
+    creaseEdges(e, creaseSegsBefore, &creaseIdsBefore);
     auto folds = [&](const Envelope &env)
     {
       // Edges whose two pieces face away from each other, not counting the
@@ -884,8 +914,13 @@ int main(int argc, char **argv)
       for (std::map<std::pair<ll, ll>, std::vector<size_t> >::iterator it = on.begin(); it != on.end(); ++it)
       {
         if (it->second.size() != 2) continue;
-        bool crease = env.pointKind[(size_t)it->first.first] != 0 && env.pointKind[(size_t)it->first.second] != 0 &&
-            env.source[it->second[0]] != env.source[it->second[1]];
+        bool crease = false;
+        for (int k = 0; k < 2; k++)
+          for (int j = 0; j < 3; j++)
+          {
+            ll p = env.triangles[3*it->second[k] + j], q = env.triangles[3*it->second[k] + (j+1)%3];
+            if (((p == it->first.first && q == it->first.second) || (p == it->first.second && q == it->first.first)) && env.creaseEdge[3*it->second[k] + j]) crease = true;
+          }
         if (crease) continue;
         double n[2][3];
         for (int k = 0; k < 2; k++)
@@ -903,8 +938,8 @@ int main(int argc, char **argv)
     CleanReport c;
     std::vector<unsigned char> noFixed;
     int rc = svenvelope::CleanEnvelopeSlivers(e, noFixed, 10.0, c);
-    printf("  slivers %lld -> %lld (worst %.1f -> %.1f), %lld collapsed, %lld flipped, %d passes, %.3f s\n",
-        c.numSliversBefore, c.numSliversAfter, c.worstBefore, c.worstAfter, c.numCollapsed, c.numFlipped, c.numPasses, c.seconds);
+    printf("  slivers %lld -> %lld (worst %.1f -> %.1f), %lld collapsed, %lld snapped, %lld flipped, %d passes, %.3f s\n",
+        c.numSliversBefore, c.numSliversAfter, c.worstBefore, c.worstAfter, c.numCollapsed, c.numSnapped, c.numFlipped, c.numPasses, c.seconds);
     Check(rc == 0, "cleanup ran");
     char what[200];
     if (variant == 0)
@@ -930,24 +965,83 @@ int main(int argc, char **argv)
     ll foldsAfter = folds(e);
     snprintf(what, sizeof(what), "folded edges %lld -> %lld", foldsBefore, foldsAfter);
     Check(foldsAfter <= foldsBefore, what);
-    std::vector<double> creaseAfter;
-    for (size_t p = 0; p < e.pointKind.size(); p++)
+    // The creases stay where they were, to within a tenth of an edge: every
+    // crease point going in that is still used has not moved by more than
+    // that, and the middle of every crease edge going in lies that close to
+    // a crease edge coming out.
     {
-      if (e.pointKind[p] != 0)
+      std::vector<unsigned char> used(e.points.size()/3, 0);
+      for (size_t i = 0; i < e.triangles.size(); i++) used[(size_t)e.triangles[i]] = 1;
+      // The scale a move is judged against is the surface's own edge length,
+      // not the crease edge's: the crumple leaves crease edges far shorter
+      // than the mesh, and merging those is the point.
+      double meanEdge = 0.0;
       {
-        creaseAfter.push_back(e.points[3*p]);
-        creaseAfter.push_back(e.points[3*p + 1]);
-        creaseAfter.push_back(e.points[3*p + 2]);
+        ll numEdges = 0;
+        for (size_t i = 0; i + 2 < e.triangles.size(); i += 3)
+          for (int j = 0; j < 3; j++)
+          {
+            const double *pa = &creaseBefore[3*e.triangles[i + j]], *pb = &creaseBefore[3*e.triangles[i + (j+1)%3]];
+            meanEdge += std::sqrt((pa[0]-pb[0])*(pa[0]-pb[0]) + (pa[1]-pb[1])*(pa[1]-pb[1]) + (pa[2]-pb[2])*(pa[2]-pb[2]));
+            numEdges++;
+          }
+        meanEdge /= std::max<ll>(numEdges, 1);
       }
+      double meanCrease = meanEdge;
+      double maxMove = 0.0;
+      for (size_t p = 0; p < kindBefore.size(); p++)
+      {
+        if (kindBefore[p] == 0 || !used[p]) continue;
+        double d = std::sqrt((e.points[3*p]-creaseBefore[3*p])*(e.points[3*p]-creaseBefore[3*p]) +
+            (e.points[3*p+1]-creaseBefore[3*p+1])*(e.points[3*p+1]-creaseBefore[3*p+1]) +
+            (e.points[3*p+2]-creaseBefore[3*p+2])*(e.points[3*p+2]-creaseBefore[3*p+2]));
+        maxMove = std::max(maxMove, d);
+      }
+      snprintf(what, sizeof(what), "crease points moved at most %.4g (a tenth of the mean edge is %.4g)", maxMove, 0.1*meanCrease);
+      Check(maxMove <= 0.1*meanCrease, what);
+      std::vector<std::array<double, 6> > creaseSegsAfter;
+      creaseEdges(e, creaseSegsAfter, nullptr);
+      double worstOff = 0.0;
+      int numOff = 0;
+      // A crease edge one of whose ends the cleanup took away was collapsed
+      // within its allowance, which the point check above bounds; the edges
+      // whose ends both remain have to still be creases, where they were.
+      int numSkipped = 0;
+      for (size_t i = 0; i < creaseSegsBefore.size(); i++)
+      {
+        if (!used[(size_t)creaseIdsBefore[i].first] || !used[(size_t)creaseIdsBefore[i].second])
+        {
+          numSkipped++;
+          continue;
+        }
+        const std::array<double, 6> &s = creaseSegsBefore[i];
+        double mid[3] = {0.5*(s[0]+s[3]), 0.5*(s[1]+s[4]), 0.5*(s[2]+s[5])};
+        double len = std::sqrt((s[3]-s[0])*(s[3]-s[0]) + (s[4]-s[1])*(s[4]-s[1]) + (s[5]-s[2])*(s[5]-s[2]));
+        double best = 1e300;
+        for (size_t k = 0; k < creaseSegsAfter.size(); k++)
+        {
+          const std::array<double, 6> &q = creaseSegsAfter[k];
+          double ab[3] = {q[3]-q[0], q[4]-q[1], q[5]-q[2]}, ap[3] = {mid[0]-q[0], mid[1]-q[1], mid[2]-q[2]};
+          double L2 = ab[0]*ab[0] + ab[1]*ab[1] + ab[2]*ab[2];
+          double u = (L2 > 0.0) ? std::max(0.0, std::min(1.0, (ab[0]*ap[0] + ab[1]*ap[1] + ab[2]*ap[2])/L2)) : 0.0;
+          double d2 = 0.0;
+          for (int m = 0; m < 3; m++) { double dd = mid[m] - (q[m] + u*ab[m]); d2 += dd*dd; }
+          best = std::min(best, std::sqrt(d2));
+        }
+        (void)len;
+        worstOff = std::max(worstOff, best);
+        if (best > 0.1*meanEdge) numOff++;
+      }
+      snprintf(what, sizeof(what), "crease edges stay in place: %d of %zu midpoints lie more than a tenth of the mean edge (%.4g) off the new creases (worst %.4g; %d edges collapsed away)", numOff, creaseSegsBefore.size(), 0.1*meanEdge, worstOff, numSkipped);
+      Check(numOff == 0, what);
     }
-    Check(creaseAfter == creaseBefore, "no crease point moved");
     size_t numReshaped = 0, numWhole = 0;
     for (size_t i = 0; i < e.whole.size(); i++)
     {
       if (e.whole[i] == 2) numReshaped++;
       if (e.whole[i] == 1) numWhole++;
     }
-    Check(e.source.size() == e.triangles.size()/3 && e.whole.size() == e.source.size(), "source and whole follow the triangles");
+    Check(e.source.size() == e.triangles.size()/3 && e.whole.size() == e.source.size() && e.creaseEdge.size() == e.triangles.size(), "source, whole and creaseEdge follow the triangles");
     Check(c.numCollapsed + c.numFlipped == 0 || numReshaped > 0, "reshaped pieces are marked");
     double vAfter = EnclosedVolume(e);
     snprintf(what, sizeof(what), "volume %.4f -> %.4f", vBefore, vAfter);
@@ -999,6 +1093,82 @@ int main(int argc, char **argv)
     char what[120];
     snprintf(what, sizeof(what), "volume %.5f of %.5f", v, 1.0/(6.0*std::sqrt(2.0)));
     Check(std::abs(v - 1.0/(6.0*std::sqrt(2.0))) < 1e-9, what);
+  }
+
+  // 11. A crease loop closed inside one triangle: a small tetrahedron whose
+  // apex pokes up through the top of a large slab, so that the loop where
+  // the two cross lies inside a single triangle of the slab's top and is a
+  // hole in the piece around it. The union's boundary has the slab's top
+  // with the loop cut out and the tetrahedron's tip standing in it.
+  {
+    Surface s;
+    // The slab: [-5, 5] x [-5, 5] x [-1, 0], twelve triangles wound outward.
+    ll b0 = AddPoint(s, -5, -5, -1), b1 = AddPoint(s, 5, -5, -1), b2 = AddPoint(s, 5, 5, -1), b3 = AddPoint(s, -5, 5, -1);
+    ll t0 = AddPoint(s, -5, -5, 0), t1 = AddPoint(s, 5, -5, 0), t2 = AddPoint(s, 5, 5, 0), t3 = AddPoint(s, -5, 5, 0);
+    AddTriangle(s, t0, t1, t2); AddTriangle(s, t0, t2, t3);          // top, up
+    AddTriangle(s, b0, b2, b1); AddTriangle(s, b0, b3, b2);          // bottom, down
+    AddTriangle(s, b0, b1, t1); AddTriangle(s, b0, t1, t0);          // -y
+    AddTriangle(s, b1, b2, t2); AddTriangle(s, b1, t2, t1);          // +x
+    AddTriangle(s, b2, b3, t3); AddTriangle(s, b2, t3, t2);          // +y
+    AddTriangle(s, b3, b0, t0); AddTriangle(s, b3, t0, t3);          // -x
+    // The tetrahedron: base at z = -0.5 inside the slab, apex at z = 0.5
+    // above it, placed in the top triangle (t0, t1, t2), which is the half
+    // x > y of the top.
+    ll a0 = AddPoint(s, 1.5, -2.5, -0.5), a1 = AddPoint(s, 2.5, -2.5, -0.5), a2 = AddPoint(s, 2.0, -1.5, -0.5);
+    ll ap = AddPoint(s, 2.0, -2.0, 0.5);
+    AddTriangle(s, a0, a2, a1);                                        // base, down
+    AddTriangle(s, a0, a1, ap); AddTriangle(s, a1, a2, ap); AddTriangle(s, a2, a0, ap);
+    s.numSheetTriangles = (ll)(s.triangles.size()/3);
+    Envelope e;
+    Report r;
+    RunAndCheckClosed("11. a tetrahedron poking through one triangle of a slab", s, e, r, 0);
+    Check(r.numPairsCrossing == 3, "the three faces of the tip cross the top");
+    // The tip above z = 0 is the tetrahedron scaled by a half about its
+    // apex: an eighth of its volume, which is (1/3)(1/2)(1) = 1/6.
+    double v = EnclosedVolume(e);
+    char what[160];
+    snprintf(what, sizeof(what), "volume %.6f of the slab's 100 plus the tip's %.6f", v, 1.0/48.0);
+    Check(std::abs(v - (100.0 + 1.0/48.0)) < 1.0e-6, what);
+  }
+
+  // 12. The jittered valley over a dozen seeds: the envelope has to come out
+  // sound (no arrangement fault, watertight, no crossing) whatever the
+  // jitter, which puts crease loops inside triangles, creases through
+  // corners and along edges, and triple points everywhere.
+  for (int variant = 0; variant < 12; variant++)
+  {
+    Surface inner;
+    AddValleyBlock(inner, 2.0, 40, 30);
+    unsigned long long state = 12345ULL + 977ULL*(unsigned long long)variant;
+    auto next = [&]() { state = state*6364136223846793005ULL + 1442695040888963407ULL; return (double)(state >> 11)/9007199254740992.0 - 0.5; };
+    const int nx = 40, ny = 30;
+    for (int i = 1; i < nx; i++)
+    {
+      for (int j = 1; j < ny; j++)
+      {
+        size_t p = (size_t)i*(ny+1) + j;
+        double x = inner.points[3*p] + 0.8*(2.0/nx)*next()*(variant == 0 ? 0.0 : 1.0);
+        double y = inner.points[3*p + 1] + 0.8*(3.0/ny)*next()*(variant == 0 ? 0.0 : 1.0);
+        inner.points[3*p] = x;
+        inner.points[3*p + 1] = y;
+        inner.points[3*p + 2] = 2.0*x*x;
+      }
+    }
+    Surface s = inner;
+    Extrude(s, 0.5);
+    s.numSheetTriangles = (ll)(s.triangles.size()/3);
+    SheetNormals(inner, s);
+    Envelope e;
+    Report r;
+    std::string error;
+    int rc = svenvelope::BuildOuterEnvelope(s, e, r, error);
+    ll boundary = 0, bad = 0;
+    std::vector<unsigned char> crossing;
+    double at[3];
+    ll numCrossing = (rc == 0) ? svenvelope::CountCrossingTriangles(e.points, e.triangles, crossing, at) : -1;
+    char what[200];
+    snprintf(what, sizeof(what), "12.%d jittered valley seed %d: built %d, faults %lld, watertight %d, crossings %lld, pockets %lld", variant, variant, rc == 0, r.numArrangementFaults, rc == 0 && Watertight(e, 0, boundary, bad), numCrossing, r.numPockets);
+    Check(rc == 0 && r.numArrangementFaults == 0 && Watertight(e, 0, boundary, bad) && numCrossing == 0, what);
   }
 
   if (perf)

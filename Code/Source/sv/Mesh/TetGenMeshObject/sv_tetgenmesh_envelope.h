@@ -97,6 +97,7 @@ struct Envelope
   std::vector<long long> triangles;    // three point ids per kept piece
   std::vector<long long> source;       // the input sheet triangle each piece came from
   std::vector<unsigned char> whole;    // 1 if the piece is an input triangle kept uncut
+  std::vector<unsigned char> creaseEdge; // three per piece: 1 if edge j (from corner j to j+1) lies on a crease, the segment along which two sheets cross
   // The pieces dropped, with the winding number on their outer side, for
   // looking at what was cut away; a piece no ray could classify has winding
   // number -999 here, and a piece dropped as the wall of a pocket -998.
@@ -162,7 +163,10 @@ struct CleanReport
   double worstAfter = 0.0;          // and coming out
   long long numCollapsed = 0;       // edges collapsed
   long long numFlipped = 0;         // edges flipped
+  long long numSnapped = 0;         // apexes put on the long edge, splitting the triangle across it
   long long numNoMoveAllowed = 0;   // slivers left because no move passed the checks
+  long long numLeftCreased = 0;     // of those, the ones touching a crease
+  double worstAfterAt[3] = {0.0, 0.0, 0.0};  // the centre of the worst piece coming out
   int numPasses = 0;
   double seconds = 0.0;
 };
@@ -176,21 +180,33 @@ struct CleanReport
  * points around it are free, because the outer surface has no
  * point-for-point relation to the interface. So a sliver is removed by
  * collapsing its shortest edge onto the end that must not move - a point on
- * a boundary loop, a point the caller fixes, or a crease point - or, when
- * that is not allowed, by flipping its longest edge, which moves nothing.
+ * a boundary loop, a point the caller fixes, or a crease point - or by
+ * putting its apex on its long edge and splitting the triangle across that
+ * edge at the foot, or, when neither is allowed, by flipping its longest
+ * edge, which moves nothing.
  *
- * A collapse is allowed only when it keeps the surface a manifold, folds no
- * triangle against a neighbour across an edge that is not a crease, turns no
- * triangle that was sound by more than sixty degrees, leaves no triangle it
- * touches worse than the limit or than it was, and moves the surface by no
- * more than a twentieth of an edge: the point taken away has to lie that
- * close to the reshaped triangles. A crease point may only be collapsed
- * onto another crease point, so a crease is only ever shortened by a
- * segment within that bound, never bent. A flip is allowed only when the
- * two triangles on the edge are nearly coplanar, the edge is not a crease,
- * both new triangles are better than the worse of the old, and the same
- * bound holds. Whether the result crosses itself is not checked here; the
- * caller counts that and decides.
+ * A collapse or a snap is allowed only when it keeps the surface a
+ * manifold, leaves no triangle it touches worse than the worst of those it
+ * touched or than the limit (so the local worst never grows), makes no new
+ * fold across an edge that is not a crease and deepens none that was there,
+ * turns no sound triangle large against the move by more than sixty
+ * degrees, and moves the surface by no more than the allowance: for a piece
+ * a crease cut, the piece's own altitude (or its short edge, when that is
+ * short too), since such a piece and the crumple of a fold around it are
+ * artefacts of the cutting and the extrusion; for a sliver of the sheet
+ * itself, a twentieth of the mean edge around it, and the point may not
+ * slide further than that either, so that no ridge is chamfered. Two
+ * triangles no bigger than the move are not judged for folding or turning;
+ * the crossing check settles them. A crease point may only be collapsed
+ * onto another crease point or put on a crease edge, or off its crease by
+ * a tenth of the longest crease edge at it, so a crease is only ever
+ * shortened, joined or moved within its own resolution, never bent off its
+ * line. A point put on a crease edge becomes a crease point, and the
+ * envelope's crease-edge marks follow every move. A flip is allowed only
+ * when the two triangles on the edge are nearly coplanar, the edge is not a
+ * crease, both new triangles are better than the worse of the old, and the
+ * surface moves by no more than a twentieth of an edge. Whether the result
+ * crosses itself is not checked here; the caller counts that and decides.
  * @param envelope The envelope, cleaned in place. Pieces it reshapes get
  * whole set to 2; points it drops stay in the point list unreferenced.
  * @param fixedPoint One flag per envelope point, or empty, for points that
