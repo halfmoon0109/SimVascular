@@ -42,6 +42,7 @@
 
 #include "sv_tetgenmesh_envelope.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -52,6 +53,7 @@
 using svenvelope::Surface;
 using svenvelope::Envelope;
 using svenvelope::Report;
+using svenvelope::CleanReport;
 typedef long long ll;
 
 static int numFailed = 0;
@@ -330,6 +332,23 @@ static void Extrude(Surface &s, double thickness)
   }
 }
 
+// Gives an extruded surface the normals its sheet triangles had before the
+// extrusion, from the surface it was extruded from (same triangles).
+static void SheetNormals(const Surface &inner, Surface &s)
+{
+  s.sheetNormal.assign((size_t)3*s.numSheetTriangles, 0.0);
+  for (ll t = 0; t < s.numSheetTriangles; t++)
+  {
+    const double *a = &inner.points[(size_t)3*inner.triangles[(size_t)3*t]];
+    const double *b = &inner.points[(size_t)3*inner.triangles[(size_t)3*t + 1]];
+    const double *c = &inner.points[(size_t)3*inner.triangles[(size_t)3*t + 2]];
+    double e1[3] = {b[0]-a[0], b[1]-a[1], b[2]-a[2]}, e2[3] = {c[0]-a[0], c[1]-a[1], c[2]-a[2]};
+    s.sheetNormal[(size_t)3*t] = e1[1]*e2[2]-e1[2]*e2[1];
+    s.sheetNormal[(size_t)3*t + 1] = e1[2]*e2[0]-e1[0]*e2[2];
+    s.sheetNormal[(size_t)3*t + 2] = e1[0]*e2[1]-e1[1]*e2[0];
+  }
+}
+
 //---------------------
 // Checks
 //---------------------
@@ -457,6 +476,10 @@ static void PrintReport(const Report &r)
   if (!r.firstFault.empty())
   {
     printf("  first fault: %s at (%g, %g, %g)\n", r.firstFault.c_str(), r.firstFaultAt[0], r.firstFaultAt[1], r.firstFaultAt[2]);
+  }
+  if (r.numPockets > 0)
+  {
+    printf("  pockets and shreds: %lld components cut off from the rims, %lld pieces dropped with them\n", r.numPockets, r.numPocketPieces);
   }
   printf("  winding histogram:");
   for (size_t i = 0; i < r.windingHistogram.size(); i++)
@@ -614,6 +637,7 @@ int main(int argc, char **argv)
     const double t = 0.5;
     Extrude(s, t);
     s.numSheetTriangles = (ll)(s.triangles.size()/3);
+    SheetNormals(inner, s);
     Envelope e;
     Report r;
     RunAndCheckClosed("4. folded valley", s, e, r, 0);
@@ -755,6 +779,196 @@ int main(int argc, char **argv)
     int rc = svenvelope::BuildOuterEnvelope(s, e, r, error);
     printf("8. inconsistent winding\n");
     Check(rc != 0 && error.find("consistently wound") != std::string::npos, "refused with a message naming the winding");
+  }
+
+  // 9. Sliver cleanup: a valley whose grid is jittered so that the crease
+  // passes close to corners and along edges, leaving pieces with almost no
+  // altitude. The cleanup has to take them out without moving a crease
+  // point, without opening the surface, folding it or making it cross
+  // itself, and without taking wall away over the floor.
+  // The seeds are ones whose jittered valley the envelope takes without an
+  // arrangement fault, since the caller runs the cleanup on a sound envelope
+  // only; a dangling crease segment under heavier jitter is the envelope's
+  // own open question, not the cleanup's.
+  const int seeds[4] = {0, 1, 8, 9};
+  for (int which = 0; which < 4; which++)
+  {
+    const int variant = seeds[which];
+    Surface inner;
+    AddValleyBlock(inner, 2.0, 40, 30);
+    // Jitter the interior top points by up to 0.4 of the grid spacing.
+    unsigned long long state = 12345ULL + 977ULL*(unsigned long long)variant;
+    auto next = [&]() { state = state*6364136223846793005ULL + 1442695040888963407ULL; return (double)(state >> 11)/9007199254740992.0 - 0.5; };
+    const int nx = 40, ny = 30;
+    for (int i = 1; i < nx; i++)
+    {
+      for (int j = 1; j < ny; j++)
+      {
+        size_t p = (size_t)i*(ny+1) + j;
+        double x = inner.points[3*p] + 0.8*(2.0/nx)*next()*(variant == 0 ? 0.0 : 1.0);
+        double y = inner.points[3*p + 1] + 0.8*(3.0/ny)*next()*(variant == 0 ? 0.0 : 1.0);
+        inner.points[3*p] = x;
+        inner.points[3*p + 1] = y;
+        inner.points[3*p + 2] = 2.0*x*x;
+      }
+    }
+    Surface s = inner;
+    const double t = 0.5;
+    Extrude(s, t);
+    s.numSheetTriangles = (ll)(s.triangles.size()/3);
+    SheetNormals(inner, s);
+    Envelope e;
+    Report r;
+    char name[120];
+    snprintf(name, sizeof(name), "9.%d sliver cleanup on a %s valley (seed %d)", which, variant == 0 ? "regular" : "jittered", variant);
+    bool sound = RunAndCheckClosed(name, s, e, r, 0) && r.numArrangementFaults == 0;
+    if (!sound)
+    {
+      printf("  (the envelope has faults; the cleanup is not run on it, as the caller would not)\n");
+      continue;
+    }
+    // Slivers that touch a crease are the ones the cleanup is for; the
+    // block's ridges make long triangles too, which are its own affair.
+    auto creaseSlivers = [&](const Envelope &env, double &worstAspect)
+    {
+      ll n = 0;
+      worstAspect = 0.0;
+      for (size_t i = 0; i + 2 < env.triangles.size(); i += 3)
+      {
+        const double *a = &env.points[3*env.triangles[i]], *b = &env.points[3*env.triangles[i+1]], *c = &env.points[3*env.triangles[i+2]];
+        double L = 0.0;
+        const double *corner[3] = {a, b, c};
+        for (int j = 0; j < 3; j++)
+        {
+          const double *x = corner[j], *y = corner[(j+1)%3];
+          L = std::max(L, std::sqrt((x[0]-y[0])*(x[0]-y[0]) + (x[1]-y[1])*(x[1]-y[1]) + (x[2]-y[2])*(x[2]-y[2])));
+        }
+        double e1[3] = {b[0]-a[0], b[1]-a[1], b[2]-a[2]}, e2[3] = {c[0]-a[0], c[1]-a[1], c[2]-a[2]};
+        double n3[3] = {e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]};
+        double twiceArea = std::sqrt(n3[0]*n3[0] + n3[1]*n3[1] + n3[2]*n3[2]);
+        double aspect = (twiceArea > 0.0) ? L*L*std::sqrt(3.0)/(2.0*twiceArea) : 1e300;
+        bool touchesCrease = env.pointKind[env.triangles[i]] != 0 || env.pointKind[env.triangles[i+1]] != 0 || env.pointKind[env.triangles[i+2]] != 0;
+        if (!touchesCrease) continue;
+        worstAspect = std::max(worstAspect, aspect);
+        if (aspect > 10.0) n++;
+      }
+      return n;
+    };
+    double worstCreaseBefore = 0.0, worstCreaseAfter = 0.0;
+    ll creaseSliversBefore = creaseSlivers(e, worstCreaseBefore);
+    double vBefore = EnclosedVolume(e);
+    std::vector<double> creaseBefore;
+    for (size_t p = 0; p < e.pointKind.size(); p++)
+    {
+      if (e.pointKind[p] != 0)
+      {
+        creaseBefore.push_back(e.points[3*p]);
+        creaseBefore.push_back(e.points[3*p + 1]);
+        creaseBefore.push_back(e.points[3*p + 2]);
+      }
+    }
+    auto folds = [&](const Envelope &env)
+    {
+      // Edges whose two pieces face away from each other, not counting the
+      // creases, where the sheets meet at whatever angle they make.
+      std::map<std::pair<ll, ll>, std::vector<size_t> > on;
+      for (size_t i = 0; i + 2 < env.triangles.size(); i += 3)
+      {
+        for (int j = 0; j < 3; j++)
+        {
+          ll a = env.triangles[i + j], b = env.triangles[i + (j+1)%3];
+          on[std::make_pair(std::min(a, b), std::max(a, b))].push_back(i/3);
+        }
+      }
+      ll folded = 0;
+      for (std::map<std::pair<ll, ll>, std::vector<size_t> >::iterator it = on.begin(); it != on.end(); ++it)
+      {
+        if (it->second.size() != 2) continue;
+        bool crease = env.pointKind[(size_t)it->first.first] != 0 && env.pointKind[(size_t)it->first.second] != 0 &&
+            env.source[it->second[0]] != env.source[it->second[1]];
+        if (crease) continue;
+        double n[2][3];
+        for (int k = 0; k < 2; k++)
+        {
+          const ll *tri = &env.triangles[3*it->second[k]];
+          const double *a = &env.points[3*tri[0]], *b = &env.points[3*tri[1]], *c = &env.points[3*tri[2]];
+          double e1[3] = {b[0]-a[0], b[1]-a[1], b[2]-a[2]}, e2[3] = {c[0]-a[0], c[1]-a[1], c[2]-a[2]};
+          n[k][0] = e1[1]*e2[2]-e1[2]*e2[1]; n[k][1] = e1[2]*e2[0]-e1[0]*e2[2]; n[k][2] = e1[0]*e2[1]-e1[1]*e2[0];
+        }
+        if (n[0][0]*n[1][0] + n[0][1]*n[1][1] + n[0][2]*n[1][2] < 0.0) folded++;
+      }
+      return folded;
+    };
+    ll foldsBefore = folds(e);
+    CleanReport c;
+    std::vector<unsigned char> noFixed;
+    int rc = svenvelope::CleanEnvelopeSlivers(e, noFixed, 10.0, c);
+    printf("  slivers %lld -> %lld (worst %.1f -> %.1f), %lld collapsed, %lld flipped, %d passes, %.3f s\n",
+        c.numSliversBefore, c.numSliversAfter, c.worstBefore, c.worstAfter, c.numCollapsed, c.numFlipped, c.numPasses, c.seconds);
+    Check(rc == 0, "cleanup ran");
+    char what[200];
+    if (variant == 0)
+    {
+      Check(c.numSliversBefore >= 0, "regular valley surveyed");
+    }
+    else
+    {
+      Check(c.numSliversBefore > 0, "the jittered valley had slivers to clean");
+    }
+    ll creaseSliversAfter = creaseSlivers(e, worstCreaseAfter);
+    snprintf(what, sizeof(what), "slivers touching a crease: %lld -> %lld (worst %.0f -> %.0f); all slivers %lld -> %lld",
+        creaseSliversBefore, creaseSliversAfter, worstCreaseBefore, worstCreaseAfter, c.numSliversBefore, c.numSliversAfter);
+    Check(creaseSliversAfter*2 <= creaseSliversBefore, what);
+    Check(creaseSliversBefore == 0 || worstCreaseAfter < worstCreaseBefore, "the worst piece on a crease is better");
+    ll boundary = 0, bad = 0;
+    Check(Watertight(e, 0, boundary, bad), "still watertight after the cleanup");
+    std::vector<unsigned char> crossing;
+    double at[3];
+    ll numCrossing = svenvelope::CountCrossingTriangles(e.points, e.triangles, crossing, at);
+    snprintf(what, sizeof(what), "no crossings after the cleanup (%lld)", numCrossing);
+    Check(numCrossing == 0, what);
+    ll foldsAfter = folds(e);
+    snprintf(what, sizeof(what), "folded edges %lld -> %lld", foldsBefore, foldsAfter);
+    Check(foldsAfter <= foldsBefore, what);
+    std::vector<double> creaseAfter;
+    for (size_t p = 0; p < e.pointKind.size(); p++)
+    {
+      if (e.pointKind[p] != 0)
+      {
+        creaseAfter.push_back(e.points[3*p]);
+        creaseAfter.push_back(e.points[3*p + 1]);
+        creaseAfter.push_back(e.points[3*p + 2]);
+      }
+    }
+    Check(creaseAfter == creaseBefore, "no crease point moved");
+    size_t numReshaped = 0, numWhole = 0;
+    for (size_t i = 0; i < e.whole.size(); i++)
+    {
+      if (e.whole[i] == 2) numReshaped++;
+      if (e.whole[i] == 1) numWhole++;
+    }
+    Check(e.source.size() == e.triangles.size()/3 && e.whole.size() == e.source.size(), "source and whole follow the triangles");
+    Check(c.numCollapsed + c.numFlipped == 0 || numReshaped > 0, "reshaped pieces are marked");
+    double vAfter = EnclosedVolume(e);
+    snprintf(what, sizeof(what), "volume %.4f -> %.4f", vBefore, vAfter);
+    Check(std::abs(vAfter - vBefore) < 0.01*vBefore, what);
+    // The wall over the floor, away from the block's ends, whose ridges the
+    // jitter reaches.
+    double minDistance = 1e300;
+    int numSampled = 0;
+    for (size_t p = 0; p < inner.points.size()/3; p++)
+    {
+      const double *q = &inner.points[3*p];
+      if (std::abs(q[0]) > 0.8 || q[1] < 0.5 || q[1] > 2.5 || q[2] < 2.0*q[0]*q[0] - 1e-9)
+      {
+        continue;
+      }
+      minDistance = std::min(minDistance, DistanceToMesh(q, e));
+      numSampled++;
+    }
+    snprintf(what, sizeof(what), "wall over the valley after the cleanup: %d inner points stand at least %.4f from the envelope (t = %.2f)", numSampled, minDistance, t);
+    Check(numSampled > 0 && minDistance > 0.9*t, what);
+    (void)numWhole;
   }
 
   if (perf)

@@ -79,6 +79,11 @@ struct Surface
   std::vector<double> points;        // three per point
   std::vector<long long> triangles;  // three point ids per triangle
   long long numSheetTriangles = 0;
+  // Optional, three per sheet triangle: the direction the triangle faced
+  // before it was extruded (the inner triangle's normal). With it, a sheet
+  // triangle that has turned over in the extrusion is known exactly; without
+  // it, one is guessed from disagreeing with its neighbours.
+  std::vector<double> sheetNormal;
 };
 
 /**
@@ -94,7 +99,7 @@ struct Envelope
   std::vector<unsigned char> whole;    // 1 if the piece is an input triangle kept uncut
   // The pieces dropped, with the winding number on their outer side, for
   // looking at what was cut away; a piece no ray could classify has winding
-  // number -999 here.
+  // number -999 here, and a piece dropped as the wall of a pocket -998.
   std::vector<long long> droppedTriangles;
   std::vector<long long> droppedSource;
   std::vector<int> droppedWinding;
@@ -119,6 +124,8 @@ struct Report
   long long numRays = 0;
   long long numRayRetries = 0;         // rays that grazed an edge and were shot again
   long long numUndecided = 0;          // pieces no ray could classify; they are dropped
+  long long numPockets = 0;            // components of the kept surface cut off from the rims that enclose nothing or are shreds: the slits of a fold, dropped
+  long long numPocketPieces = 0;       // pieces dropped with them
   long long numArrangementFaults = 0;  // a triangle whose pieces do not add up to it, a segment with one end, and the like
   long long numNonManifoldEdges = 0;   // edges of the kept surface on more than two pieces
   long long numMiswoundEdges = 0;      // edges of the kept surface traversed the same way twice
@@ -143,6 +150,59 @@ struct Report
  */
 int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &report,
     std::string &error);
+
+/**
+ * @brief What the sliver cleanup did.
+ */
+struct CleanReport
+{
+  long long numSliversBefore = 0;   // pieces above the aspect limit going in
+  long long numSliversAfter = 0;    // and coming out
+  double worstBefore = 0.0;         // the largest aspect ratio going in
+  double worstAfter = 0.0;          // and coming out
+  long long numCollapsed = 0;       // edges collapsed
+  long long numFlipped = 0;         // edges flipped
+  long long numNoMoveAllowed = 0;   // slivers left because no move passed the checks
+  int numPasses = 0;
+  double seconds = 0.0;
+};
+
+/**
+ * @brief Takes the sliver pieces out of an envelope without moving a crease.
+ * @details Cutting a triangle along a crease that passes close to one of its
+ * corners, or nearly along one of its edges, leaves a piece with almost no
+ * altitude, and a volume mesher has to stand a tetrahedron as flat as that
+ * piece on it. The crease is exact and stays where it is; the extruded
+ * points around it are free, because the outer surface has no
+ * point-for-point relation to the interface. So a sliver is removed by
+ * collapsing its shortest edge onto the end that must not move - a point on
+ * a boundary loop, a point the caller fixes, or a crease point - or, when
+ * that is not allowed, by flipping its longest edge, which moves nothing.
+ *
+ * A collapse is allowed only when it keeps the surface a manifold, folds no
+ * triangle against a neighbour across an edge that is not a crease, turns no
+ * triangle that was sound by more than sixty degrees, leaves no triangle it
+ * touches worse than the limit or than it was, and moves the surface by no
+ * more than a twentieth of an edge: the point taken away has to lie that
+ * close to the reshaped triangles. A crease point may only be collapsed
+ * onto another crease point, so a crease is only ever shortened by a
+ * segment within that bound, never bent. A flip is allowed only when the
+ * two triangles on the edge are nearly coplanar, the edge is not a crease,
+ * both new triangles are better than the worse of the old, and the same
+ * bound holds. Whether the result crosses itself is not checked here; the
+ * caller counts that and decides.
+ * @param envelope The envelope, cleaned in place. Pieces it reshapes get
+ * whole set to 2; points it drops stay in the point list unreferenced.
+ * @param fixedPoint One flag per envelope point, or empty, for points that
+ * must not move besides the crease and boundary points.
+ * @param aspectLimit The aspect ratio (1 for an equilateral triangle) above
+ * which a piece is a sliver.
+ * @param report Set to what was done.
+ * @return 0 if the envelope was cleaned, 1 if it was malformed (an edge on
+ * more than two pieces, ids out of range) and was left as it was.
+ */
+int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &fixedPoint,
+    double aspectLimit, CleanReport &report);
 
 /**
  * @brief Counts the triangles of a surface that pass through another triangle
