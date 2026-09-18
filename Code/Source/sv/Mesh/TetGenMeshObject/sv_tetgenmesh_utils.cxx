@@ -78,6 +78,11 @@
 #include "sv_vtk_utils.h"
 #include "sv_tetgenmesh_envelope.h"
 
+#ifdef _WIN32
+#include <direct.h>
+#else
+#include <unistd.h>
+#endif
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -661,6 +666,18 @@ int TGenUtils_WriteVTP(char *filename,vtkPolyData *PData)
   {
     fprintf(stderr,"Could not write the polydata to %s\n", filename);
     return SV_ERROR;
+  }
+  // Where it went: a relative name lands in the process's working
+  // directory, which is wherever SimVascular was started from and not the
+  // project, so the log says so in full.
+  {
+    char cwd[4096];
+#ifdef _WIN32
+    const char *where = _getcwd(cwd, sizeof(cwd));
+#else
+    const char *where = getcwd(cwd, sizeof(cwd));
+#endif
+    fprintf(stdout,"  wrote %s in %s\n", filename, where != nullptr ? where : "(the working directory could not be read)");
   }
 
   return SV_OK;
