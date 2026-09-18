@@ -33,17 +33,17 @@ SimVascular의 TetGen 메셔(`Code/Source/sv/Mesh/TetGenMeshObject/`)에 이 벽
 | 5 | 트리밍 — 정점 안팎 분류 + 1.03 margin으로 잘라 zip/seam으로 붙임 | 4차 실측까지 구멍·겹침 잔존 | 틈을 **추측**으로 메우는 순간 결함이 남는다. 폐기 |
 | 6 | **정확한 자기교차 envelope** (현재) | 2026-09-18 첫 완주: 교차 0·구멍 0·TetGen 채움 | 삼각형 쌍 교차를 정확히 계산해 crease로 자르고 winding number로 바깥 조각만 남긴다. 아무것도 옮기지 않고 추측하지 않는다 |
 
-폐기된 세부 처방(같은 길 다시 가지 말 것): 법선 방향 ε 이동 분류(ε에 따라 오탐이 늘어남), 뒤집힌 삼각형 +1링 강제 제거(시트 가장자리에 구멍), pocket 판정을 부피 문턱으로 하기(정상 폐곡면도 삭제 — e199a511에서 "감싸임" 판정으로 교체), 슬리버 정리의 이동 허용량을 슬리버 긴 변 기준(√3/(2·limit)·L)으로 잡기(crease와 무관한 능선 whole 슬리버가 0.19씩 미끄러져 합성 계곡 부피 1.6% 손실 — 허용량은 crease 조각에만 자기 고도로, 시트 조각은 주변 평균 변의 1/20에 이동 거리까지 묶는다), 접힘 검사를 "기존 접힘은 허용"으로만 완화하기(접힘이 완전히 뒤집히며 부피 손실 — 접힘의 심화 금지가 함께 필요).
+폐기된 세부 처방(같은 길 다시 가지 말 것): 법선 방향 ε 이동 분류(ε에 따라 오탐이 늘어남), 뒤집힌 삼각형 +1링 강제 제거(시트 가장자리에 구멍), pocket 판정을 부피 문턱으로 하기(정상 폐곡면도 삭제 — e199a511에서 "감싸임" 판정으로 교체), 슬리버 정리의 이동 허용량을 슬리버 긴 변 기준(√3/(2·limit)·L)으로 잡기(crease와 무관한 능선 whole 슬리버가 0.19씩 미끄러져 합성 계곡 부피 1.6% 손실 — 허용량은 crease 조각에만 자기 고도로, 시트 조각은 주변 평균 변의 1/20에 이동 거리까지 묶는다), 접힘 검사를 "기존 접힘은 허용"으로만 완화하기(접힘이 완전히 뒤집히며 부피 손실 — 접힘의 심화 금지가 함께 필요), arrangement 단계에서 변 위 crease 점의 snap 허용오차만 변 길이의 2~5%로 올려 슬리버를 생성 시점에 없애기(두 crease 점이 합쳐질 때 평면 그래프에 중복·겹침 변이 생겨 12 seed 전부 비다양체·역방향 변 — 정합적 snap rounding은 arrangement를 통째로 다시 계산하는 별개 알고리즘이다).
 
 ## 5. 현재 구조
 
-- `sv_tetgenmesh_envelope.{h,cxx}` — envelope 코어. VTK 무관, 표준 라이브러리만 사용. `svenvelope` 네임스페이스. `BuildOuterEnvelope`(교차→분할→분류→pocket 제거→변 검사; 삼각형 안에 닫힌 crease 고리(상대 시트 정점의 관통)는 구멍으로 판정해 감싸는 조각에 bridge로 잇는다), `CleanEnvelopeSlivers`(rim을 고정하고 crease를 자기 해상도 안에서만 움직이는 collapse / snap-to-edge / flip; crease 변은 `Envelope::creaseEdge` 플래그로 정확히 추적), `CountCrossingTriangles`.
+- `sv_tetgenmesh_envelope.{h,cxx}` — envelope 코어. VTK 무관, 표준 라이브러리만 사용. `svenvelope` 네임스페이스. `BuildOuterEnvelope`(교차→분할→분류→pocket 제거→변 검사; 삼각형 안에 닫힌 crease 고리(상대 시트 정점의 관통)는 구멍으로 판정해 감싸는 조각에 bridge로 잇는다), `CleanEnvelopeSlivers`(rim을 고정하고 crease를 자기 해상도 안에서만 움직이는 collapse / snap-to-edge / flip / 정점 제거(별 영역 재삼각분할, crease 점이면 두 crease 이웃을 잇는 현을 강제); crease 변은 `Envelope::creaseEdge` 플래그로 정확히 추적), `CountCrossingTriangles`.
 - `sv_tetgenmesh_utils.cxx` — glue. 압출, VTK 변환, 정리 호출(fault·교차 0일 때만, 정리 후 교차 시 원본 복귀), 진단 로그·`wall_outer_trimmed.vtp`·`wall_outer_dropped.vtp` 출력.
 - `Testing/test_envelope.cxx` — 독립 테스트 12묶음(구·겹친 구·접힌 계곡·cap 튜브·교차 계수·winding·슬리버 정리 4 seed·정사면체·슬랩 관통 섬·jitter 계곡 12 seed 건전성). `c++ -std=c++17 -O2 -Wall -Wextra -Wpedantic -I. sv_tetgenmesh_envelope.cxx Testing/test_envelope.cxx`로 Mac에서 빌드·실행 가능. CMake에는 아직 연결돼 있지 않다.
 
 ## 6. 열린 문제 (2026-09-18 기준, 웹 세션 갱신)
 
-- **슬리버**: crease가 정점 근처를 스치며 남긴 조각(AR 75219)이 tet AR 28860으로 이어진다. 처방 = a74bd3b9의 슬리버 정리 + 이번 확장(꼭짓점을 긴 변 위로 내리는 snap-to-edge, "국소 최악이 나빠지지 않으면 허용"하는 aspect 기준, 새 접힘·접힘 심화 금지, crease 조각에는 자기 고도만큼의 허용량). 합성 jitter 계곡 12 seed에서 crease 슬리버 최악 1.16e6→677, 2.9e5→786, 정규 계곡 3912→41, 부피 변화 ≤0.4%. **남는 것**: 두 crease 사이 띠에서 링크 조건(collapse가 비다양체를 만드는 배치)에 막힌 AR 10~100대 조각 수십~백여 개. 다음 처방 후보는 띠의 대각선을 먼저 flip한 뒤 collapse. 재빌드 실측 대기.
+- **슬리버**: crease가 정점 근처를 스치며 남긴 조각(AR 75219)이 tet AR 28860으로 이어진다. 처방 = a74bd3b9의 슬리버 정리 + 이번 확장(꼭짓점을 긴 변 위로 내리는 snap-to-edge, "국소 최악이 나빠지지 않으면 허용"하는 aspect 기준, 새 접힘·접힘 심화 금지, crease 조각에는 자기 고도만큼의 허용량). 링크 조건에 막히는 배치에는 정점 제거(별 영역 재삼각분할)를 더했다. 합성 jitter 계곡 12 seed: 정규 계곡은 crease 슬리버 172→0, jitter seed는 최악 1.16e6→303, 2.9e5→786, 남는 crease 슬리버 19~108개(AR 10~100 위주, 최악 46~1316), 부피 변화 ≤0.4%, 교차 0, watertight. **남는 것**: 남은 조각의 정점은 계측상 crease 접합점(crease 변 3개 이상)·crease 끝점이거나, crease 현이 이미 다른 변으로 존재하는 배치라 collapse·제거 모두 위상을 깨지 않고는 불가능하다. 더 줄이려면 crease 접합점 주변을 점 삽입까지 허용하는 국소 리메시가 필요하다. 재빌드 실측 대기.
 - **두께 미달 0.31**: fold 슬릿 조각이 벽 안에 남는다. 처방 = a74bd3b9·e199a511의 pocket/shred 제거. 재빌드 실측 대기. 로그의 breakdown 줄로 슬릿 조각인지 두께표 단차인지 판정 예정.
 - **jitter 계곡의 arrangement fault**: **해결.** 원인은 상대 시트의 정점 하나가 삼각형을 뚫어 삼각형 안에 닫힌 crease 고리(섬)를 만드는데, face 추적이 연결 성분별로만 돌아 "구멍 있는 면"을 표현하지 못한 것(섬 내부가 두 번 세어짐). 음의 면적 사이클을 구멍으로 판정해 감싸는 조각에 Eberly 방식 bridge로 이어 ear clipping한다. 12 seed 전부 fault 0(test 12), 슬랩 관통 섬 테스트(test 11) 부피 정확.
 - **ModelFace ridge 슬리버**(z≈74/-175, 원인 A): MMG가 face 경계를 고정해 못 없앤다. 모델 재생성 또는 국소 collapse가 필요. envelope과 별개.
