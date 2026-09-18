@@ -72,6 +72,7 @@
 
 #include <algorithm>
 #include <array>
+#include <map>
 #include <cmath>
 #include <set>
 #include <utility>
@@ -2876,6 +2877,52 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     return SV_ERROR;
   }
 
+  // Each shell triangle's role goes to TetGen as its facet marker, and TetGen
+  // hands the marker back on every boundary face of the fill. A triangle whose
+  // points are all inner points is the fluid/wall interface, all outer points
+  // is the free outer wall, and a mix is a side wall closing the two at a cap.
+  // The values are those of 'CellEntityIds' in the wedge extrusion, which is
+  // all the downstream split reads that array for: it only tests for the side
+  // wall value.
+  const int innerSurfaceCellId = 1;
+  const int outerSurfaceCellId = 2;
+  const int sidewallCellEntityId = 9999;
+  const vtkIdType numInner = surface->GetNumberOfPoints();
+  vtkIdType numShellInner = 0, numShellOuter = 0, numShellSide = 0;
+  std::vector<int> shellRole((size_t)shell->GetNumberOfCells(), sidewallCellEntityId);
+  for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    shell->GetCellPoints(cellId, npts, pts);
+    int numInnerPts = 0;
+    for (vtkIdType j = 0; j < npts; j++)
+    {
+      if (pts[j] < numInner)
+      {
+        numInnerPts++;
+      }
+    }
+    if (npts == 3 && numInnerPts == 3)
+    {
+      shellRole[(size_t)cellId] = innerSurfaceCellId;
+      numShellInner++;
+    }
+    else if (npts == 3 && numInnerPts == 0)
+    {
+      shellRole[(size_t)cellId] = outerSurfaceCellId;
+      numShellOuter++;
+    }
+    else
+    {
+      numShellSide++;
+    }
+    if (cellId < shellInMesh->numberoffacets)
+    {
+      shellInMesh->facetmarkerlist[cellId] = shellRole[(size_t)cellId];
+    }
+  }
+
   // A closed inner surface encloses the lumen as well as the wall, so the
   // lumen has to be marked as a hole or it would be filled with wall elements.
   // An inner surface left open at the caps has a rim pair at each end and is
@@ -2911,6 +2958,10 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // may be added or moved; without this the interface stops matching the fluid
   // mesh and the solver refuses the case.
   shellBehavior->nobisect = 1;
+  // Nor may any input point be dropped or renumbered: the interface nodes
+  // have to come out where they went in, whatever TetGen thinks of a point it
+  // finds unused or doubled.
+  shellBehavior->nojettison = 1;
   shellBehavior->quality = 1;
   shellBehavior->minratio = 1.414;
   shellBehavior->mindihedral = 10.0;
@@ -2947,9 +2998,12 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   }
   wallmesh_ = vtkUnstructuredGrid::New();
 
+  // The boundary faces come out with the facet markers they went in with,
+  // as 'ModelFaceID' on the surface mesh, and with the fill's point index
+  // of each of their points as 'GlobalNodeID' less one.
   auto wallSurfaceMesh = vtkSmartPointer<vtkPolyData>::New();
   int totRegions = 0;
-  if (TGenUtils_ConvertToVTK(shellOutMesh, wallmesh_, wallSurfaceMesh, &totRegions, 0) != SV_OK)
+  if (TGenUtils_ConvertToVTK(shellOutMesh, wallmesh_, wallSurfaceMesh, &totRegions, 1) != SV_OK)
   {
     fprintf(stderr,"Problem converting the filled wall mesh from TetGen\n");
     delete shellBehavior;
@@ -2957,15 +3011,13 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     delete shellOutMesh;
     return SV_ERROR;
   }
-
-  // The shell triangles are inserted below as the boundary of this mesh, on
-  // the strength of the mesher having kept every input facet and every input
-  // point at its index. Its own boundary says whether it did: one face per
-  // shell triangle, or the tagging below would name the wrong triangles.
-  if (wallSurfaceMesh->GetNumberOfCells() != shell->GetNumberOfCells())
+  auto boundaryMarkers = vtkIntArray::SafeDownCast(wallSurfaceMesh->GetCellData()->GetArray("ModelFaceID"));
+  auto boundaryNodeIds = vtkIntArray::SafeDownCast(wallSurfaceMesh->GetPointData()->GetArray("GlobalNodeID"));
+  if (boundaryMarkers == nullptr || boundaryNodeIds == nullptr ||
+      boundaryMarkers->GetNumberOfTuples() != wallSurfaceMesh->GetNumberOfCells() ||
+      boundaryNodeIds->GetNumberOfTuples() != wallSurfaceMesh->GetNumberOfPoints())
   {
-    fprintf(stderr,"The filled wall has %lld boundary faces but the shell it was filled from has %lld triangles, so the mesher did not keep the shell as its boundary and the wall boundary cannot be tagged from it\n",
-        (long long)wallSurfaceMesh->GetNumberOfCells(), (long long)shell->GetNumberOfCells());
+    fprintf(stderr,"The filled wall's boundary came back without its facet markers or node numbers, so the wall boundary cannot be tagged\n");
     delete shellBehavior;
     delete shellInMesh;
     delete shellOutMesh;
@@ -2992,12 +3044,15 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // on the cell type and then reads 'CellEntityIds' without checking that it
   // exists. A mesh of tetrahedra alone therefore has to be given the same
   // shape, or that split produces an empty surface and the read dereferences
-  // null. The boundary triangles are exactly the shell surface triangles,
-  // because the mesher was run with boundary splitting off and so preserved
-  // the input facets, and its output keeps the input points at their input
-  // indices, so the shell cells can be inserted unchanged.
+  // null. The boundary triangles are the faces TetGen reports as its
+  // boundary, each with the marker of the shell facet it lies in; they are
+  // not assumed to be the shell triangles, they are checked against them.
+  // With boundary splitting off every shell facet should come back as one
+  // face on the same three points, and for the interface it must: a face on
+  // other points there would be a node the fluid mesh does not have. The
+  // outer wall and the side walls may be split without harm to the solver,
+  // and a face there that matches no shell triangle is taken as it is.
   {
-    vtkIdType numInner = surface->GetNumberOfPoints();
     vtkIdType numTets = wallmesh_->GetNumberOfCells();
 
     auto cellEntityIds = vtkSmartPointer<vtkIntArray>::New();
@@ -3012,15 +3067,6 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       cellEntityIds->InsertNextValue(0);
       modelFaceIds->InsertNextValue(0);
     }
-
-    // A triangle whose points are all inner points is the fluid/wall
-    // interface, all outer points is the free outer wall, and a mix is a side
-    // wall closing the two at a cap. 'CellEntityIds' follows the wedge
-    // extrusion, which is all the downstream split reads it for: it only tests
-    // for the side wall value.
-    const int innerSurfaceCellId = 1;
-    const int outerSurfaceCellId = 2;
-    const int sidewallCellEntityId = 9999;
 
     // 'ModelFaceID' is a different matter, because it is the face the solver
     // and the mesh-complete output name their boundaries by, and the model
@@ -3044,12 +3090,12 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       double faceIdRange[2];
       surfaceFaceIds->GetRange(faceIdRange, 0);
       outerWallFaceId = (int)faceIdRange[1] + 1;
-      std::vector<int> modelFaceIds;
-      if (originalpolydata_ != nullptr && GetModelFaceIDs(modelFaceIds) == SV_OK)
+      std::vector<int> modelFaceIdList;
+      if (originalpolydata_ != nullptr && GetModelFaceIDs(modelFaceIdList) == SV_OK)
       {
-        for (size_t f = 0; f < modelFaceIds.size(); f++)
+        for (size_t f = 0; f < modelFaceIdList.size(); f++)
         {
-          outerWallFaceId = std::max(outerWallFaceId, modelFaceIds[f] + 1);
+          outerWallFaceId = std::max(outerWallFaceId, modelFaceIdList[f] + 1);
         }
       }
       else
@@ -3068,8 +3114,22 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     faceLocator->BuildLocator();
     auto faceCell = vtkSmartPointer<vtkGenericCell>::New();
 
-    int numInnerCells = 0, numOuterCells = 0, numSideCells = 0;
-
+    // The shell's points by position and its triangles by their three points,
+    // for the check and for the winding: a boundary face on a shell triangle's
+    // points is inserted the way the shell winds it. Points are matched by
+    // position rather than index so that nothing rests on the mesher keeping
+    // its input numbering; TetGen hands input points back unmoved, and both
+    // sides are compared at single precision, which is what the VTK points
+    // hold.
+    std::map<std::array<float, 3>, vtkIdType> shellPointAt;
+    for (vtkIdType pointId = 0; pointId < shell->GetNumberOfPoints(); pointId++)
+    {
+      double p[3];
+      shell->GetPoint(pointId, p);
+      std::array<float, 3> key = {(float)p[0], (float)p[1], (float)p[2]};
+      shellPointAt[key] = pointId;
+    }
+    std::map<std::array<vtkIdType, 3>, vtkIdType> shellByPoints;
     for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
     {
       vtkIdType npts;
@@ -3079,19 +3139,100 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       {
         continue;
       }
+      std::array<vtkIdType, 3> key = {pts[0], pts[1], pts[2]};
+      std::sort(key.begin(), key.end());
+      shellByPoints[key] = cellId;
+    }
 
-      int numInnerPts = 0;
-      for (vtkIdType j = 0; j < npts; j++)
+    int numInnerCells = 0, numOuterCells = 0, numSideCells = 0;
+    int numInnerOffShell = 0, numOtherOffShell = 0, numMarkedOtherwise = 0;
+    std::vector<unsigned char> shellSeen((size_t)shell->GetNumberOfCells(), 0);
+
+    for (vtkIdType faceId = 0; faceId < wallSurfaceMesh->GetNumberOfCells(); faceId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *facePts;
+      wallSurfaceMesh->GetCellPoints(faceId, npts, facePts);
+      if (npts != 3)
       {
-        if (pts[j] < numInner)
+        continue;
+      }
+      // The face's points in the filled mesh, and the shell points at the
+      // same positions, if any.
+      vtkIdType pts[3], shellIds[3];
+      bool inRange = true, onShellPoints = true;
+      for (int j = 0; j < 3; j++)
+      {
+        pts[j] = (vtkIdType)boundaryNodeIds->GetValue(facePts[j]) - 1;
+        inRange = inRange && pts[j] >= 0 && pts[j] < wallmesh_->GetNumberOfPoints();
+        shellIds[j] = -1;
+        if (inRange)
         {
-          numInnerPts++;
+          double p[3];
+          wallmesh_->GetPoint(pts[j], p);
+          std::array<float, 3> key = {(float)p[0], (float)p[1], (float)p[2]};
+          std::map<std::array<float, 3>, vtkIdType>::iterator at = shellPointAt.find(key);
+          if (at != shellPointAt.end())
+          {
+            shellIds[j] = at->second;
+          }
         }
+        onShellPoints = onShellPoints && shellIds[j] >= 0;
+      }
+      if (!inRange)
+      {
+        numOtherOffShell++;
+        continue;
+      }
+      int role = boundaryMarkers->GetValue(faceId);
+      std::map<std::array<vtkIdType, 3>, vtkIdType>::iterator onShell = shellByPoints.end();
+      if (onShellPoints)
+      {
+        std::array<vtkIdType, 3> key = {shellIds[0], shellIds[1], shellIds[2]};
+        std::sort(key.begin(), key.end());
+        onShell = shellByPoints.find(key);
+      }
+      if (onShell != shellByPoints.end())
+      {
+        // The face is a shell triangle: wind it as the shell does.
+        const vtkIdType *shellPts;
+        shell->GetCellPoints(onShell->second, npts, shellPts);
+        vtkIdType wound[3];
+        for (int k = 0; k < 3; k++)
+        {
+          wound[k] = pts[k];
+          for (int j = 0; j < 3; j++)
+          {
+            if (shellIds[j] == shellPts[k])
+            {
+              wound[k] = pts[j];
+            }
+          }
+        }
+        for (int k = 0; k < 3; k++)
+        {
+          pts[k] = wound[k];
+        }
+        if (role != shellRole[(size_t)onShell->second])
+        {
+          numMarkedOtherwise++;
+          role = shellRole[(size_t)onShell->second];
+        }
+        shellSeen[(size_t)onShell->second] = 1;
+      }
+      else if (role == innerSurfaceCellId)
+      {
+        numInnerOffShell++;
+        continue;
+      }
+      else
+      {
+        numOtherOffShell++;
       }
 
       int entityId = sidewallCellEntityId;
-      int faceId = sidewallCellEntityId;
-      if (numInnerPts == 3)
+      int modelFaceId = sidewallCellEntityId;
+      if (role == innerSurfaceCellId)
       {
         entityId = innerSurfaceCellId;
         numInnerCells++;
@@ -3100,14 +3241,14 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         // under it. It is looked up by position rather than by cell index
         // because the shell only holds the triangles of that surface, and a
         // surface that held anything else would put the two out of step.
-        faceId = outerWallFaceId;
+        modelFaceId = outerWallFaceId;
         if (surfaceFaceIds != nullptr)
         {
           double centroid[3] = {0.0, 0.0, 0.0};
-          for (vtkIdType j = 0; j < npts; j++)
+          for (int j = 0; j < 3; j++)
           {
             double p[3];
-            shell->GetPoint(pts[j], p);
+            wallmesh_->GetPoint(pts[j], p);
             for (int k = 0; k < 3; k++)
             {
               centroid[k] += p[k]/3.0;
@@ -3120,14 +3261,14 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
           faceLocator->FindClosestPoint(centroid, closest, faceCell, closestCell, subId, distanceSquared);
           if (closestCell >= 0)
           {
-            faceId = surfaceFaceIds->GetValue(closestCell);
+            modelFaceId = surfaceFaceIds->GetValue(closestCell);
           }
         }
       }
-      else if (numInnerPts == 0)
+      else if (role == outerSurfaceCellId)
       {
         entityId = outerSurfaceCellId;
-        faceId = outerWallFaceId;
+        modelFaceId = outerWallFaceId;
         numOuterCells++;
       }
       else
@@ -3135,16 +3276,42 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         numSideCells++;
       }
 
-      wallmesh_->InsertNextCell(VTK_TRIANGLE, npts, pts);
+      wallmesh_->InsertNextCell(VTK_TRIANGLE, 3, pts);
       cellEntityIds->InsertNextValue(entityId);
-      modelFaceIds->InsertNextValue(faceId);
+      modelFaceIds->InsertNextValue(modelFaceId);
+    }
+
+    // An interface triangle of the shell that no boundary face came back on
+    // was split or moved, and so was one that came back on other points.
+    int numInnerMissing = 0;
+    for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
+    {
+      if (shellRole[(size_t)cellId] == innerSurfaceCellId && !shellSeen[(size_t)cellId])
+      {
+        numInnerMissing++;
+      }
+    }
+    if (numInnerOffShell > 0 || numInnerMissing > 0)
+    {
+      fprintf(stderr,"The filled wall's boundary does not keep the fluid/wall interface: %d interface faces lie on points that are not an interface triangle's and %d of the %lld interface triangles came back on no face, so the mesher split or moved the interface and the wall would not match the fluid mesh\n",
+          numInnerOffShell, numInnerMissing, (long long)numShellInner);
+      delete shellBehavior;
+      delete shellInMesh;
+      delete shellOutMesh;
+      return SV_ERROR;
+    }
+    if (numOtherOffShell > 0 || numMarkedOtherwise > 0)
+    {
+      fprintf(stdout,"  %d outer or side wall boundary faces lie on points that are not a shell triangle's (the mesher split those facets) and %d carry a marker other than their shell triangle's; they are tagged by the shell where it has them and by the marker otherwise\n",
+          numOtherOffShell, numMarkedOtherwise);
     }
 
     wallmesh_->GetCellData()->AddArray(cellEntityIds);
     wallmesh_->GetCellData()->AddArray(modelFaceIds);
 
-    fprintf(stdout,"  wall boundary tagged: %d interface, %d outer, %d side wall triangles; the outer wall is ModelFaceID %d\n",
-        numInnerCells, numOuterCells, numSideCells, outerWallFaceId);
+    fprintf(stdout,"  wall boundary tagged from %lld TetGen boundary faces: %d interface, %d outer, %d side wall triangles (shell had %lld, %lld, %lld); the outer wall is ModelFaceID %d\n",
+        (long long)wallSurfaceMesh->GetNumberOfCells(), numInnerCells, numOuterCells, numSideCells,
+        (long long)numShellInner, (long long)numShellOuter, (long long)numShellSide, outerWallFaceId);
   }
 
   delete shellBehavior;
