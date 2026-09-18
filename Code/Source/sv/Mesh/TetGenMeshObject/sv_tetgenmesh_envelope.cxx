@@ -1116,13 +1116,15 @@ struct LocalGraph
       }
       candidates.push_back(P);
     }
-    // Every other vertex to the right of M, nearest first, as a fallback.
+    // Every other vertex, nearest first, as a fallback: those to the right
+    // of M first, then the rest.
+    for (int side = 0; side < 2; side++)
     {
       std::vector<std::pair<double, int> > rest;
       for (size_t i = 0; i < n; i++)
       {
         int r = outer[i];
-        if (r == M || !(x[(size_t)r] >= mx))
+        if (r == M || (side == 0) != (x[(size_t)r] >= mx))
         {
           continue;
         }
@@ -1876,6 +1878,15 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
     for (size_t f = 0; f < positive.size(); f++)
     {
       polygon = positive[f];
+      // Rightmost hole first, as the bridging wants: a hole already joined
+      // puts its vertices on the polygon, where the next hole can see them.
+      std::sort(holesOf[f].begin(), holesOf[f].end(), [&](size_t h1, size_t h2)
+      {
+        double x1 = -std::numeric_limits<double>::max(), x2 = x1;
+        for (size_t m = 0; m < holes[h1].size(); m++) x1 = std::max(x1, graph.x[(size_t)holes[h1][m]]);
+        for (size_t m = 0; m < holes[h2].size(); m++) x2 = std::max(x2, graph.x[(size_t)holes[h2][m]]);
+        return x1 > x2;
+      });
       for (size_t k = 0; k < holesOf[f].size(); k++)
       {
         std::vector<std::vector<int> > others;
@@ -2418,9 +2429,14 @@ struct SliverMesh
   double meanExtent = 0.0;
   mutable std::vector<ll> stamp;
   mutable ll stampValue = 0;
-  // Triangles made after the grid was built (by splitting), which the grid
-  // does not hold and every crossing query has to look at as well.
+  // Triangles made after the grid was built (by splitting), or reshaped
+  // until they left the bins the grid holds them in, which every crossing
+  // query has to look at as well.
   std::vector<ll> extraTris;
+  std::vector<unsigned char> inExtra;
+  std::vector<int> binLo, binHi;         // per triangle at the grid build: the bins its box covered, three each
+  std::vector<double> origin;            // every point where it stood going in, for bounding what a point moves in all
+  double meanEdgeAll = 0.0;              // the mean edge of the whole surface going in, the scale of the budgets
   // The kinds of the envelope's points, to mark a point that was moved onto
   // a crease as a crease point.
   std::vector<int> *kind = nullptr;
@@ -2441,6 +2457,87 @@ struct SliverMesh
     grid.Build(geometry.box, numTris, meanExtent, 4000000);
     stamp.assign((size_t)numTris, 0);
     stampValue = 0;
+    binLo.assign((size_t)3*numTris, 0);
+    binHi.assign((size_t)3*numTris, 0);
+    for (ll t = 0; t < numTris; t++)
+    {
+      for (int k = 0; k < 3; k++)
+      {
+        binLo[(size_t)3*t + k] = grid.Bin(geometry.box[(size_t)6*t + 2*k], k);
+        binHi[(size_t)3*t + k] = grid.Bin(geometry.box[(size_t)6*t + 2*k + 1], k);
+      }
+    }
+    inExtra.assign((size_t)numTris, 0);
+  }
+
+  // Puts a triangle on the list every crossing query scans, once.
+  void AddExtra(ll t)
+  {
+    if ((size_t)t >= inExtra.size()) inExtra.resize((size_t)t + 1, 0);
+    if (inExtra[(size_t)t]) return;
+    inExtra[(size_t)t] = 1;
+    extraTris.push_back(t);
+  }
+
+  // After a triangle was reshaped: if its box has left the bins the grid
+  // holds it in, widened by one, the grid can no longer find it, so it goes
+  // on the list that is always scanned.
+  void NoteReshaped(ll t)
+  {
+    if ((size_t)3*t + 2 >= binLo.size()) return;   // made after the build: on the list already
+    const double *c[3] = {At(tris[(size_t)3*t]), At(tris[(size_t)3*t + 1]), At(tris[(size_t)3*t + 2])};
+    double box[6];
+    BoxOf(c, box);
+    for (int k = 0; k < 3; k++)
+    {
+      int lo = grid.Bin(box[2*k], k), hi = grid.Bin(box[2*k + 1], k);
+      if (lo < binLo[(size_t)3*t + k] - 1 || hi > binHi[(size_t)3*t + k] + 1)
+      {
+        AddExtra(t);
+        return;
+      }
+    }
+  }
+
+  // Drops the dead from the list the crossing queries scan.
+  void PruneExtra()
+  {
+    std::vector<ll> kept;
+    for (size_t i = 0; i < extraTris.size(); i++)
+    {
+      if (alive[(size_t)extraTris[i]]) kept.push_back(extraTris[i]);
+      else inExtra[(size_t)extraTris[i]] = 0;
+    }
+    extraTris.swap(kept);
+  }
+
+  // How far a point may stand from where it started, in all: a crease
+  // point a tenth of the surface's mean edge, a point of the sheet a
+  // twentieth. The scale is the whole surface's so that the budget is one
+  // number a caller or a test can hold the result to.
+  bool WithinBudget(ll p, const double at[3]) const
+  {
+    if ((size_t)3*p + 2 >= origin.size()) return true;
+    double budget = (crease[(size_t)p] ? 0.1 : 0.05)*meanEdgeAll;
+    return Distance(at, &origin[(size_t)3*p]) <= budget;
+  }
+
+  // Gives every edge of a triangle the same crease mark on both its
+  // triangles: a crease if either says so. Every move ends by calling this
+  // on the triangles it made or reshaped, so that the marks never disagree
+  // across an edge and no mark is lost with a triangle that dies.
+  void UnifyFlags(ll t)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll p = tris[(size_t)3*t + j], q = tris[(size_t)3*t + (j+1)%3];
+      ll on[3];
+      int n = OnEdge(p, q, on, 3);
+      unsigned char f = creaseFlag[(size_t)3*t + j];
+      for (int k = 0; k < n && k < 3; k++) f |= FlagOf(on[k], p, q);
+      for (int k = 0; k < n && k < 3; k++) SetFlag(on[k], p, q, f);
+      creaseFlag[(size_t)3*t + j] = f;
+    }
   }
 
   static void BoxOf(const double *c[3], double box[6])
@@ -2736,20 +2833,25 @@ struct SliverMesh
     changed.erase(std::unique(changed.begin(), changed.end()), changed.end());
     if (changed.empty()) return false;
     const double moved = Distance(At(u), At(v));
+    // Triangles no bigger than a few allowances are below what the move can
+    // be judged by, for turning and folding; with no allowance nothing is.
+    const double exemptSize = 4.0*allowance;
 
-    // The worst triangle touched, going in: the two on the edge and the ones
-    // reshaped. No triangle may come out worse than that, or than the limit,
-    // so the local worst never gets worse and the global worst never grows.
+    // The bound on what comes out: no triangle may be worse than the worst
+    // reshaped, or than the limit, or than half as bad as the worse of the
+    // two taken away - so the local worst never grows, and what replaces a
+    // sliver is at least twice as good as the sliver was, which is what
+    // makes the passes converge.
     double worstBefore = aspectLimit;
-    for (int k = 0; k < 2; k++)
-    {
-      int s0, l0;
-      worstBefore = std::max(worstBefore, Aspect(onEdge[k], s0, l0));
-    }
     for (size_t i = 0; i < changed.size(); i++)
     {
       int s0, l0;
       worstBefore = std::max(worstBefore, Aspect(changed[i], s0, l0));
+    }
+    for (int k = 0; k < 2; k++)
+    {
+      int s0, l0;
+      worstBefore = std::max(worstBefore, 0.5*Aspect(onEdge[k], s0, l0));
     }
 
     // The normal a triangle will have, read through the substitution and
@@ -2820,14 +2922,16 @@ struct SliverMesh
       NormalOf(after, nAfter);
       double lenAfter = Norm(nAfter);
       if (!(lenAfter > 0.0)) return false;
-      // A sound triangle large against the move may not turn by more than
-      // sixty degrees; a sliver has no direction to speak of, and a triangle
-      // no bigger than the move is below what the move can be judged by, so
-      // both are judged by their neighbours instead.
-      if (aspectBefore <= aspectLimit && before[l0] != nullptr && Distance(before[l0], before[(l0+1)%3]) > 4.0*moved)
+      // A sound triangle never turns over, whatever its size. One large
+      // against the allowance may not turn by more than sixty degrees; a
+      // sliver has no direction to speak of, and a triangle no bigger than
+      // a few allowances is below what the move can be judged by, so both
+      // are judged by their neighbours instead.
+      if (aspectBefore <= aspectLimit)
       {
         double lenBefore = Norm(nBefore);
-        if (!(lenBefore > 0.0) || Dot(nBefore, nAfter) < 0.5*lenBefore*lenAfter) return false;
+        if (!(lenBefore > 0.0) || Dot(nBefore, nAfter) < 0.0) return false;
+        if (Distance(before[l0], before[(l0+1)%3]) > exemptSize && Dot(nBefore, nAfter) < 0.5*lenBefore*lenAfter) return false;
       }
       for (int j = 0; j < 3; j++)
       {
@@ -2837,16 +2941,16 @@ struct SliverMesh
         if (m == -2) return false;
         if (m < 0) continue;   // a boundary edge stays one
         if (IsCreaseEdge(x, y)) continue;
-        // Two triangles no bigger than the move have no dihedral to speak
-        // of; whether they fold is settled by the crossing check.
-        if (!(Distance(after[l1], after[(l1+1)%3]) > 4.0*moved)) continue;
+        // Two triangles no bigger than a few allowances have no dihedral to
+        // speak of; whether they fold is settled by the crossing check.
+        if (!(Distance(after[l1], after[(l1+1)%3]) > exemptSize)) continue;
         {
           const double *cm[3];
           ll idsm[3];
           CornersAfter(m, u, v, cm, idsm);
           int sm, lm;
           TriangleAspect(cm, sm, lm);
-          if (!(Distance(cm[lm], cm[(lm+1)%3]) > 4.0*moved)) continue;
+          if (!(Distance(cm[lm], cm[(lm+1)%3]) > exemptSize)) continue;
         }
         double nm[3];
         normalAfter(m, nm);
@@ -2878,13 +2982,13 @@ struct SliverMesh
       around.push_back(onEdge[0]);
       around.push_back(onEdge[1]);
       double bound = std::max(0.05*MeanEdge(around), allowance);
-      // A piece of the sheet itself may not slide either: along a curved
-      // surface a long slide changes the shape though the point taken away
-      // lies close to it. A piece a crease cut is judged by that distance
-      // alone: where two creases run within the allowance of each other the
-      // sheets there are as good as one, and a crease point may travel along
-      // them to where they join.
-      if (!(allowance > 0.0) && !(moved <= bound)) return false;
+      // The point may not slide further than the bound either: along a
+      // curved surface a long slide changes the shape though the point taken
+      // away lies close to the new triangles, and a long slide also carries
+      // the triangles out of the grid's reach and the turning and folding
+      // checks out of theirs. A needle's short edge is within the allowance;
+      // a cap's is not, and a cap is snapped instead.
+      if (!(moved <= bound)) return false;
       double nearest = std::numeric_limits<double>::infinity();
       for (size_t i = 0; i < changed.size(); i++)
       {
@@ -2918,7 +3022,14 @@ struct SliverMesh
     }
 
     // Apply. An edge that ran to u now runs to v and keeps its flag; where
-    // two edges merge into one, the edge is a crease if either was.
+    // two edges merge into one - the edges to the two apexes, whose marks
+    // on the two triangles taken away would otherwise be lost - the edge is
+    // a crease if either was.
+    unsigned char apexFlag[2];
+    for (size_t k = 0; k < 2; k++)
+    {
+      apexFlag[k] = (IsCreaseEdge(u, apex[k]) || IsCreaseEdge(v, apex[k])) ? 1 : 0;
+    }
     alive[(size_t)onEdge[0]] = 0;
     alive[(size_t)onEdge[1]] = 0;
     for (size_t i = 0; i < changed.size(); i++)
@@ -2940,10 +3051,13 @@ struct SliverMesh
         ll on[3];
         int n = OnEdge(p, q, on, 3);
         unsigned char f = 0;
+        for (size_t k = 0; k < 2; k++) if (p == apex[k] || q == apex[k]) f |= apexFlag[k];
         for (int k = 0; k < n && k < 3; k++) f |= FlagOf(on[k], p, q);
         for (int k = 0; k < n && k < 3; k++) SetFlag(on[k], p, q, f);
       }
+      NoteReshaped(t);
     }
+    for (size_t i = 0; i < changed.size(); i++) UnifyFlags(changed[i]);
     return true;
   }
 
@@ -3019,20 +3133,22 @@ struct SliverMesh
     changed.erase(std::unique(changed.begin(), changed.end()), changed.end());
     if (changed.empty()) return false;
     // The move is the altitude; it may not exceed a twentieth of the mean
-    // edge around the apex, or the allowance.
+    // edge around the apex, or the allowance; and the point may not end up
+    // further from where it started, over all its moves, than its budget.
     {
       std::vector<ll> around(changed);
       around.push_back(t);
       around.push_back(tp);
       if (!(Distance(oldU, f) <= std::max(0.05*MeanEdge(around), allowance))) return false;
+      if (!WithinBudget(u, f)) return false;
     }
-    const double moved = Distance(oldU, f);
+    const double exemptSize = 4.0*allowance;
     std::vector<double> aspectBefore(changed.size()), longestBefore(changed.size());
     std::vector<std::array<double, 3> > normalBefore(changed.size());
     double worstBefore = aspectLimit;
     {
       int s0, l0;
-      worstBefore = std::max(worstBefore, Aspect(t, s0, l0));
+      worstBefore = std::max(worstBefore, 0.5*Aspect(t, s0, l0));
     }
     for (size_t i = 0; i < changed.size(); i++)
     {
@@ -3084,12 +3200,13 @@ struct SliverMesh
       if (!(aspect <= worstBefore)) return restore();
       if (i < changed.size())
       {
-        // A sound triangle large against the move may not turn by more than
-        // sixty degrees.
-        if (aspectBefore[i] <= aspectLimit && longestBefore[i] > 4.0*moved)
+        // A sound triangle never turns over; one large against the
+        // allowance may not turn by more than sixty degrees.
+        if (aspectBefore[i] <= aspectLimit)
         {
           double lenBefore = Norm(normalBefore[i].data());
-          if (!(lenBefore > 0.0) || Dot(normalBefore[i].data(), newNormal[i].data()) < 0.5*lenBefore*len) return restore();
+          if (!(lenBefore > 0.0) || Dot(normalBefore[i].data(), newNormal[i].data()) < 0.0) return restore();
+          if (longestBefore[i] > exemptSize && Dot(normalBefore[i].data(), newNormal[i].data()) < 0.5*lenBefore*len) return restore();
         }
       }
       else
@@ -3127,7 +3244,7 @@ struct SliverMesh
     };
     for (size_t i = 0; i < newTris.size(); i++)
     {
-      bool bigI = longestOf(newTris[i].data()) > 4.0*moved;
+      bool bigI = longestOf(newTris[i].data()) > exemptSize;
       for (int j = 0; j < 3; j++)
       {
         ll p = newTris[i][(size_t)j], q = newTris[i][(size_t)(j+1)%3];
@@ -3141,7 +3258,7 @@ struct SliverMesh
           bool hasQ = o[0] == q || o[1] == q || o[2] == q;
           if (!hasP || !hasQ) continue;
           numNeighbours++;
-          if (!bigI || !(longestOf(o.data()) > 4.0*moved)) continue;
+          if (!bigI || !(longestOf(o.data()) > exemptSize)) continue;
           if (!creaseLike(p, q) && Folded(newNormal[i].data(), newNormal[k].data()))
           {
             double oi[3], ok[3];
@@ -3166,7 +3283,7 @@ struct SliverMesh
           const double *co[3];
           ll idso[3];
           CornersAfter(o, -1, -1, co, idso);
-          if (!bigI || !(longestOf(idso) > 4.0*moved)) continue;
+          if (!bigI || !(longestOf(idso) > exemptSize)) continue;
           double no[3];
           NormalOf(co, no);
           if (!creaseLike(p, q) && Folded(newNormal[i].data(), no))
@@ -3197,16 +3314,18 @@ struct SliverMesh
       }
     }
 
-    // Apply. The halves of tp keep its flags on the edges they keep, the two
-    // parts of the split edge take that edge's flag, and the new edge to the
-    // foot is no crease.
+    // Apply. The halves of tp keep its flags on the edges they keep; the
+    // two parts of the split edge are creases if that edge was, or if the
+    // sliver's edge now lying along them was; the new edge to the foot is
+    // no crease.
     unsigned char flagVW = FlagOf(tp, v, w) | FlagOf(t, v, w);
+    unsigned char flagWU = flagVW | (IsCreaseEdge(w, u) ? 1 : 0), flagUV = flagVW | (IsCreaseEdge(u, v) ? 1 : 0);
     unsigned char flagWX = FlagOf(tp, w, x), flagXV = FlagOf(tp, x, v);
     alive[(size_t)t] = 0;
     tris[(size_t)3*tp] = w;
     tris[(size_t)3*tp + 1] = u;
     tris[(size_t)3*tp + 2] = x;
-    creaseFlag[(size_t)3*tp] = flagVW;
+    creaseFlag[(size_t)3*tp] = flagWU;
     creaseFlag[(size_t)3*tp + 1] = 0;
     creaseFlag[(size_t)3*tp + 2] = flagWX;
     reshaped[(size_t)tp] = 1;
@@ -3214,21 +3333,35 @@ struct SliverMesh
     tris.push_back(u);
     tris.push_back(v);
     tris.push_back(x);
-    creaseFlag.push_back(flagVW);
+    creaseFlag.push_back(flagUV);
     creaseFlag.push_back(flagXV);
     creaseFlag.push_back(0);
     alive.push_back(1);
     reshaped.push_back(1);
     source.push_back(source[(size_t)tp]);
-    extraTris.push_back(fresh);
+    AddExtra(fresh);
     star[(size_t)u].push_back(tp);
     star[(size_t)u].push_back(fresh);
     star[(size_t)v].push_back(fresh);
     star[(size_t)x].push_back(fresh);
-    if (creaseEdge)
+    // The two parts of the split edge carry its flag on both their
+    // triangles: the halves have it, the triangles of u's star on them get
+    // it here.
+    for (size_t i = 0; i < changed.size(); i++)
+    {
+      SetFlag(changed[i], w, u, flagWU);
+      SetFlag(changed[i], u, v, flagUV);
+      reshaped[(size_t)changed[i]] = 1;
+      NoteReshaped(changed[i]);
+    }
+    NoteReshaped(tp);
+    for (size_t i = 0; i < changed.size(); i++) UnifyFlags(changed[i]);
+    UnifyFlags(tp);
+    UnifyFlags(fresh);
+    if (creaseEdge || flagWU || flagUV)
     {
       crease[(size_t)u] = 1;
-      if (kind != nullptr) (*kind)[(size_t)u] = 1;
+      if (kind != nullptr && (*kind)[(size_t)u] == 0) (*kind)[(size_t)u] = 1;
     }
     return true;
   }
@@ -3317,14 +3450,33 @@ struct SliverMesh
       worstBefore = std::max(worstBefore, TriangleAspect(c, s0, l0));
     }
     if (!Normalize(meanN)) return false;
-    if (!(allowance > 0.0))
+    // A point of the sheet (no allowance) is taken out only where the sheet
+    // is smooth: every triangle of its star within thirty degrees of the
+    // mean. A crease point in the crumple of a fold may have a star that
+    // folds over itself; the ring's being a simple polygon in the frame,
+    // checked below, is what the triangulation needs, and laying the ring
+    // flat there is the point.
+    for (size_t i = 0; i < n; i++)
     {
+      double len = Norm(starNormal[i].data());
+      if (!(len > 0.0)) return false;
+      if (!(allowance > 0.0) && Dot(starNormal[i].data(), meanN) < 0.866*len) return false;
+    }
+    // The bound on the new triangles: the worst of the star but its worst
+    // member, the sliver being taken away, or half of that.
+    {
+      std::vector<double> aspects(n);
       for (size_t i = 0; i < n; i++)
       {
-        double len = Norm(starNormal[i].data());
-        if (!(len > 0.0)) continue;
-        if (Dot(starNormal[i].data(), meanN) < 0.866*len) return false;   // more than thirty degrees off the mean: a ridge
+        const double *c[3];
+        ll ids[3];
+        CornersAfter(starTris[i], -1, -1, c, ids);
+        int s0, l0;
+        aspects[i] = TriangleAspect(c, s0, l0);
       }
+      std::sort(aspects.begin(), aspects.end());
+      worstBefore = std::max(aspectLimit, 0.5*aspects[n - 1]);
+      for (size_t i = 0; i + 1 < n; i++) worstBefore = std::max(worstBefore, aspects[i]);
     }
     double axisU[3], axisV[3];
     {
@@ -3352,6 +3504,18 @@ struct SliverMesh
         area += px[i]*py[j] - px[j]*py[i];
       }
       if (!(area > 0.0)) return false;
+      auto orient = [&](size_t a, size_t b, size_t c) { return (px[b] - px[a])*(py[c] - py[a]) - (py[b] - py[a])*(px[c] - px[a]); };
+      for (size_t i = 0; i < n; i++)
+      {
+        size_t i2 = (i + 1) % n;
+        for (size_t k = i + 1; k < n; k++)
+        {
+          size_t k2 = (k + 1) % n;
+          if (i2 == k || k2 == i) continue;   // edges that share an end
+          double o1 = orient(i, i2, k), o2 = orient(i, i2, k2), o3 = orient(k, k2, i), o4 = orient(k, k2, i2);
+          if (((o1 > 0.0 && o2 < 0.0) || (o1 < 0.0 && o2 > 0.0)) && ((o3 > 0.0 && o4 < 0.0) || (o3 < 0.0 && o4 > 0.0))) return false;
+        }
+      }
     }
 
     // Ear clipping of one chain of ring indices (a closed polygon), best ear
@@ -3541,8 +3705,20 @@ struct SliverMesh
       }
     }
 
-    // Apply: the ring edges keep the flags of the star triangles they were
-    // on, the crease chord is a crease, other diagonals are not.
+    // Apply: the ring edges keep the marks they had on either side, the
+    // crease chord is a crease - also when it is a ring edge already, on
+    // the triangle beyond it too - and other diagonals are not.
+    std::vector<unsigned char> ringFlag(n);
+    for (size_t i = 0; i < n; i++)
+    {
+      ringFlag[i] = IsCreaseEdge(ring[i], ring[(i + 1) % n]) ? 1 : 0;
+    }
+    if (creased)
+    {
+      ll on[3];
+      int cnt = OnEdge(c1, c2, on, 3);
+      for (int k = 0; k < cnt && k < 3; k++) SetFlag(on[k], c1, c2, 1);
+    }
     for (size_t i = 0; i < newTris.size(); i++)
     {
       ll fresh = (ll)(tris.size()/3);
@@ -3552,20 +3728,19 @@ struct SliverMesh
       {
         ll p = newTris[i][(size_t)j], q = newTris[i][(size_t)(j+1)%3];
         flags[j] = 0;
-        if (isRingEdge(p, q))
+        bool chord = creased && ((p == c1 && q == c2) || (p == c2 && q == c1));
+        if (chord) flags[j] = 1;
+        for (size_t r = 0; r < n; r++)
         {
-          for (size_t s = 0; s < starTris.size(); s++)
+          ll a = ring[r], b = ring[(r + 1) % n];
+          if ((a == p && b == q) || (a == q && b == p))
           {
-            if (Contains(starTris[s], p) && Contains(starTris[s], q))
+            flags[j] |= ringFlag[r];
+            for (size_t s = 0; s < starTris.size(); s++)
             {
-              flags[j] = FlagOf(starTris[s], p, q);
-              src = starTris[s];
+              if (Contains(starTris[s], p) && Contains(starTris[s], q)) src = starTris[s];
             }
           }
-        }
-        else if (creased && ((p == c1 && q == c2) || (p == c2 && q == c1)))
-        {
-          flags[j] = 1;
         }
       }
       for (int j = 0; j < 3; j++)
@@ -3576,11 +3751,12 @@ struct SliverMesh
       alive.push_back(1);
       reshaped.push_back(1);
       source.push_back(source[(size_t)src]);
-      extraTris.push_back(fresh);
+      AddExtra(fresh);
       for (int j = 0; j < 3; j++) star[(size_t)newTris[i][(size_t)j]].push_back(fresh);
     }
     for (size_t s = 0; s < starTris.size(); s++) alive[(size_t)starTris[s]] = 0;
     star[(size_t)u].clear();
+    for (size_t i = 0; i < newTris.size(); i++) UnifyFlags((ll)(tris.size()/3) - (ll)newTris.size() + (ll)i);
     return true;
   }
 
@@ -3674,7 +3850,7 @@ struct SliverMesh
       if (WouldCross(n2ids.data(), changedIds, other2, removed)) return false;
     }
 
-    unsigned char fAD = FlagOf(m, a, d), fDB = FlagOf(m, d, b), fBC = FlagOf(t, b, c), fCA = FlagOf(t, c, a);
+    unsigned char fAD = IsCreaseEdge(a, d) ? 1 : 0, fDB = IsCreaseEdge(d, b) ? 1 : 0, fBC = IsCreaseEdge(b, c) ? 1 : 0, fCA = IsCreaseEdge(c, a) ? 1 : 0;
     tris[(size_t)3*t] = a; tris[(size_t)3*t + 1] = d; tris[(size_t)3*t + 2] = c;
     tris[(size_t)3*m] = b; tris[(size_t)3*m + 1] = c; tris[(size_t)3*m + 2] = d;
     creaseFlag[(size_t)3*t] = fAD; creaseFlag[(size_t)3*t + 1] = 0; creaseFlag[(size_t)3*t + 2] = fCA;
@@ -3683,6 +3859,10 @@ struct SliverMesh
     reshaped[(size_t)m] = 1;
     star[(size_t)d].push_back(t);
     star[(size_t)c].push_back(m);
+    NoteReshaped(t);
+    NoteReshaped(m);
+    UnifyFlags(t);
+    UnifyFlags(m);
     return true;
   }
 };
@@ -3741,6 +3921,12 @@ int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &f
   mesh.fixed.assign((size_t)numPts, 0);
   mesh.crease.assign((size_t)numPts, 0);
   mesh.kind = &envelope.pointKind;
+  mesh.origin = envelope.points;
+  {
+    std::vector<ll> all;
+    for (ll t = 0; t < numTris; t++) all.push_back(t);
+    mesh.meanEdgeAll = mesh.MeanEdge(all);
+  }
   for (ll t = 0; t < numTris; t++)
   {
     for (int j = 0; j < 3; j++)
@@ -3749,6 +3935,17 @@ int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &f
     }
   }
   mesh.BuildGrid();
+  // A crease point is one on a crease edge - which includes an input point
+  // a crease was snapped to - or one the arrangement made.
+  for (ll t = 0; t < numTris; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      if (!mesh.creaseFlag[(size_t)3*t + j]) continue;
+      mesh.crease[(size_t)mesh.tris[(size_t)3*t + j]] = 1;
+      mesh.crease[(size_t)mesh.tris[(size_t)3*t + (j+1)%3]] = 1;
+    }
+  }
   for (ll p = 0; p < numPts; p++)
   {
     if (envelope.pointKind[(size_t)p] != 0)
@@ -3820,6 +4017,7 @@ int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &f
     if (slivers.empty()) break;
     std::sort(slivers.begin(), slivers.end());
     report.numPasses = pass + 1;
+    mesh.PruneExtra();
     bool changed = false;
     for (size_t i = 0; i < slivers.size(); i++)
     {
