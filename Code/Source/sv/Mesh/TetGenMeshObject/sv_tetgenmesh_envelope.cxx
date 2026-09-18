@@ -4123,54 +4123,69 @@ struct SliverMesh
       }
       if (numOn == 3 || (numOn == 2) != (onCycleTri[i] != 0)) return false;
     }
-    // Whether the cycle separates the surface: the flood from side A that
-    // never crosses a cycle edge either reaches side B - the cycle goes
-    // round a handle, which is cut below - or runs out. Then the cycle
-    // bounds a disc on each side, and the smaller one, if it is a bubble
-    // no bigger than the bound, is taken off and the cycle closed with a
-    // triangle; a big one is left alone, as cutting there would split the
-    // surface in two.
-    std::vector<ll> flooded;
-    bool separates = true;
+    // Whether the cycle separates the surface: floods from side A and side
+    // B that never cross a cycle edge, grown turn and turn about, either
+    // meet - the cycle goes round a handle, which is cut below - or one of
+    // them runs out. Then the cycle bounds a disc on each side, and the
+    // smaller one, if it is a bubble no bigger than the bound, is taken off
+    // and the cycle closed with a triangle; a big one is left alone, as
+    // cutting there would split the surface in two. Growing both at once
+    // keeps the work to the handle's own neighbourhood: a flood from one
+    // side alone would have to go all the way round a handle, and over the
+    // whole surface for a separating cycle.
+    std::vector<ll> flood[2];
+    bool separates = false;
+    int exhausted = -1;
     {
       ll numNow = (ll)(tris.size()/3);
       if (stamp.size() < (size_t)numNow) stamp.resize((size_t)numNow, 0);
-      stampValue++;
-      std::vector<ll> stack;
+      ll mark[2] = {++stampValue, ++stampValue};
+      std::vector<ll> queue[2];
+      size_t head[2] = {0, 0};
       for (size_t i = 0; i < all.size(); i++)
       {
-        if (onCycleTri[i] && side[i] == 0)
-        {
-          stamp[(size_t)all[i]] = stampValue;
-          stack.push_back(all[i]);
-          flooded.push_back(all[i]);
-        }
+        if (!onCycleTri[i]) continue;
+        int sd = side[i];
+        stamp[(size_t)all[i]] = mark[sd];
+        queue[sd].push_back(all[i]);
+        flood[sd].push_back(all[i]);
       }
-      while (!stack.empty() && separates)
+      bool met = false;
+      while (!met)
       {
-        ll t = stack.back();
-        stack.pop_back();
-        for (int j = 0; j < 3 && separates; j++)
+        bool anyStep = false;
+        for (int sd = 0; sd < 2 && !met; sd++)
         {
-          ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
-          if (isCyclePoint(a) && isCyclePoint(b)) continue;
-          ll on[3];
-          int n = OnEdge(a, b, on, 3);
-          for (int m = 0; m < n && m < 3; m++)
+          if (head[sd] >= queue[sd].size())
           {
-            ll o = on[m];
-            if (o == t || stamp[(size_t)o] == stampValue) continue;
-            int io = indexOf(o);
-            if (io >= 0 && onCycleTri[(size_t)io] && side[(size_t)io] == 1)
+            separates = true;
+            exhausted = sd;
+            break;
+          }
+          anyStep = true;
+          ll t = queue[sd][head[sd]++];
+          for (int j = 0; j < 3 && !met; j++)
+          {
+            ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
+            if (isCyclePoint(a) && isCyclePoint(b)) continue;
+            ll on[3];
+            int n = OnEdge(a, b, on, 3);
+            for (int m = 0; m < n && m < 3; m++)
             {
-              separates = false;
-              break;
+              ll o = on[m];
+              if (o == t || stamp[(size_t)o] == mark[sd]) continue;
+              if (stamp[(size_t)o] == mark[1 - sd])
+              {
+                met = true;
+                break;
+              }
+              stamp[(size_t)o] = mark[sd];
+              queue[sd].push_back(o);
+              flood[sd].push_back(o);
             }
-            stamp[(size_t)o] = stampValue;
-            stack.push_back(o);
-            flooded.push_back(o);
           }
         }
+        if (separates || !anyStep) break;
       }
     }
     double centre[3] = {0.0, 0.0, 0.0};
@@ -4180,53 +4195,12 @@ struct SliverMesh
     }
     if (separates)
     {
-      ll numAlive = 0;
-      ll numNow = (ll)(tris.size()/3);
-      for (ll t = 0; t < numNow; t++) numAlive += alive[(size_t)t] ? 1 : 0;
-      // The side that goes: the flooded one if it is the smaller, else the
-      // rest of the surface, gathered by the same flood from side B.
+      // The side that ran out is a disc on its own; it goes if it is a
+      // bubble, and the other side - which may be the whole of the rest
+      // of the surface - stays.
       std::vector<ll> gone;
-      int goneSide = 0;
-      if ((ll)flooded.size()*2 <= numAlive)
-      {
-        gone.swap(flooded);
-      }
-      else
-      {
-        goneSide = 1;
-        stampValue++;
-        std::vector<ll> stack;
-        for (size_t i = 0; i < all.size(); i++)
-        {
-          if (onCycleTri[i] && side[i] == 1)
-          {
-            stamp[(size_t)all[i]] = stampValue;
-            stack.push_back(all[i]);
-            gone.push_back(all[i]);
-          }
-        }
-        while (!stack.empty())
-        {
-          ll t = stack.back();
-          stack.pop_back();
-          for (int j = 0; j < 3; j++)
-          {
-            ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
-            if (isCyclePoint(a) && isCyclePoint(b)) continue;
-            ll on[3];
-            int n = OnEdge(a, b, on, 3);
-            for (int m = 0; m < n && m < 3; m++)
-            {
-              ll o = on[m];
-              if (o == t || stamp[(size_t)o] == stampValue) continue;
-              stamp[(size_t)o] = stampValue;
-              stack.push_back(o);
-              gone.push_back(o);
-            }
-          }
-        }
-        if ((ll)gone.size()*2 > numAlive) return false;
-      }
+      gone.swap(flood[exhausted]);
+      int goneSide = exhausted;
       // A bubble: everything on it within twice the bound of the cycle.
       for (size_t i = 0; i < gone.size(); i++)
       {

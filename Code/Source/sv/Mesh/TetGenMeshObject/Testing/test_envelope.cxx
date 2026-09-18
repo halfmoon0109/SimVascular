@@ -771,6 +771,51 @@ int main(int argc, char **argv)
     char what[160];
     snprintf(what, sizeof(what), "all four rims whole on the boundary (%d rim edges not)", rimEdgesMissing);
     Check(rimEdgesMissing == 0, what);
+    // The cleanup on a surface with rims: it fixes the rim points itself,
+    // and the rims come out as they went in.
+    {
+      double vBefore = EnclosedVolume(e);
+      CleanReport c;
+      std::vector<unsigned char> noFixed;
+      Check(svenvelope::CleanEnvelopeSlivers(e, noFixed, 10.0, c) == 0, "cleanup ran on the tubes");
+      ll boundary = 0, bad = 0;
+      bool closed = Watertight(e, expectedBoundary, boundary, bad);
+      snprintf(what, sizeof(what), "still watertight with the rims after the cleanup (boundary edges %lld of %lld, bad %lld)", boundary, expectedBoundary, bad);
+      Check(closed, what);
+      std::map<std::pair<ll, ll>, int> useAfter;
+      for (size_t i = 0; i + 2 < e.triangles.size(); i += 3)
+      {
+        for (int j = 0; j < 3; j++)
+        {
+          ll a = e.triangles[i + j], b = e.triangles[i + (j+1)%3];
+          useAfter[std::make_pair(std::min(a, b), std::max(a, b))]++;
+        }
+      }
+      int rimEdgesMissingAfter = 0;
+      for (int q = 0; q < 4; q++)
+      {
+        const std::vector<ll> &rim = *rims[q];
+        for (size_t m = 0; m < rim.size(); m++)
+        {
+          ll a = rim[m], b = rim[(m+1) % rim.size()];
+          std::map<std::pair<ll, ll>, int>::iterator found = useAfter.find(std::make_pair(std::min(a, b), std::max(a, b)));
+          if (found == useAfter.end() || found->second != 1)
+          {
+            rimEdgesMissingAfter++;
+          }
+        }
+      }
+      snprintf(what, sizeof(what), "all four rims whole after the cleanup (%d rim edges not)", rimEdgesMissingAfter);
+      Check(rimEdgesMissingAfter == 0, what);
+      std::vector<unsigned char> crossing;
+      double at[3];
+      ll numCrossing = svenvelope::CountCrossingTriangles(e.points, e.triangles, crossing, at);
+      snprintf(what, sizeof(what), "no crossings after the cleanup (%lld)", numCrossing);
+      Check(numCrossing == 0, what);
+      double vAfter = EnclosedVolume(e);
+      snprintf(what, sizeof(what), "volume %.4f -> %.4f", vBefore, vAfter);
+      Check(std::abs(vAfter - vBefore) < 0.01*std::abs(vBefore), what);
+    }
   }
 
   // 6. The crossing count on its own.
@@ -1320,7 +1365,19 @@ int main(int argc, char **argv)
       ll numCrossing = (rc == 0) ? svenvelope::CountCrossingTriangles(e.points, e.triangles, crossing, at) : -1;
       char what[240];
       snprintf(what, sizeof(what), "14.%d jittered valley 200 x 150 seed %d: built %d, faults %lld, watertight %d, crossings %lld, pockets %lld, shreds %lld", k, seeds[k], rc == 0, r.numArrangementFaults, rc == 0 && Watertight(e, 0, boundary, bad), numCrossing, r.numPockets, r.numShreds);
-      Check(rc == 0 && r.numArrangementFaults == 0 && Watertight(e, 0, boundary, bad) && numCrossing == 0, what);
+      bool sound = rc == 0 && r.numArrangementFaults == 0 && Watertight(e, 0, boundary, bad) && numCrossing == 0;
+      Check(sound, what);
+      if (!sound) continue;
+      // The cleanup at this resolution: watertight, no crossing, the
+      // volume kept to a hundredth.
+      double vBefore = EnclosedVolume(e);
+      CleanReport c;
+      std::vector<unsigned char> noFixed;
+      int rcClean = svenvelope::CleanEnvelopeSlivers(e, noFixed, 10.0, c);
+      ll numCrossingAfter = svenvelope::CountCrossingTriangles(e.points, e.triangles, crossing, at);
+      double vAfter = EnclosedVolume(e);
+      snprintf(what, sizeof(what), "14.%d cleanup: slivers %lld -> %lld (worst %.0f -> %.0f), %lld necks cut, watertight %d, crossings %lld, volume %.4f -> %.4f", k, c.numSliversBefore, c.numSliversAfter, c.worstBefore, c.worstAfter, c.numNecksCut, Watertight(e, 0, boundary, bad), numCrossingAfter, vBefore, vAfter);
+      Check(rcClean == 0 && Watertight(e, 0, boundary, bad) && numCrossingAfter == 0 && std::abs(vAfter - vBefore) < 0.01*vBefore, what);
     }
   }
 
