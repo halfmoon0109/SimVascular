@@ -833,32 +833,12 @@ int main(int argc, char **argv)
   // altitude. The cleanup has to take them out without moving a crease
   // point, without opening the surface, folding it or making it cross
   // itself, and without taking wall away over the floor.
-  // The seeds are ones whose jittered valley the envelope takes without an
-  // arrangement fault, since the caller runs the cleanup on a sound envelope
-  // only; a dangling crease segment under heavier jitter is the envelope's
-  // own open question, not the cleanup's.
-  const int seeds[4] = {0, 1, 8, 9};
-  for (int which = 0; which < 4; which++)
+  // All twelve seeds of test 12: the cleanup runs on every sound envelope
+  // the caller would hand it.
+  for (int variant = 0; variant < 12; variant++)
   {
-    const int variant = seeds[which];
     Surface inner;
-    AddValleyBlock(inner, 2.0, 40, 30);
-    // Jitter the interior top points by up to 0.4 of the grid spacing.
-    unsigned long long state = 12345ULL + 977ULL*(unsigned long long)variant;
-    auto next = [&]() { state = state*6364136223846793005ULL + 1442695040888963407ULL; return (double)(state >> 11)/9007199254740992.0 - 0.5; };
-    const int nx = 40, ny = 30;
-    for (int i = 1; i < nx; i++)
-    {
-      for (int j = 1; j < ny; j++)
-      {
-        size_t p = (size_t)i*(ny+1) + j;
-        double x = inner.points[3*p] + 0.8*(2.0/nx)*next()*(variant == 0 ? 0.0 : 1.0);
-        double y = inner.points[3*p + 1] + 0.8*(3.0/ny)*next()*(variant == 0 ? 0.0 : 1.0);
-        inner.points[3*p] = x;
-        inner.points[3*p + 1] = y;
-        inner.points[3*p + 2] = 2.0*x*x;
-      }
-    }
+    AddJitteredValley(inner, 40, 30, variant);
     Surface s = inner;
     const double t = 0.5;
     Extrude(s, t);
@@ -867,7 +847,7 @@ int main(int argc, char **argv)
     Envelope e;
     Report r;
     char name[120];
-    snprintf(name, sizeof(name), "9.%d sliver cleanup on a %s valley (seed %d)", which, variant == 0 ? "regular" : "jittered", variant);
+    snprintf(name, sizeof(name), "9.%d sliver cleanup on a %s valley (seed %d)", variant, variant == 0 ? "regular" : "jittered", variant);
     bool sound = RunAndCheckClosed(name, s, e, r, 0) && r.numArrangementFaults == 0;
     if (!sound)
     {
@@ -981,6 +961,63 @@ int main(int argc, char **argv)
       return folded;
     };
     ll foldsBefore = folds(e);
+    // The wall over the whole top, ends included, where the rims and the
+    // block's ridges are: the cleanup may not thin it anywhere.
+    auto wallOverTop = [&](const Envelope &env)
+    {
+      double minDistance = 1e300;
+      for (size_t p = 0; p < inner.points.size()/3; p++)
+      {
+        const double *q = &inner.points[3*p];
+        if (std::abs(q[0]) > 0.8 || q[2] < 2.0*q[0]*q[0] - 1e-9)
+        {
+          continue;
+        }
+        minDistance = std::min(minDistance, DistanceToMesh(q, env));
+      }
+      return minDistance;
+    };
+    // Edges on two pieces whose crease marks disagree.
+    auto flagMismatches = [&](const Envelope &env)
+    {
+      std::map<std::pair<ll, ll>, std::vector<std::pair<size_t, int> > > on;
+      for (size_t i = 0; i + 2 < env.triangles.size(); i += 3)
+        for (int j = 0; j < 3; j++)
+        {
+          ll a = env.triangles[i + j], b = env.triangles[i + (j+1)%3];
+          on[std::make_pair(std::min(a, b), std::max(a, b))].push_back(std::make_pair(i/3, j));
+        }
+      ll mismatches = 0;
+      for (auto &kv : on)
+      {
+        if (kv.second.size() != 2) continue;
+        if (env.creaseEdge[3*kv.second[0].first + kv.second[0].second] != env.creaseEdge[3*kv.second[1].first + kv.second[1].second]) mismatches++;
+      }
+      return mismatches;
+    };
+    double wallBefore = wallOverTop(e);
+    ll mismatchesBefore = flagMismatches(e);
+    // The wall over the floor, away from the block's ends, whose ridges the
+    // jitter reaches.
+    auto wallOverFloor = [&](const Envelope &env, int &numSampled)
+    {
+      double minDistance = 1e300;
+      numSampled = 0;
+      for (size_t p = 0; p < inner.points.size()/3; p++)
+      {
+        const double *q = &inner.points[3*p];
+        if (std::abs(q[0]) > 0.8 || q[1] < 0.5 || q[1] > 2.5 || q[2] < 2.0*q[0]*q[0] - 1e-9)
+        {
+          continue;
+        }
+        minDistance = std::min(minDistance, DistanceToMesh(q, env));
+        numSampled++;
+      }
+      return minDistance;
+    };
+    int numSampledBefore = 0;
+    double floorBefore = wallOverFloor(e, numSampledBefore);
+    std::vector<ll> trianglesBefore(e.triangles);
     CleanReport c;
     std::vector<unsigned char> noFixed;
     int rc = svenvelope::CleanEnvelopeSlivers(e, noFixed, 10.0, c);
@@ -1020,14 +1057,16 @@ int main(int argc, char **argv)
       for (size_t i = 0; i < e.triangles.size(); i++) used[(size_t)e.triangles[i]] = 1;
       // The scale a move is judged against is the surface's own edge length,
       // not the crease edge's: the crumple leaves crease edges far shorter
-      // than the mesh, and merging those is the point.
+      // than the mesh, and merging those is the point. It is the mean edge
+      // of the surface going in, over every edge of every triangle, which
+      // is the scale the cleanup's own budget is set by.
       double meanEdge = 0.0;
       {
         ll numEdges = 0;
-        for (size_t i = 0; i + 2 < e.triangles.size(); i += 3)
+        for (size_t i = 0; i + 2 < trianglesBefore.size(); i += 3)
           for (int j = 0; j < 3; j++)
           {
-            const double *pa = &creaseBefore[3*e.triangles[i + j]], *pb = &creaseBefore[3*e.triangles[i + (j+1)%3]];
+            const double *pa = &creaseBefore[3*trianglesBefore[i + j]], *pb = &creaseBefore[3*trianglesBefore[i + (j+1)%3]];
             meanEdge += std::sqrt((pa[0]-pb[0])*(pa[0]-pb[0]) + (pa[1]-pb[1])*(pa[1]-pb[1]) + (pa[2]-pb[2])*(pa[2]-pb[2]));
             numEdges++;
           }
@@ -1092,22 +1131,18 @@ int main(int argc, char **argv)
     double vAfter = EnclosedVolume(e);
     snprintf(what, sizeof(what), "volume %.4f -> %.4f", vBefore, vAfter);
     Check(std::abs(vAfter - vBefore) < 0.01*vBefore, what);
-    // The wall over the floor, away from the block's ends, whose ridges the
-    // jitter reaches.
-    double minDistance = 1e300;
+    // The wall over the floor: the envelope's own, near the thickness, and
+    // not thinned by the cleanup.
     int numSampled = 0;
-    for (size_t p = 0; p < inner.points.size()/3; p++)
-    {
-      const double *q = &inner.points[3*p];
-      if (std::abs(q[0]) > 0.8 || q[1] < 0.5 || q[1] > 2.5 || q[2] < 2.0*q[0]*q[0] - 1e-9)
-      {
-        continue;
-      }
-      minDistance = std::min(minDistance, DistanceToMesh(q, e));
-      numSampled++;
-    }
-    snprintf(what, sizeof(what), "wall over the valley after the cleanup: %d inner points stand at least %.4f from the envelope (t = %.2f)", numSampled, minDistance, t);
-    Check(numSampled > 0 && minDistance > 0.9*t, what);
+    double minDistance = wallOverFloor(e, numSampled);
+    snprintf(what, sizeof(what), "wall over the valley: %d inner points stand at least %.4f from the envelope before the cleanup and %.4f after (t = %.2f)", numSampled, floorBefore, minDistance, t);
+    Check(numSampled > 0 && numSampled == numSampledBefore && floorBefore > 0.85*t && minDistance >= 0.95*floorBefore, what);
+    double wallAfter = wallOverTop(e);
+    snprintf(what, sizeof(what), "wall over the whole top %.4f -> %.4f (not thinned by more than a twentieth)", wallBefore, wallAfter);
+    Check(wallAfter >= 0.95*wallBefore, what);
+    ll mismatchesAfter = flagMismatches(e);
+    snprintf(what, sizeof(what), "crease marks agree on both pieces of every edge: %lld -> %lld mismatches", mismatchesBefore, mismatchesAfter);
+    Check(mismatchesBefore == 0 && mismatchesAfter == 0, what);
     (void)numWhole;
   }
 
