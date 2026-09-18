@@ -2958,6 +2958,31 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     return SV_ERROR;
   }
 
+  // The shell triangles are inserted below as the boundary of this mesh, on
+  // the strength of the mesher having kept every input facet and every input
+  // point at its index. Its own boundary says whether it did: one face per
+  // shell triangle, or the tagging below would name the wrong triangles.
+  if (wallSurfaceMesh->GetNumberOfCells() != shell->GetNumberOfCells())
+  {
+    fprintf(stderr,"The filled wall has %lld boundary faces but the shell it was filled from has %lld triangles, so the mesher did not keep the shell as its boundary and the wall boundary cannot be tagged from it\n",
+        (long long)wallSurfaceMesh->GetNumberOfCells(), (long long)shell->GetNumberOfCells());
+    delete shellBehavior;
+    delete shellInMesh;
+    delete shellOutMesh;
+    return SV_ERROR;
+  }
+
+  // The conversion numbers the nodes and elements and gives every element the
+  // region 1, as it does for the fluid core. Those arrays are as long as the
+  // tetrahedra; the shell triangles inserted below would leave them shorter
+  // than the cell list, and the filters that append this mesh copy cell data
+  // by cell index and would read past their end. The wedge extrusion carries
+  // none of them, and the append assigns the wall its region, node and
+  // element numbers itself, so they are dropped here.
+  wallmesh_->GetPointData()->RemoveArray("GlobalNodeID");
+  wallmesh_->GetCellData()->RemoveArray("GlobalElementID");
+  wallmesh_->GetCellData()->RemoveArray("ModelRegionID");
+
   fprintf(stdout,"  wall filled with %lld tetrahedra on %lld nodes\n",
       (long long)wallmesh_->GetNumberOfCells(), (long long)wallmesh_->GetNumberOfPoints());
 

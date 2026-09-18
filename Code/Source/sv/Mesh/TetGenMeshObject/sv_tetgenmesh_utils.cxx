@@ -46,6 +46,7 @@
 #include "vtkSmartPointer.h"
 #include "vtkDataArray.h"
 #include "vtkIntArray.h"
+#include "vtkIdTypeArray.h"
 #include "vtkDoubleArray.h"
 #include "vtkIdList.h"
 #include "vtkCellArray.h"
@@ -152,7 +153,9 @@ int TGenUtils_ConvertSurfaceToTetGen(tetgenio *inmesh,vtkPolyData *polydatasolid
   // Convert faces
   inmesh->numberoffacets = (int) polydatasolid->GetNumberOfPolys();
   inmesh->facetlist = new tetgenio::facet[inmesh->numberoffacets];
-  inmesh->facetmarkerlist = new int[inmesh->numberoffacets];
+  // Zero, so that a caller that sets no markers (the wall shell fill) hands
+  // TetGen defined values rather than whatever the allocation held.
+  inmesh->facetmarkerlist = new int[inmesh->numberoffacets]();
 
   //fprintf(stderr,"Converting Faces...\n");
   vtkSmartPointer<vtkIdList> ptIds = vtkSmartPointer<vtkIdList>::New();
@@ -5124,9 +5127,10 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   }
   else
   {
-    fprintf(stdout,"  sliver cleanup (aspect ratio above %g): %lld slivers before, %lld after (worst %.0f -> %.0f); %lld edges collapsed onto a point that stays and %lld flipped in %d passes, no crease or rim point moved; %.1f s%s\n",
+    fprintf(stdout,"  sliver cleanup (aspect ratio above %g): %lld slivers before, %lld after (worst %.0f -> %.0f, the worst left at (%.5g, %.5g, %.5g), %lld of those left on a crease); %lld edges collapsed, %lld apexes put on their long edge and %lld edges flipped in %d passes, no rim point moved and no crease bent beyond its own resolution; %.1f s%s\n",
         10.0, clean.numSliversBefore, clean.numSliversAfter, clean.worstBefore, clean.worstAfter,
-        clean.numCollapsed, clean.numFlipped, clean.numPasses, clean.seconds,
+        clean.worstAfterAt[0], clean.worstAfterAt[1], clean.worstAfterAt[2], clean.numLeftCreased,
+        clean.numCollapsed, clean.numSnapped, clean.numFlipped, clean.numPasses, clean.seconds,
         (cleanState == 2) ? " - UNDONE: the cleaned surface crossed itself, so the envelope is used as it was" : "");
     if (cleanState == 2)
     {
