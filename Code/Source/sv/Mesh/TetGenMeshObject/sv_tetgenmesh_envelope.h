@@ -164,6 +164,7 @@ struct CleanReport
   long long numCollapsed = 0;       // edges collapsed
   long long numFlipped = 0;         // edges flipped
   long long numSnapped = 0;         // apexes put on the long edge, splitting the triangle across it
+  long long numRemoved = 0;         // points taken out, their ring triangulated afresh
   long long numNoMoveAllowed = 0;   // slivers left because no move passed the checks
   long long numLeftCreased = 0;     // of those, the ones touching a crease
   double worstAfterAt[3] = {0.0, 0.0, 0.0};  // the centre of the worst piece coming out
@@ -183,9 +184,14 @@ struct CleanReport
  * a boundary loop, a point the caller fixes, or a crease point - or by
  * putting its apex on its long edge and splitting the triangle across that
  * edge at the foot, or, when neither is allowed, by flipping its longest
- * edge, which moves nothing.
+ * edge, which moves nothing; and when none of those is allowed - a
+ * collapse needs the two points' links to meet only at the two apexes,
+ * which in the crumple of a fold they often do not - by taking a point of
+ * the sliver out altogether and triangulating the ring of its neighbours
+ * afresh, on both sides of the crease chord when the point was a crease
+ * point with exactly two crease edges.
  *
- * A collapse or a snap is allowed only when it keeps the surface a
+ * A collapse, a snap or a removal is allowed only when it keeps the surface a
  * manifold, leaves no triangle it touches worse than the worst of those it
  * touched or than the limit (so the local worst never grows), makes no new
  * fold across an edge that is not a crease and deepens none that was there,

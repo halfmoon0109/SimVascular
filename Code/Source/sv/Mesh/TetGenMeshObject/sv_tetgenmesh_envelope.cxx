@@ -3233,6 +3233,357 @@ struct SliverMesh
     return true;
   }
 
+  // Takes a point out of the surface and triangulates the ring of its
+  // neighbours afresh, when every check passes. This is the move for a point
+  // a collapse cannot take away: a collapse joins the point to one
+  // neighbour and needs the two links to meet only at the two apexes, which
+  // in the crumple of a fold, where creases run into each other, they often
+  // do not; the ring is triangulated without joining anything to anything
+  // that is already joined, so it has no such condition. A crease point is
+  // taken out only when exactly two crease edges meet at it, and the ring is
+  // then triangulated on both sides of the edge joining those two, so the
+  // crease runs straight through where the point was; a point where a
+  // crease ends or three meet stays. The ring is triangulated in the plane
+  // of the star's mean normal, taking at each step the ear of the best
+  // shape.
+  bool RemoveVertex(ll u, double allowance)
+  {
+    if (fixed[(size_t)u]) return false;
+    // The star, and the ring edge each triangle has opposite u, in the order
+    // the triangle runs (u, a, b): the ring runs a -> b.
+    std::vector<ll> starTris;
+    std::map<ll, ll> nextOf, triOf;
+    const std::vector<ll> &su = star[(size_t)u];
+    for (size_t i = 0; i < su.size(); i++)
+    {
+      ll m = su[i];
+      if (!alive[(size_t)m] || !Contains(m, u)) continue;
+      bool seen = false;
+      for (size_t k = 0; k < starTris.size() && !seen; k++) seen = starTris[k] == m;
+      if (seen) continue;
+      starTris.push_back(m);
+      int j = CornerOf(m, u);
+      ll a = tris[(size_t)3*m + (j+1)%3], b = tris[(size_t)3*m + (j+2)%3];
+      if (nextOf.count(a)) return false;   // not a simple ring
+      nextOf[a] = b;
+      triOf[a] = m;
+    }
+    size_t n = starTris.size();
+    if (n < 3) return false;
+    std::vector<ll> ring;
+    ll start = nextOf.begin()->first, cur = start;
+    for (size_t k = 0; k < n; k++)
+    {
+      ring.push_back(cur);
+      std::map<ll, ll>::iterator it = nextOf.find(cur);
+      if (it == nextOf.end()) return false;
+      cur = it->second;
+    }
+    if (cur != start || ring.size() != n) return false;   // open or pinched
+    for (size_t i = 0; i < n; i++) for (size_t k = i + 1; k < n; k++) if (ring[i] == ring[k]) return false;
+
+    // The crease edges at u.
+    std::vector<size_t> creaseAt;
+    for (size_t i = 0; i < n; i++)
+    {
+      ll m = triOf[ring[i]];
+      // edge (u, ring[i]) is on triangle m and on the previous triangle
+      if (FlagOf(m, u, ring[i]) || FlagOf(triOf[ring[(i + n - 1) % n]], u, ring[i])) creaseAt.push_back(i);
+    }
+    if (creaseAt.size() != 0 && creaseAt.size() != 2) return false;
+    bool creased = creaseAt.size() == 2;
+    if (creased)
+    {
+      ll c1 = ring[creaseAt[0]], c2 = ring[creaseAt[1]];
+      ll on[3];
+      if ((creaseAt[1] + 1) % n != creaseAt[0] && (creaseAt[0] + 1) % n != creaseAt[1] && OnEdge(c1, c2, on, 3) != 0) return false;
+    }
+
+    // The frame: the star's mean normal. A point of the sheet itself (no
+    // allowance) is taken out only where the sheet is smooth: across a
+    // ridge the ring's triangles would cut the corner off, which no
+    // distance bound on the point taken away catches.
+    double meanN[3] = {0.0, 0.0, 0.0};
+    double worstBefore = aspectLimit;
+    std::vector<std::array<double, 3> > starNormal(n);
+    for (size_t i = 0; i < n; i++)
+    {
+      const double *c[3];
+      ll ids[3];
+      CornersAfter(starTris[i], -1, -1, c, ids);
+      NormalOf(c, starNormal[i].data());
+      for (int k = 0; k < 3; k++) meanN[k] += starNormal[i][(size_t)k];
+      int s0, l0;
+      worstBefore = std::max(worstBefore, TriangleAspect(c, s0, l0));
+    }
+    if (!Normalize(meanN)) return false;
+    if (!(allowance > 0.0))
+    {
+      for (size_t i = 0; i < n; i++)
+      {
+        double len = Norm(starNormal[i].data());
+        if (!(len > 0.0)) continue;
+        if (Dot(starNormal[i].data(), meanN) < 0.866*len) return false;   // more than thirty degrees off the mean: a ridge
+      }
+    }
+    double axisU[3], axisV[3];
+    {
+      double r0[3];
+      Sub(At(ring[0]), At(u), r0);
+      double d = Dot(r0, meanN);
+      for (int k = 0; k < 3; k++) axisU[k] = r0[k] - d*meanN[k];
+      if (!Normalize(axisU)) return false;
+      Cross(meanN, axisU, axisV);
+    }
+    std::vector<double> px(n), py(n);
+    for (size_t i = 0; i < n; i++)
+    {
+      double r[3];
+      Sub(At(ring[i]), At(u), r);
+      px[i] = Dot(r, axisU);
+      py[i] = Dot(r, axisV);
+    }
+    // The ring has to be a simple polygon in the frame, run the right way.
+    {
+      double area = 0.0;
+      for (size_t i = 0; i < n; i++)
+      {
+        size_t j = (i + 1) % n;
+        area += px[i]*py[j] - px[j]*py[i];
+      }
+      if (!(area > 0.0)) return false;
+    }
+
+    // Ear clipping of one chain of ring indices (a closed polygon), best ear
+    // first; false if the polygon cannot be clipped.
+    auto clip = [&](const std::vector<size_t> &poly, std::vector<std::array<size_t, 3> > &out) -> bool
+    {
+      std::vector<size_t> ringIdx(poly);
+      while (ringIdx.size() > 3)
+      {
+        size_t m = ringIdx.size();
+        double best = std::numeric_limits<double>::infinity();
+        size_t bestAt = m;
+        for (size_t i = 0; i < m; i++)
+        {
+          size_t a = ringIdx[(i + m - 1) % m], b = ringIdx[i], c = ringIdx[(i + 1) % m];
+          double cross = (px[b] - px[a])*(py[c] - py[a]) - (py[b] - py[a])*(px[c] - px[a]);
+          if (!(cross > 0.0)) continue;
+          bool blocked = false;
+          for (size_t o = 0; o < m && !blocked; o++)
+          {
+            size_t p = ringIdx[o];
+            if (p == a || p == b || p == c) continue;
+            double s1 = (px[b] - px[a])*(py[p] - py[a]) - (py[b] - py[a])*(px[p] - px[a]);
+            double s2 = (px[c] - px[b])*(py[p] - py[b]) - (py[c] - py[b])*(px[p] - px[b]);
+            double s3 = (px[a] - px[c])*(py[p] - py[c]) - (py[a] - py[c])*(px[p] - px[c]);
+            blocked = s1 >= 0.0 && s2 >= 0.0 && s3 >= 0.0;
+          }
+          if (blocked) continue;
+          const double *cc[3] = {At(ring[a]), At(ring[b]), At(ring[c])};
+          int s0, l0;
+          double aspect = TriangleAspect(cc, s0, l0);
+          if (aspect < best)
+          {
+            best = aspect;
+            bestAt = i;
+          }
+        }
+        if (bestAt == m) return false;
+        std::array<size_t, 3> tri = {{ringIdx[(bestAt + m - 1) % m], ringIdx[bestAt], ringIdx[(bestAt + 1) % m]}};
+        out.push_back(tri);
+        ringIdx.erase(ringIdx.begin() + (long)bestAt);
+      }
+      if (ringIdx.size() == 3)
+      {
+        std::array<size_t, 3> tri = {{ringIdx[0], ringIdx[1], ringIdx[2]}};
+        out.push_back(tri);
+      }
+      return true;
+    };
+    std::vector<std::array<size_t, 3> > fans;
+    if (creased)
+    {
+      // Two polygons, each running along the ring and closing across the
+      // crease chord; each needs three vertices, else the chord is a ring
+      // edge already and that side is nothing.
+      size_t i1 = creaseAt[0], i2 = creaseAt[1];
+      std::vector<size_t> side1, side2;
+      for (size_t i = i1; ; i = (i + 1) % n) { side1.push_back(i); if (i == i2) break; }
+      for (size_t i = i2; ; i = (i + 1) % n) { side2.push_back(i); if (i == i1) break; }
+      if (side1.size() >= 3 && !clip(side1, fans)) return false;
+      if (side2.size() >= 3 && !clip(side2, fans)) return false;
+    }
+    else
+    {
+      std::vector<size_t> all;
+      for (size_t i = 0; i < n; i++) all.push_back(i);
+      if (!clip(all, fans)) return false;
+    }
+    if (fans.empty()) return false;
+
+    // The new triangles, their diagonals not already edges, none worse than
+    // the worst of the star, no fold made or deepened across any edge,
+    // and the point taken away close to them.
+    std::vector<std::array<ll, 3> > newTris;
+    std::vector<std::array<double, 3> > newNormal;
+    for (size_t f = 0; f < fans.size(); f++)
+    {
+      std::array<ll, 3> ids = {{ring[fans[f][0]], ring[fans[f][1]], ring[fans[f][2]]}};
+      const double *c[3] = {At(ids[0]), At(ids[1]), At(ids[2])};
+      int s0, l0;
+      double aspect = TriangleAspect(c, s0, l0);
+      if (!(aspect <= worstBefore)) return false;
+      std::array<double, 3> nn;
+      NormalOf(c, nn.data());
+      if (!(Norm(nn.data()) > 0.0)) return false;
+      if (!(Dot(nn.data(), meanN) > 0.0)) return false;
+      newTris.push_back(ids);
+      newNormal.push_back(nn);
+    }
+    auto isRingEdge = [&](ll p, ll q) -> bool
+    {
+      for (size_t i = 0; i < n; i++)
+      {
+        ll a = ring[i], b = ring[(i + 1) % n];
+        if ((a == p && b == q) || (a == q && b == p)) return true;
+      }
+      return false;
+    };
+    ll c1 = creased ? ring[creaseAt[0]] : -1, c2 = creased ? ring[creaseAt[1]] : -1;
+    for (size_t i = 0; i < newTris.size(); i++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        ll p = newTris[i][(size_t)j], q = newTris[i][(size_t)(j+1)%3];
+        bool ringEdge = isRingEdge(p, q);
+        if (!ringEdge)
+        {
+          ll on[3];
+          if (OnEdge(p, q, on, 3) != 0) return false;   // already an edge elsewhere
+        }
+        bool creaseLike = ringEdge ? IsCreaseEdge(p, q) : (creased && ((p == c1 && q == c2) || (p == c2 && q == c1)));
+        // The neighbour across: another new triangle on a diagonal, the
+        // outer triangle on a ring edge.
+        int numNeighbours = 0;
+        for (size_t k = 0; k < newTris.size(); k++)
+        {
+          if (k == i) continue;
+          const std::array<ll, 3> &o = newTris[k];
+          bool hasP = o[0] == p || o[1] == p || o[2] == p, hasQ = o[0] == q || o[1] == q || o[2] == q;
+          if (!hasP || !hasQ) continue;
+          numNeighbours++;
+          if (creaseLike) continue;
+          // Both new: a fold between them is one the move makes.
+          if (Folded(newNormal[i].data(), newNormal[k].data())) return false;
+        }
+        if (ringEdge)
+        {
+          ll on[3];
+          int cnt = OnEdge(p, q, on, 3);
+          for (int k = 0; k < cnt && k < 3; k++)
+          {
+            ll o = on[k];
+            bool inStar = false;
+            for (size_t s = 0; s < starTris.size() && !inStar; s++) inStar = starTris[s] == o;
+            if (inStar) continue;
+            numNeighbours++;
+            if (creaseLike) continue;
+            const double *co[3];
+            ll idso[3];
+            CornersAfter(o, -1, -1, co, idso);
+            double no[3];
+            NormalOf(co, no);
+            if (Folded(newNormal[i].data(), no))
+            {
+              // A fold the move makes is refused; one that was there between
+              // the old star triangle on this edge and o may stay but not
+              // deepen.
+              ll starTri = -1;
+              for (size_t s = 0; s < starTris.size(); s++)
+              {
+                if (Contains(starTris[s], p) && Contains(starTris[s], q)) starTri = starTris[s];
+              }
+              if (starTri < 0) return false;
+              const double *cst[3];
+              ll idst[3];
+              CornersAfter(starTri, -1, -1, cst, idst);
+              double nst[3];
+              NormalOf(cst, nst);
+              if (!Folded(nst, no)) return false;
+              double cosBefore = Dot(nst, no)/std::max(1.0e-300, Norm(nst)*Norm(no));
+              double cosAfter = Dot(newNormal[i].data(), no)/std::max(1.0e-300, Norm(newNormal[i].data())*Norm(no));
+              if (cosAfter < cosBefore - 1.0e-12) return false;
+            }
+          }
+        }
+        if (numNeighbours > 1) return false;
+      }
+    }
+    // The point taken away has to lie on the new triangles within the bound.
+    {
+      double bound = std::max(0.05*MeanEdge(starTris), allowance);
+      double nearest = std::numeric_limits<double>::infinity();
+      for (size_t i = 0; i < newTris.size(); i++)
+      {
+        nearest = std::min(nearest, PointTriangleDistance(At(u), At(newTris[i][0]), At(newTris[i][1]), At(newTris[i][2])));
+      }
+      if (!(nearest <= bound)) return false;
+    }
+    // Nothing new may pass through the surface.
+    {
+      std::vector<ll> none;
+      for (size_t i = 0; i < newTris.size(); i++)
+      {
+        std::vector<std::array<ll, 3> > others;
+        for (size_t k = 0; k < newTris.size(); k++) if (k != i) others.push_back(newTris[k]);
+        if (WouldCross(newTris[i].data(), none, others, starTris)) return false;
+      }
+    }
+
+    // Apply: the ring edges keep the flags of the star triangles they were
+    // on, the crease chord is a crease, other diagonals are not.
+    for (size_t i = 0; i < newTris.size(); i++)
+    {
+      ll fresh = (ll)(tris.size()/3);
+      unsigned char flags[3];
+      ll src = starTris[0];
+      for (int j = 0; j < 3; j++)
+      {
+        ll p = newTris[i][(size_t)j], q = newTris[i][(size_t)(j+1)%3];
+        flags[j] = 0;
+        if (isRingEdge(p, q))
+        {
+          for (size_t s = 0; s < starTris.size(); s++)
+          {
+            if (Contains(starTris[s], p) && Contains(starTris[s], q))
+            {
+              flags[j] = FlagOf(starTris[s], p, q);
+              src = starTris[s];
+            }
+          }
+        }
+        else if (creased && ((p == c1 && q == c2) || (p == c2 && q == c1)))
+        {
+          flags[j] = 1;
+        }
+      }
+      for (int j = 0; j < 3; j++)
+      {
+        tris.push_back(newTris[i][(size_t)j]);
+        creaseFlag.push_back(flags[j]);
+      }
+      alive.push_back(1);
+      reshaped.push_back(1);
+      source.push_back(source[(size_t)src]);
+      extraTris.push_back(fresh);
+      for (int j = 0; j < 3; j++) star[(size_t)newTris[i][(size_t)j]].push_back(fresh);
+    }
+    for (size_t s = 0; s < starTris.size(); s++) alive[(size_t)starTris[s]] = 0;
+    star[(size_t)u].clear();
+    return true;
+  }
+
   // Flips edge j of triangle t when every check passes.
   bool Flip(ll t, int j)
   {
@@ -3535,6 +3886,20 @@ int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &f
         {
           done = true;
           report.numCollapsed++;
+        }
+      }
+      // Taking a point out altogether, when no joining was allowed: the
+      // apex of the long edge first, then the ends of the short edge.
+      if (!done)
+      {
+        ll order[3] = {mesh.tris[(size_t)3*t + (longest+2)%3], mesh.tris[(size_t)3*t + shortest], mesh.tris[(size_t)3*t + (shortest+1)%3]};
+        for (int k = 0; k < 3 && !done; k++)
+        {
+          if (mesh.RemoveVertex(order[k], std::max(allowanceSnap, allowanceCollapse)))
+          {
+            done = true;
+            report.numRemoved++;
+          }
         }
       }
       if (done) changed = true;

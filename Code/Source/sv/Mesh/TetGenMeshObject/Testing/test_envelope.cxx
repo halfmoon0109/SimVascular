@@ -938,8 +938,8 @@ int main(int argc, char **argv)
     CleanReport c;
     std::vector<unsigned char> noFixed;
     int rc = svenvelope::CleanEnvelopeSlivers(e, noFixed, 10.0, c);
-    printf("  slivers %lld -> %lld (worst %.1f -> %.1f), %lld collapsed, %lld snapped, %lld flipped, %d passes, %.3f s\n",
-        c.numSliversBefore, c.numSliversAfter, c.worstBefore, c.worstAfter, c.numCollapsed, c.numSnapped, c.numFlipped, c.numPasses, c.seconds);
+    printf("  slivers %lld -> %lld (worst %.1f -> %.1f), %lld collapsed, %lld snapped, %lld flipped, %lld points removed, %d passes, %.3f s\n",
+        c.numSliversBefore, c.numSliversAfter, c.worstBefore, c.worstAfter, c.numCollapsed, c.numSnapped, c.numFlipped, c.numRemoved, c.numPasses, c.seconds);
     Check(rc == 0, "cleanup ran");
     char what[200];
     if (variant == 0)
