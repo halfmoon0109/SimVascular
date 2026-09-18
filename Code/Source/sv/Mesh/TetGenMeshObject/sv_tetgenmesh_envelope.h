@@ -124,7 +124,7 @@ struct Report
   long long numRays = 0;
   long long numRayRetries = 0;         // rays that grazed an edge and were shot again
   long long numUndecided = 0;          // pieces no ray could classify; they are dropped
-  long long numPockets = 0;            // components of the kept surface cut off from the rims that enclose nothing or are shreds: the slits of a fold, dropped
+  long long numPockets = 0;            // components of the kept surface, off the rims, that the rest of the closed surface winds around: the slits of a fold, dropped
   long long numPocketPieces = 0;       // pieces dropped with them
   long long numArrangementFaults = 0;  // a triangle whose pieces do not add up to it, a segment with one end, and the like
   long long numNonManifoldEdges = 0;   // edges of the kept surface on more than two pieces

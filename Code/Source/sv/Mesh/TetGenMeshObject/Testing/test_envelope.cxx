@@ -971,6 +971,36 @@ int main(int argc, char **argv)
     (void)numWhole;
   }
 
+  // 10. A closed surface of its own, however small or coarse, is envelope
+  // in full: a unit tetrahedron at the origin and one far from it, whose
+  // pieces would have read as a slit under a volume-over-area test (a
+  // tetrahedron spreads to 0.07 of its edge) or as a solid under a
+  // signed volume taken about the origin.
+  for (int where = 0; where < 2; where++)
+  {
+    Surface s;
+    double o[3] = {0.0, 0.0, 0.0};
+    if (where == 1) { o[0] = 100.0; o[1] = 50.0; o[2] = -30.0; }
+    ll a = AddPoint(s, o[0], o[1], o[2]);
+    ll b = AddPoint(s, o[0] + 1.0, o[1], o[2]);
+    ll c = AddPoint(s, o[0] + 0.5, o[1] + std::sqrt(3.0)/2.0, o[2]);
+    ll d = AddPoint(s, o[0] + 0.5, o[1] + std::sqrt(3.0)/6.0, o[2] + std::sqrt(2.0/3.0));
+    // Outward wound: seen from outside, each face runs counter-clockwise.
+    AddTriangle(s, a, c, b);
+    AddTriangle(s, a, b, d);
+    AddTriangle(s, b, c, d);
+    AddTriangle(s, c, a, d);
+    s.numSheetTriangles = 4;
+    Envelope e;
+    Report r;
+    RunAndCheckClosed(where == 0 ? "10.0 a unit tetrahedron at the origin" : "10.1 a unit tetrahedron far from the origin", s, e, r, 0);
+    Check(r.numPockets == 0 && r.numPiecesKept == 4 && r.numWholeKept == 4, "all four faces kept, none taken for a pocket");
+    double v = EnclosedVolume(e);
+    char what[120];
+    snprintf(what, sizeof(what), "volume %.5f of %.5f", v, 1.0/(6.0*std::sqrt(2.0)));
+    Check(std::abs(v - 1.0/(6.0*std::sqrt(2.0))) < 1e-9, what);
+  }
+
   if (perf)
   {
     Surface s;

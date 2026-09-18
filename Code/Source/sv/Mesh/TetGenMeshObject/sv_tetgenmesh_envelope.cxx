@@ -715,7 +715,7 @@ struct Scramble
 bool WindingAlongRay(const double origin[3], const double direction[3], ll skipTriangle,
     const std::vector<double> &points, const std::vector<ll> &tris,
     const TriangleGeometry &geometry, const Grid &grid, std::vector<ll> &stamp, ll &stampValue,
-    double edgeTol, int &winding)
+    double edgeTol, int &winding, const std::vector<unsigned char> *skipSet = nullptr)
 {
   winding = 0;
   stampValue++;
@@ -757,7 +757,7 @@ bool WindingAlongRay(const double origin[3], const double direction[3], ll skipT
         continue;
       }
       stamp[(size_t)t] = stampValue;
-      if (geometry.degenerate[(size_t)t])
+      if (geometry.degenerate[(size_t)t] || (skipSet != nullptr && (*skipSet)[(size_t)t]))
       {
         continue;
       }
@@ -1769,19 +1769,16 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
   // nothing of the solid in it. The pieces on the walls of a slit have
   // winding number zero on their outer side and pass as envelope, though
   // they lie deep inside the wall. What gives them away is that they are
-  // cut off: everything around them is inside the solid and dropped, so
-  // they come out as components of the kept surface on their own - a
-  // closed pocket enclosing next to nothing, or an open shred of a few
-  // pieces - touching no cap rim. Those are dropped as a whole. A component
-  // that owns a cap rim edge is a vessel's wall and stays. A closed
-  // component stays when the volume it encloses, spread over its area, is
-  // thicker than a quarter of its mean edge, which a closed surface of any
-  // substance is (a ball of radius R spreads to R/3) and a slit, at most a
-  // few hundredths of an edge thick, never is; the volume is taken about
-  // the component's own centroid, since that of an open piece of surface
-  // depends on the origin. An open component without a rim stays only when
-  // it carries at least a hundredth of the kept area: that is a wall with a
-  // hole in it, which is reported as such, not a shred.
+  // cut off and enclosed: everything around them is inside the solid and
+  // dropped, so they come out as a component of the kept surface on their
+  // own, touching no cap rim - a closed pocket or an open shred - and the
+  // rest of the closed surface winds around them. So each component without
+  // a rim edge is put to the winding number once more, from its largest
+  // piece, with the sheet triangles the component itself came from left
+  // out of the count: what is left winds around a slit and around nothing
+  // that is envelope. A closed surface of its own, however small or coarse,
+  // has nothing else around it and stays; a wall with a hole in it stays
+  // too, and the hole is reported.
   std::vector<unsigned char> pocket((size_t)numPieceTris, 0);
   {
     std::vector<ll> parent((size_t)numPieceTris);
@@ -1835,9 +1832,8 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
         }
       }
     }
-    struct Component { double area, edgeLength, centroid[3]; ll numEdges, numPieces, numBoundaryEdges; unsigned char rimmed; double volume; };
+    struct Component { unsigned char rimmed; ll largestPiece; double largestArea; std::vector<ll> pieces; };
     std::map<ll, Component> components;
-    double totalArea = 0.0;
     for (ll p = 0; p < numPieceTris; p++)
     {
       if (!keep[(size_t)p])
@@ -1852,54 +1848,21 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
       Cross(e1, e2, n);
       double area = 0.5*Norm(n);
       Component &comp = components[find(p)];
-      comp.area += area;
-      totalArea += area;
-      for (int k = 0; k < 3; k++)
+      if (comp.pieces.empty() || area > comp.largestArea)
       {
-        comp.centroid[k] += area*(a[k] + b[k] + c[k])/3.0;
+        comp.largestArea = area;
+        comp.largestPiece = p;
       }
-      comp.edgeLength += Distance(a, b) + Distance(b, c) + Distance(c, a);
-      comp.numEdges += 3;
-      comp.numPieces++;
+      comp.pieces.push_back(p);
     }
     for (std::map<EdgeKey, std::vector<ll> >::iterator it = keptOn.begin(); it != keptOn.end(); ++it)
     {
-      if (it->second.size() == 1)
+      if (it->second.size() == 1 && rimEdge.count(it->first))
       {
-        Component &comp = components[find(it->second[0])];
-        comp.numBoundaryEdges++;
-        if (rimEdge.count(it->first))
-        {
-          comp.rimmed = 1;
-        }
+        components[find(it->second[0])].rimmed = 1;
       }
     }
-    for (std::map<ll, Component>::iterator it = components.begin(); it != components.end(); ++it)
-    {
-      if (it->second.area > 0.0)
-      {
-        for (int k = 0; k < 3; k++)
-        {
-          it->second.centroid[k] /= it->second.area;
-        }
-      }
-    }
-    for (ll p = 0; p < numPieceTris; p++)
-    {
-      if (!keep[(size_t)p])
-      {
-        continue;
-      }
-      const ll *pp = &pieceTris[(size_t)3*p];
-      Component &comp = components[find(p)];
-      double a[3], b[3], c[3], bc[3];
-      Sub(&points[(size_t)3*pp[0]], comp.centroid, a);
-      Sub(&points[(size_t)3*pp[1]], comp.centroid, b);
-      Sub(&points[(size_t)3*pp[2]], comp.centroid, c);
-      Cross(b, c, bc);
-      comp.volume += Dot(a, bc)/6.0;
-    }
-    std::map<ll, unsigned char> dropComponent;
+    std::vector<unsigned char> ownSource((size_t)numTris, 0);
     for (std::map<ll, Component>::iterator it = components.begin(); it != components.end(); ++it)
     {
       const Component &comp = it->second;
@@ -1907,28 +1870,52 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
       {
         continue;
       }
-      double meanEdge = (comp.numEdges > 0) ? comp.edgeLength/(double)comp.numEdges : 0.0;
-      bool drop = false;
-      if (comp.numBoundaryEdges == 0)
+      for (size_t i = 0; i < comp.pieces.size(); i++)
       {
-        drop = std::abs(comp.volume) < 0.25*meanEdge*comp.area;
+        ownSource[(size_t)pieceSource[(size_t)comp.pieces[i]]] = 1;
       }
-      else
+      ll p = comp.largestPiece;
+      const ll *pp = &pieceTris[(size_t)3*p];
+      double centre[3];
+      for (int k = 0; k < 3; k++)
       {
-        drop = comp.area < 0.01*totalArea;
+        centre[k] = (points[(size_t)3*pp[0] + k] + points[(size_t)3*pp[1] + k] + points[(size_t)3*pp[2] + k])/3.0;
       }
-      if (drop)
+      const double *n = &geometry.normal[(size_t)3*pieceSource[(size_t)p]];
+      const double sense = (double)report.windingSense;
+      int winding = 0;
+      bool ok = false;
+      for (int attempt = 0; attempt < maxRayTries && !ok; attempt++)
       {
-        dropComponent[it->first] = 1;
-        report.numPockets++;
+        Scramble scramble((unsigned long long)p*1000003ULL + (unsigned long long)attempt*7919ULL + 4243ULL);
+        double spread = 0.05 + 0.1*attempt;
+        double d[3];
+        for (int k = 0; k < 3; k++)
+        {
+          d[k] = sense*n[k] + spread*scramble.Next();
+        }
+        if (!Normalize(d) || !(sense*Dot(d, n) > 0.2))
+        {
+          continue;
+        }
+        report.numRays++;
+        ok = WindingAlongRay(centre, d, pieceSource[(size_t)p], points, tris, geometry,
+            grid, stamp, stampValue, rayEdgeTol, winding, &ownSource);
       }
-    }
-    for (ll p = 0; p < numPieceTris; p++)
-    {
-      if (keep[(size_t)p] && dropComponent.count(find(p)))
+      for (size_t i = 0; i < comp.pieces.size(); i++)
       {
-        pocket[(size_t)p] = 1;
-        keep[(size_t)p] = 0;
+        ownSource[(size_t)pieceSource[(size_t)comp.pieces[i]]] = 0;
+      }
+      // Undecided is left as it is: nothing is dropped on a guess.
+      if (!ok || winding == 0)
+      {
+        continue;
+      }
+      report.numPockets++;
+      for (size_t i = 0; i < comp.pieces.size(); i++)
+      {
+        pocket[(size_t)comp.pieces[i]] = 1;
+        keep[(size_t)comp.pieces[i]] = 0;
         report.numPocketPieces++;
       }
     }
