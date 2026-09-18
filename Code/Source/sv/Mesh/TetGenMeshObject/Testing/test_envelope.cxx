@@ -526,7 +526,7 @@ static void PrintReport(const Report &r)
   }
   if (r.numPockets > 0 || r.numShreds > 0)
   {
-    printf("  pockets and shreds: %lld components cut off from the rims, %lld pieces dropped with them; %lld open shreds, %lld pieces\n", r.numPockets, r.numPocketPieces, r.numShreds, r.numShredPieces);
+    printf("  pockets and shreds: %lld components cut off from the rims, %lld pieces dropped with them; %lld open shreds or specks, %lld pieces\n", r.numPockets, r.numPocketPieces, r.numShreds, r.numShredPieces);
   }
   printf("  winding histogram:");
   for (size_t i = 0; i < r.windingHistogram.size(); i++)

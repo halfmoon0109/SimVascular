@@ -5127,10 +5127,10 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   }
   else
   {
-    fprintf(stdout,"  sliver cleanup (aspect ratio above %g): %lld slivers before, %lld after (worst %.0f -> %.0f, the worst left at (%.5g, %.5g, %.5g), %lld of those left on a crease); %lld edges collapsed, %lld apexes put on their long edge, %lld edges flipped and %lld points taken out in %d passes, no rim point moved and no crease bent beyond its own resolution; %.1f s%s\n",
+    fprintf(stdout,"  sliver cleanup (aspect ratio above %g): %lld slivers before, %lld after (worst %.0f -> %.0f, the worst left at (%.5g, %.5g, %.5g), %lld of those left on a crease); %lld edges collapsed, %lld apexes put on their long edge, %lld edges flipped, %lld points taken out, %lld hair-thin handles cut or bubbles taken off and %lld points where the surface touched itself split, in %d passes, no rim point moved and no crease bent beyond its own resolution; %.1f s%s\n",
         10.0, clean.numSliversBefore, clean.numSliversAfter, clean.worstBefore, clean.worstAfter,
         clean.worstAfterAt[0], clean.worstAfterAt[1], clean.worstAfterAt[2], clean.numLeftCreased,
-        clean.numCollapsed, clean.numSnapped, clean.numFlipped, clean.numRemoved, clean.numPasses, clean.seconds,
+        clean.numCollapsed, clean.numSnapped, clean.numFlipped, clean.numRemoved, clean.numNecksCut, clean.numUnpinched, clean.numPasses, clean.seconds,
         (cleanState == 2) ? " - UNDONE: the cleaned surface crossed itself, so the envelope is used as it was" : "");
     if (cleanState == 2)
     {

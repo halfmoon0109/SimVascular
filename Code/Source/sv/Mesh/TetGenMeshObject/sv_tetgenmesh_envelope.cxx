@@ -2411,16 +2411,33 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
       // slit is kept and the layer whose back faces it is dropped, and the
       // ray cast below cannot tell, as the dropped layer lies between the
       // kept one and everything that surrounds them.
-      bool open = false;
+      bool open = false, anyWhole = false;
+      double lo[3] = {std::numeric_limits<double>::max(), std::numeric_limits<double>::max(), std::numeric_limits<double>::max()};
+      double hi[3] = {-std::numeric_limits<double>::max(), -std::numeric_limits<double>::max(), -std::numeric_limits<double>::max()};
       for (size_t i = 0; i < comp.pieces.size() && !open; i++)
       {
         const ll *pp = &pieceTris[(size_t)3*comp.pieces[i]];
+        anyWhole = anyWhole || pieceWhole[(size_t)comp.pieces[i]];
         for (int j = 0; j < 3 && !open; j++)
         {
           open = keptOn[EdgeKey(pp[j], pp[(j+1)%3])].size() == 1;
+          for (int k = 0; k < 3; k++)
+          {
+            lo[k] = std::min(lo[k], points[(size_t)3*pp[j] + k]);
+            hi[k] = std::max(hi[k], points[(size_t)3*pp[j] + k]);
+          }
         }
       }
-      if (open)
+      // A speck: a closed component made of nothing but cut pieces, smaller
+      // than a triangle of the sheet. The crumple of a fold leaves closed
+      // tetrahedra a hair across where three or four sheets cross within a
+      // hair of one another - solid specks floating off the wall - and
+      // nothing that small, made of fragments, can be meant. A closed
+      // surface of its own with a whole triangle on it stays, as before,
+      // however small or coarse.
+      double extent = std::max(hi[0] - lo[0], std::max(hi[1] - lo[1], hi[2] - lo[2]));
+      bool speck = !open && !anyWhole && extent < meanExtent;
+      if (open || speck)
       {
         report.numShreds++;
         for (size_t i = 0; i < comp.pieces.size(); i++)
@@ -2653,6 +2670,7 @@ struct SliverMesh
   std::vector<std::vector<ll> > star;
   std::vector<unsigned char> fixed;    // per point: a rim point or one the caller fixed; never moves
   std::vector<unsigned char> crease;   // per point: a crease point; moves only onto another crease point, and then only within the deviation bound
+  std::vector<std::vector<ll> > merged;   // per point: the points collapsed into it, whose origins it now stands for
   double aspectLimit;
   // How much the cosine across an edge already folded may fall in one move.
   static constexpr double foldDeepening = 0.2;
@@ -2754,6 +2772,35 @@ struct SliverMesh
     double budget = (crease[(size_t)p] ? 0.1 : 0.05)*meanEdgeAll;
     return Distance(at, &origin[(size_t)3*p]) <= budget;
   }
+
+  // Whether the origin of every point p stands for - its own and those
+  // collapsed into it - lies within the bound of the triangles given. A
+  // collapse takes a point off the surface within a bound of the new
+  // triangles, but the next collapse there measures from the new surface,
+  // and a chain of them can walk the surface off a ridge a bound at a
+  // time; measured from where the points started, it cannot.
+  bool OriginsNear(ll p, const std::vector<std::array<ll, 3> > &tri, double bound) const
+  {
+    if ((size_t)p >= merged.size()) return true;
+    for (size_t k = 0; k <= merged[(size_t)p].size(); k++)
+    {
+      ll q = (k == 0) ? p : merged[(size_t)p][k - 1];
+      if ((size_t)3*q + 2 >= origin.size()) continue;
+      const double *o = &origin[(size_t)3*q];
+      double nearest = std::numeric_limits<double>::infinity();
+      for (size_t i = 0; i < tri.size(); i++)
+      {
+        nearest = std::min(nearest, PointTriangleDistance(o, At(tri[i][0]), At(tri[i][1]), At(tri[i][2])));
+      }
+      if (!(nearest <= bound)) return false;
+    }
+    return true;
+  }
+
+  // The bound on how far the surface may retreat from where its points
+  // started, in all: the allowance of the move, or a twentieth of the
+  // surface's mean edge.
+  double RetreatBound(double allowance) const { return std::max(allowance, 0.05*meanEdgeAll); }
 
   // Gives every edge of a triangle the same crease mark on both its
   // triangles: a crease if either says so. Every move ends by calling this
@@ -3251,6 +3298,7 @@ struct SliverMesh
         CornersAfter(changed[i], u, v, c, ids.data());
         changedTris.push_back(ids);
       }
+      if (!OriginsNear(u, changedTris, RetreatBound(allowance))) return false;
       for (size_t i = 0; i < changed.size(); i++)
       {
         std::vector<std::array<ll, 3> > others;
@@ -3277,6 +3325,12 @@ struct SliverMesh
       tris[(size_t)3*t + j] = v;
       reshaped[(size_t)t] = 1;
       star[(size_t)v].push_back(t);
+    }
+    if ((size_t)v < merged.size() && (size_t)u < merged.size())
+    {
+      merged[(size_t)v].push_back(u);
+      merged[(size_t)v].insert(merged[(size_t)v].end(), merged[(size_t)u].begin(), merged[(size_t)u].end());
+      merged[(size_t)u].clear();
     }
     star[(size_t)u].clear();
     for (size_t i = 0; i < changed.size(); i++)
@@ -3537,8 +3591,10 @@ struct SliverMesh
         if (n > 3 || numNeighbours > 1 || folded) return restore();
       }
     }
-    // Nothing new may pass through the surface.
+    // Nothing new may pass through the surface, and the points u stands for
+    // stay within the retreat bound of it.
     {
+      if (!OriginsNear(u, newTris, RetreatBound(allowance))) return restore();
       std::vector<ll> changedIds(changed);
       changedIds.push_back(tp);
       std::vector<ll> removed;
@@ -3925,7 +3981,8 @@ struct SliverMesh
         if (numNeighbours > 1) return false;
       }
     }
-    // The point taken away has to lie on the new triangles within the bound.
+    // The point taken away has to lie on the new triangles within the
+    // bound, and so have the points it stands for, from where they started.
     {
       double bound = std::max(0.05*MeanEdge(starTris), allowance);
       double nearest = std::numeric_limits<double>::infinity();
@@ -3934,6 +3991,7 @@ struct SliverMesh
         nearest = std::min(nearest, PointTriangleDistance(At(u), At(newTris[i][0]), At(newTris[i][1]), At(newTris[i][2])));
       }
       if (!(nearest <= bound)) return false;
+      if (!OriginsNear(u, newTris, RetreatBound(allowance))) return false;
     }
     // Nothing new may pass through the surface.
     {
@@ -4441,6 +4499,7 @@ struct SliverMesh
     {
       crease.push_back(creased ? 1 : 0);
       fixed.push_back(0);
+      merged.push_back(std::vector<ll>());
       star.push_back(std::vector<ll>());
       for (int m = 0; m < 3; m++) origin.push_back(at[s][m]);
       if (kind) kind->push_back(2);
@@ -4585,6 +4644,7 @@ struct SliverMesh
         }
         crease.push_back(crease[(size_t)p]);
         fixed.push_back(0);
+        merged.push_back(std::vector<ll>());
         star.push_back(fan);
         for (int m = 0; m < 3; m++) origin.push_back(at[m]);
         if (kind) kind->push_back((*kind)[(size_t)p]);
@@ -4762,6 +4822,7 @@ int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &f
   mesh.star.resize((size_t)numPts);
   mesh.fixed.assign((size_t)numPts, 0);
   mesh.crease.assign((size_t)numPts, 0);
+  mesh.merged.assign((size_t)numPts, std::vector<ll>());
   mesh.kind = &envelope.pointKind;
   mesh.origin = envelope.points;
   {
