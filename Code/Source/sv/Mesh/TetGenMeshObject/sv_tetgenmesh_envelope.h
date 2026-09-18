@@ -167,6 +167,8 @@ struct CleanReport
   long long numFlipped = 0;         // edges flipped
   long long numSnapped = 0;         // apexes put on the long edge, splitting the triangle across it
   long long numRemoved = 0;         // points taken out, their ring triangulated afresh
+  long long numNecksCut = 0;        // handles cut: tiny 3-cycles of edges that were no triangle, the two sides closed with a cone each; or a bubble on such a cycle taken off
+  long long numUnpinched = 0;       // points made where the surface touched itself at a point, one for each extra fan
   long long numNoMoveAllowed = 0;   // slivers left because no move passed the checks
   long long numLeftCreased = 0;     // of those, the ones touching a crease
   double worstAfterAt[3] = {0.0, 0.0, 0.0};  // the centre of the worst piece coming out

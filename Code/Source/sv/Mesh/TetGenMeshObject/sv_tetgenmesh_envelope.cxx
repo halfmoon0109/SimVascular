@@ -2654,6 +2654,8 @@ struct SliverMesh
   std::vector<unsigned char> fixed;    // per point: a rim point or one the caller fixed; never moves
   std::vector<unsigned char> crease;   // per point: a crease point; moves only onto another crease point, and then only within the deviation bound
   double aspectLimit;
+  // How much the cosine across an edge already folded may fall in one move.
+  static constexpr double foldDeepening = 0.2;
   // The triangles binned where they started; a reshaped triangle stays
   // within an edge of where it was, so a query widened by a bin finds it.
   Grid grid;
@@ -3192,11 +3194,16 @@ struct SliverMesh
           double nmBefore[3];
           normalBefore(m, nmBefore);
           if (!Folded(nBefore, nmBefore)) return false;
-          // An existing fold may not deepen: the cosine across the edge may
-          // not fall.
+          // An existing fold may deepen a little - by a fifth in the cosine
+          // across the edge - and no more. Held to none at all, the crumple
+          // of a fold, where every edge is folded already, admits no move
+          // and keeps its slivers; let deepen freely, folds are pulled flat
+          // over one another and the wall thins. The fifth was measured: a
+          // dozen jittered valleys lose no wall and no more volume than
+          // before, and half of the slivers that were left.
           double cosBefore = Dot(nBefore, nmBefore)/std::max(1.0e-300, Norm(nBefore)*Norm(nmBefore));
           double cosAfter = Dot(nAfter, nm)/std::max(1.0e-300, lenAfter*Norm(nm));
-          if (cosAfter < cosBefore - 1.0e-12) return false;
+          if (cosAfter < cosBefore - foldDeepening) return false;
         }
       }
     }
@@ -3498,7 +3505,7 @@ struct SliverMesh
             if (!Folded(oi, ok)) folded = true;
             double cosBefore = Dot(oi, ok)/std::max(1.0e-300, Norm(oi)*Norm(ok));
             double cosAfter = Dot(newNormal[i].data(), newNormal[k].data())/std::max(1.0e-300, Norm(newNormal[i].data())*Norm(newNormal[k].data()));
-            if (cosAfter < cosBefore - 1.0e-12) folded = true;
+            if (cosAfter < cosBefore - foldDeepening) folded = true;
           }
         }
         ll on[3];
@@ -3524,7 +3531,7 @@ struct SliverMesh
             if (!Folded(oi, no)) folded = true;
             double cosBefore = Dot(oi, no)/std::max(1.0e-300, Norm(oi)*Norm(no));
             double cosAfter = Dot(newNormal[i].data(), no)/std::max(1.0e-300, Norm(newNormal[i].data())*Norm(no));
-            if (cosAfter < cosBefore - 1.0e-12) folded = true;
+            if (cosAfter < cosBefore - foldDeepening) folded = true;
           }
         }
         if (n > 3 || numNeighbours > 1 || folded) return restore();
@@ -3654,7 +3661,10 @@ struct SliverMesh
       // edge (u, ring[i]) is on triangle m and on the previous triangle
       if (FlagOf(m, u, ring[i]) || FlagOf(triOf[ring[(i + n - 1) % n]], u, ring[i])) creaseAt.push_back(i);
     }
-    if (creaseAt.size() != 0 && creaseAt.size() != 2) return false;
+    // A point on one crease keeps the crease through it with a chord; one
+    // at the end of a crease may go, the crease then ending a step earlier;
+    // one where three or more meet stays.
+    if (creaseAt.size() > 2) return false;
     bool creased = creaseAt.size() == 2;
     if (creased)
     {
@@ -3908,7 +3918,7 @@ struct SliverMesh
               if (!Folded(nst, no)) return false;
               double cosBefore = Dot(nst, no)/std::max(1.0e-300, Norm(nst)*Norm(no));
               double cosAfter = Dot(newNormal[i].data(), no)/std::max(1.0e-300, Norm(newNormal[i].data())*Norm(no));
-              if (cosAfter < cosBefore - 1.0e-12) return false;
+              if (cosAfter < cosBefore - foldDeepening) return false;
             }
           }
         }
@@ -3989,6 +3999,633 @@ struct SliverMesh
     star[(size_t)u].clear();
     for (size_t i = 0; i < newTris.size(); i++) UnifyFlags((ll)(tris.size()/3) - (ll)newTris.size() + (ll)i);
     return true;
+  }
+
+  // The points next to both u and v other than the apexes of the two
+  // triangles on edge (u, v): each closes a 3-cycle (u, v, w) of edges that
+  // is no triangle, which is what stops the edge collapsing (the link
+  // condition) - the collapse would double the edge to w.
+  void ExtraCommon(ll u, ll v, std::vector<ll> &extra) const
+  {
+    extra.clear();
+    ll onEdge[3];
+    if (OnEdge(u, v, onEdge, 3) != 2) return;
+    std::vector<ll> linkU, linkV;
+    auto link = [&](ll p, std::vector<ll> &out)
+    {
+      const std::vector<ll> &s = star[(size_t)p];
+      for (size_t i = 0; i < s.size(); i++)
+      {
+        ll t = s[i];
+        if (!alive[(size_t)t] || !Contains(t, p)) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          ll q = tris[(size_t)3*t + j];
+          if (q != p) out.push_back(q);
+        }
+      }
+      std::sort(out.begin(), out.end());
+      out.erase(std::unique(out.begin(), out.end()), out.end());
+    };
+    link(u, linkU);
+    link(v, linkV);
+    std::vector<ll> common;
+    std::set_intersection(linkU.begin(), linkU.end(), linkV.begin(), linkV.end(), std::back_inserter(common));
+    for (size_t i = 0; i < common.size(); i++)
+    {
+      ll w = common[i];
+      if (w == u || w == v) continue;
+      bool isApex = false;
+      for (int k = 0; k < 2; k++)
+      {
+        if (Contains(onEdge[k], w)) isApex = true;
+      }
+      if (!isApex) extra.push_back(w);
+    }
+  }
+
+  // Cuts the surface along a tiny 3-cycle (u, v, w) of edges that bounds no
+  // triangle, and closes the two sides with a cone each, to a new point on
+  // either side. Such a cycle is the neck of a handle: where three sheets
+  // cross within a hair of one another the envelope threads a spike of one
+  // through a pinhole in another, or leaves a tunnel between them, a handle
+  // as wide as the hair, whose walls are the slivers no collapse can take -
+  // the cycle is the very thing the link condition refuses. The envelope of
+  // the jittered valleys comes out with up to ten such handles, and every
+  // move that keeps the topology keeps them. A handle narrower than a tenth
+  // of the mesh's edge is nothing the mesher can use and nothing the wall's
+  // physics can see, so it is cut: the six triangles on the cycle go, every
+  // other triangle at u, v or w gets a new point in their place, one for each
+  // side, and the two points stand a little apart along their sides so that
+  // the two cones do not touch. The result is a closed surface with one
+  // handle fewer; the new cones are ordinary triangles the next passes
+  // take further.
+  bool CutNeck(ll u, ll v, ll w, double sizeBound)
+  {
+    if (u == v || v == w || u == w) return false;
+    if (fixed[(size_t)u] || fixed[(size_t)v] || fixed[(size_t)w]) return false;
+    ll cyc[3] = {u, v, w};
+    ll onCycle[3][3];
+    for (int k = 0; k < 3; k++)
+    {
+      if (OnEdge(cyc[k], cyc[(k+1)%3], onCycle[k], 3) != 2) return false;
+      if (!(Distance(At(cyc[k]), At(cyc[(k+1)%3])) <= sizeBound)) return false;
+      for (int m = 0; m < 2; m++)
+      {
+        if (Contains(onCycle[k][m], cyc[(k+2)%3])) return false;   // the cycle is a triangle
+      }
+    }
+    // The triangles at the cycle: the six on its edges, and the rest with
+    // one point on it.
+    std::vector<ll> all;
+    for (int k = 0; k < 3; k++)
+    {
+      const std::vector<ll> &st = star[(size_t)cyc[k]];
+      for (size_t i = 0; i < st.size(); i++)
+      {
+        if (alive[(size_t)st[i]] && Contains(st[i], cyc[k])) all.push_back(st[i]);
+      }
+    }
+    std::sort(all.begin(), all.end());
+    all.erase(std::unique(all.begin(), all.end()), all.end());
+    auto isCyclePoint = [&](ll p) { return p == u || p == v || p == w; };
+    // Side A holds the triangles that run along the cycle the way u, v, w
+    // runs, side B the others; the rest follow their neighbours across the
+    // edges out of the cycle's points, which no side may cross.
+    std::vector<int> side(all.size(), -1);
+    std::vector<unsigned char> onCycleTri(all.size(), 0);
+    auto indexOf = [&](ll t) -> int
+    {
+      std::vector<ll>::iterator it = std::lower_bound(all.begin(), all.end(), t);
+      return (it != all.end() && *it == t) ? (int)(it - all.begin()) : -1;
+    };
+    for (int k = 0; k < 3; k++)
+    {
+      for (int m = 0; m < 2; m++)
+      {
+        ll t = onCycle[k][m];
+        int i = indexOf(t);
+        if (i < 0) return false;
+        onCycleTri[(size_t)i] = 1;
+        int ca = CornerOf(t, cyc[k]);
+        bool forward = tris[(size_t)3*t + (ca+1)%3] == cyc[(k+1)%3];
+        int s = forward ? 0 : 1;
+        if (side[(size_t)i] >= 0 && side[(size_t)i] != s) return false;
+        side[(size_t)i] = s;
+      }
+    }
+    for (size_t i = 0; i < all.size(); i++)
+    {
+      int numOn = 0;
+      for (int j = 0; j < 3; j++)
+      {
+        if (isCyclePoint(tris[(size_t)3*all[i] + j])) numOn++;
+      }
+      if (numOn == 3 || (numOn == 2) != (onCycleTri[i] != 0)) return false;
+    }
+    // Whether the cycle separates the surface: the flood from side A that
+    // never crosses a cycle edge either reaches side B - the cycle goes
+    // round a handle, which is cut below - or runs out. Then the cycle
+    // bounds a disc on each side, and the smaller one, if it is a bubble
+    // no bigger than the bound, is taken off and the cycle closed with a
+    // triangle; a big one is left alone, as cutting there would split the
+    // surface in two.
+    std::vector<ll> flooded;
+    bool separates = true;
+    {
+      ll numNow = (ll)(tris.size()/3);
+      if (stamp.size() < (size_t)numNow) stamp.resize((size_t)numNow, 0);
+      stampValue++;
+      std::vector<ll> stack;
+      for (size_t i = 0; i < all.size(); i++)
+      {
+        if (onCycleTri[i] && side[i] == 0)
+        {
+          stamp[(size_t)all[i]] = stampValue;
+          stack.push_back(all[i]);
+          flooded.push_back(all[i]);
+        }
+      }
+      while (!stack.empty() && separates)
+      {
+        ll t = stack.back();
+        stack.pop_back();
+        for (int j = 0; j < 3 && separates; j++)
+        {
+          ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
+          if (isCyclePoint(a) && isCyclePoint(b)) continue;
+          ll on[3];
+          int n = OnEdge(a, b, on, 3);
+          for (int m = 0; m < n && m < 3; m++)
+          {
+            ll o = on[m];
+            if (o == t || stamp[(size_t)o] == stampValue) continue;
+            int io = indexOf(o);
+            if (io >= 0 && onCycleTri[(size_t)io] && side[(size_t)io] == 1)
+            {
+              separates = false;
+              break;
+            }
+            stamp[(size_t)o] = stampValue;
+            stack.push_back(o);
+            flooded.push_back(o);
+          }
+        }
+      }
+    }
+    double centre[3] = {0.0, 0.0, 0.0};
+    for (int k = 0; k < 3; k++)
+    {
+      for (int m = 0; m < 3; m++) centre[m] += At(cyc[k])[m]/3.0;
+    }
+    if (separates)
+    {
+      ll numAlive = 0;
+      ll numNow = (ll)(tris.size()/3);
+      for (ll t = 0; t < numNow; t++) numAlive += alive[(size_t)t] ? 1 : 0;
+      // The side that goes: the flooded one if it is the smaller, else the
+      // rest of the surface, gathered by the same flood from side B.
+      std::vector<ll> gone;
+      int goneSide = 0;
+      if ((ll)flooded.size()*2 <= numAlive)
+      {
+        gone.swap(flooded);
+      }
+      else
+      {
+        goneSide = 1;
+        stampValue++;
+        std::vector<ll> stack;
+        for (size_t i = 0; i < all.size(); i++)
+        {
+          if (onCycleTri[i] && side[i] == 1)
+          {
+            stamp[(size_t)all[i]] = stampValue;
+            stack.push_back(all[i]);
+            gone.push_back(all[i]);
+          }
+        }
+        while (!stack.empty())
+        {
+          ll t = stack.back();
+          stack.pop_back();
+          for (int j = 0; j < 3; j++)
+          {
+            ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
+            if (isCyclePoint(a) && isCyclePoint(b)) continue;
+            ll on[3];
+            int n = OnEdge(a, b, on, 3);
+            for (int m = 0; m < n && m < 3; m++)
+            {
+              ll o = on[m];
+              if (o == t || stamp[(size_t)o] == stampValue) continue;
+              stamp[(size_t)o] = stampValue;
+              stack.push_back(o);
+              gone.push_back(o);
+            }
+          }
+        }
+        if ((ll)gone.size()*2 > numAlive) return false;
+      }
+      // A bubble: everything on it within twice the bound of the cycle.
+      for (size_t i = 0; i < gone.size(); i++)
+      {
+        for (int j = 0; j < 3; j++)
+        {
+          ll q = tris[(size_t)3*gone[i] + j];
+          if (fixed[(size_t)q]) return false;
+          if (!(Distance(At(q), centre) <= 2.0*sizeBound)) return false;
+        }
+      }
+      // The cap runs against the staying side's triangles on the cycle.
+      std::array<ll, 3> cap = {{u, v, w}};
+      if (goneSide == 1)
+      {
+        cap[1] = w;
+        cap[2] = v;
+      }
+      {
+        const double *c[3] = {At(cap[0]), At(cap[1]), At(cap[2])};
+        double n[3];
+        NormalOf(c, n);
+        if (!(Norm(n) > 0.0)) return false;
+        std::vector<ll> none;
+        std::vector<std::array<ll, 3> > others;
+        if (WouldCross(cap.data(), none, others, gone)) return false;
+      }
+      ll src = -1;
+      for (size_t i = 0; i < all.size() && src < 0; i++)
+      {
+        if (onCycleTri[i] && side[i] != goneSide) src = all[i];
+      }
+      if (src < 0) return false;
+      ll fresh = (ll)(tris.size()/3);
+      for (int j = 0; j < 3; j++)
+      {
+        tris.push_back(cap[(size_t)j]);
+        creaseFlag.push_back(IsCreaseEdge(cap[(size_t)j], cap[(size_t)(j+1)%3]) ? 1 : 0);
+      }
+      alive.push_back(1);
+      reshaped.push_back(1);
+      source.push_back(source[(size_t)src]);
+      AddExtra(fresh);
+      for (int j = 0; j < 3; j++) star[(size_t)cap[(size_t)j]].push_back(fresh);
+      for (size_t i = 0; i < gone.size(); i++) alive[(size_t)gone[i]] = 0;
+      UnifyFlags(fresh);
+      return true;
+    }
+    // Spread the sides across the edges out of the cycle's points.
+    bool grew = true;
+    while (grew)
+    {
+      grew = false;
+      for (size_t i = 0; i < all.size(); i++)
+      {
+        if (side[i] < 0) continue;
+        ll t = all[i];
+        for (int j = 0; j < 3; j++)
+        {
+          ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
+          if (isCyclePoint(a) == isCyclePoint(b)) continue;   // a cycle edge or an edge off the cycle
+          ll on[3];
+          int n = OnEdge(a, b, on, 3);
+          if (n != 2) return false;
+          for (int m = 0; m < 2; m++)
+          {
+            int o = indexOf(on[m]);
+            if (o < 0) return false;
+            if (side[(size_t)o] < 0)
+            {
+              side[(size_t)o] = side[i];
+              grew = true;
+            }
+            else if (side[(size_t)o] != side[i]) return false;
+          }
+        }
+      }
+    }
+    for (size_t i = 0; i < all.size(); i++)
+    {
+      if (side[i] < 0) return false;
+    }
+    // The rings: on each side, the edges opposite the cycle in the
+    // triangles that stay, run in triangle order, have to close into one
+    // cycle through every point once, or the cone would be pinched.
+    std::vector<ll> ringPts[2];
+    for (int s = 0; s < 2; s++)
+    {
+      std::map<ll, ll> nextOf;
+      ll start = -1;
+      for (size_t i = 0; i < all.size(); i++)
+      {
+        if (side[i] != s || onCycleTri[i]) continue;
+        ll t = all[i];
+        int c = -1;
+        for (int j = 0; j < 3; j++)
+        {
+          if (isCyclePoint(tris[(size_t)3*t + j])) c = j;
+        }
+        ll a = tris[(size_t)3*t + (c+1)%3], b = tris[(size_t)3*t + (c+2)%3];
+        if (nextOf.count(a)) return false;
+        nextOf[a] = b;
+        start = a;
+      }
+      if (nextOf.size() < 3) return false;
+      ll cur = start;
+      for (size_t i = 0; i < nextOf.size(); i++)
+      {
+        ringPts[s].push_back(cur);
+        std::map<ll, ll>::iterator it = nextOf.find(cur);
+        if (it == nextOf.end()) return false;
+        cur = it->second;
+      }
+      if (cur != start) return false;
+      std::vector<ll> sorted(ringPts[s]);
+      std::sort(sorted.begin(), sorted.end());
+      if (std::adjacent_find(sorted.begin(), sorted.end()) != sorted.end()) return false;
+    }
+    // The triangles as they will be.
+    std::vector<std::array<ll, 3> > newTris;
+    std::vector<ll> changedIds, removedIds;
+    std::vector<int> newSide;
+    ll fresh[2] = {(ll)(points.size()/3), (ll)(points.size()/3) + 1};
+    for (size_t i = 0; i < all.size(); i++)
+    {
+      if (onCycleTri[i])
+      {
+        removedIds.push_back(all[i]);
+        continue;
+      }
+      std::array<ll, 3> nt;
+      for (int j = 0; j < 3; j++)
+      {
+        ll q = tris[(size_t)3*all[i] + j];
+        nt[(size_t)j] = isCyclePoint(q) ? fresh[side[i]] : q;
+      }
+      newTris.push_back(nt);
+      newSide.push_back(side[i]);
+      changedIds.push_back(all[i]);
+    }
+    double worstBefore = 0.0;
+    for (size_t i = 0; i < all.size(); i++)
+    {
+      int s0, l0;
+      worstBefore = std::max(worstBefore, Aspect(all[i], s0, l0));
+    }
+    // Where the two new points stand: at the cycle's centre, each moved a
+    // little towards its own ring so that the cones come apart. The move is
+    // a fraction of the way to the nearest ring point, within the size
+    // bound; it starts at a quarter and is cut back when the cones it makes
+    // turn over, fold against a neighbour they were not folded against, or
+    // cross something - the separation only has to be there, not wide.
+    double dir[2][3], nearest[2];
+    for (int s = 0; s < 2; s++)
+    {
+      double mean[3] = {0.0, 0.0, 0.0};
+      nearest[s] = std::numeric_limits<double>::infinity();
+      for (size_t i = 0; i < ringPts[s].size(); i++)
+      {
+        for (int m = 0; m < 3; m++) mean[m] += At(ringPts[s][i])[m]/(double)ringPts[s].size();
+        nearest[s] = std::min(nearest[s], Distance(At(ringPts[s][i]), centre));
+      }
+      Sub(mean, centre, dir[s]);
+      if (!Normalize(dir[s])) return false;
+    }
+    // The new points, provisionally, for the geometry below.
+    for (int s = 0; s < 2; s++)
+    {
+      for (int m = 0; m < 3; m++) points.push_back(centre[m]);
+    }
+    auto undo = [&]()
+    {
+      points.resize(points.size() - 6);
+      return false;
+    };
+    const double fractions[4] = {0.25, 0.05, 0.01, 0.002};
+    bool placed = false;
+    for (int attempt = 0; attempt < 4 && !placed; attempt++)
+    {
+      for (int s = 0; s < 2; s++)
+      {
+        double step = std::min(fractions[attempt]*nearest[s], sizeBound);
+        for (int m = 0; m < 3; m++) points[(size_t)3*fresh[s] + m] = centre[m] + step*dir[s][m];
+      }
+      if (!(Distance(At(fresh[0]), At(fresh[1])) > 1.0e-6*sizeBound)) continue;
+      bool sound = true;
+      for (size_t i = 0; i < newTris.size() && sound; i++)
+      {
+        const double *c[3] = {At(newTris[i][0]), At(newTris[i][1]), At(newTris[i][2])};
+        double n[3];
+        NormalOf(c, n);
+        double len = Norm(n);
+        if (!(len > 0.0)) { sound = false; break; }
+        int s0, l0;
+        if (!(TriangleAspect(c, s0, l0) <= worstBefore)) { sound = false; break; }
+        const double *co[3];
+        ll ids[3];
+        CornersAfter(changedIds[i], -1, -1, co, ids);
+        double no[3];
+        NormalOf(co, no);
+        if (!(Dot(n, no) > 0.0)) { sound = false; break; }
+        // Across the ring edge: the neighbour that stays.
+        for (int j = 0; j < 3 && sound; j++)
+        {
+          ll a = newTris[i][(size_t)j], b = newTris[i][(size_t)(j+1)%3];
+          if (a == fresh[0] || a == fresh[1] || b == fresh[0] || b == fresh[1]) continue;
+          ll on[3];
+          int cnt = OnEdge(a, b, on, 3);
+          for (int k = 0; k < cnt && k < 3; k++)
+          {
+            if (on[k] == changedIds[i]) continue;
+            const double *cn[3];
+            ll idn[3];
+            CornersAfter(on[k], -1, -1, cn, idn);
+            double nn[3];
+            NormalOf(cn, nn);
+            if (!Folded(no, nn) && Folded(n, nn)) { sound = false; break; }
+          }
+        }
+      }
+      for (size_t i = 0; i < newTris.size() && sound; i++)
+      {
+        std::vector<std::array<ll, 3> > others;
+        for (size_t k = 0; k < newTris.size(); k++) if (k != i) others.push_back(newTris[k]);
+        if (WouldCross(newTris[i].data(), changedIds, others, removedIds)) sound = false;
+      }
+      placed = sound;
+    }
+    if (!placed) return undo();
+    double at[2][3];
+    for (int s = 0; s < 2; s++)
+    {
+      for (int m = 0; m < 3; m++) at[s][m] = At(fresh[s])[m];
+    }
+    // Apply. The new points are crease points if any of the cycle's were,
+    // made points to the envelope, and start where they stand.
+    bool creased = crease[(size_t)u] || crease[(size_t)v] || crease[(size_t)w];
+    for (int s = 0; s < 2; s++)
+    {
+      crease.push_back(creased ? 1 : 0);
+      fixed.push_back(0);
+      star.push_back(std::vector<ll>());
+      for (int m = 0; m < 3; m++) origin.push_back(at[s][m]);
+      if (kind) kind->push_back(2);
+    }
+    for (size_t i = 0; i < newTris.size(); i++)
+    {
+      ll t = changedIds[i];
+      for (int j = 0; j < 3; j++) tris[(size_t)3*t + j] = newTris[i][(size_t)j];
+      reshaped[(size_t)t] = 1;
+      NoteReshaped(t);
+      star[(size_t)fresh[newSide[i]]].push_back(t);
+    }
+    for (size_t i = 0; i < removedIds.size(); i++) alive[(size_t)removedIds[i]] = 0;
+    star[(size_t)u].clear();
+    star[(size_t)v].clear();
+    star[(size_t)w].clear();
+    for (size_t i = 0; i < newTris.size(); i++) UnifyFlags(changedIds[i]);
+    return true;
+  }
+
+  // Splits every point whose triangles make more than one fan: where the
+  // kept surface touches itself at a point - the spike of one sheet passing
+  // through another at one of its vertices - the envelope is a closed
+  // surface pinched to a point there, which the checks on edges do not see.
+  // The largest fan keeps the point; each other fan gets a point of its own,
+  // a little way towards its ring, so that the surface comes apart there.
+  // Returns the number of points made.
+  ll Unpinch(double sizeBound)
+  {
+    ll numMade = 0;
+    ll numPts = (ll)(points.size()/3);
+    for (ll p = 0; p < numPts; p++)
+    {
+      if (fixed[(size_t)p]) continue;
+      std::vector<ll> ts;
+      const std::vector<ll> &st = star[(size_t)p];
+      for (size_t i = 0; i < st.size(); i++)
+      {
+        if (alive[(size_t)st[i]] && Contains(st[i], p)) ts.push_back(st[i]);
+      }
+      std::sort(ts.begin(), ts.end());
+      ts.erase(std::unique(ts.begin(), ts.end()), ts.end());
+      if (ts.size() < 2) continue;
+      // The fans: triangles joined across the edges out of p.
+      std::vector<size_t> parent(ts.size());
+      for (size_t i = 0; i < ts.size(); i++) parent[i] = i;
+      std::function<size_t(size_t)> find = [&](size_t i) -> size_t
+      {
+        while (parent[i] != i)
+        {
+          parent[i] = parent[parent[i]];
+          i = parent[i];
+        }
+        return i;
+      };
+      std::map<ll, std::vector<size_t> > byOther;
+      for (size_t i = 0; i < ts.size(); i++)
+      {
+        for (int j = 0; j < 3; j++)
+        {
+          ll q = tris[(size_t)3*ts[i] + j];
+          if (q != p) byOther[q].push_back(i);
+        }
+      }
+      bool manifoldEdges = true;
+      for (std::map<ll, std::vector<size_t> >::iterator it = byOther.begin(); it != byOther.end(); ++it)
+      {
+        if (it->second.size() > 2) manifoldEdges = false;
+        for (size_t k = 1; k < it->second.size(); k++)
+        {
+          size_t a = find(it->second[0]), b = find(it->second[k]);
+          if (a != b) parent[b] = a;
+        }
+      }
+      if (!manifoldEdges) continue;
+      std::map<size_t, std::vector<ll> > fans;
+      for (size_t i = 0; i < ts.size(); i++) fans[find(i)].push_back(ts[i]);
+      if (fans.size() < 2) continue;
+      size_t largest = fans.begin()->first;
+      for (std::map<size_t, std::vector<ll> >::iterator it = fans.begin(); it != fans.end(); ++it)
+      {
+        if (it->second.size() > fans[largest].size()) largest = it->first;
+      }
+      std::vector<ll> staying = fans[largest];
+      for (std::map<size_t, std::vector<ll> >::iterator it = fans.begin(); it != fans.end(); ++it)
+      {
+        if (it->first == largest) continue;
+        const std::vector<ll> &fan = it->second;
+        double mean[3] = {0.0, 0.0, 0.0};
+        double nearest = std::numeric_limits<double>::infinity();
+        int count = 0;
+        for (size_t i = 0; i < fan.size(); i++)
+        {
+          for (int j = 0; j < 3; j++)
+          {
+            ll q = tris[(size_t)3*fan[i] + j];
+            if (q == p) continue;
+            for (int m = 0; m < 3; m++) mean[m] += At(q)[m];
+            count++;
+            nearest = std::min(nearest, Distance(At(q), At(p)));
+          }
+        }
+        for (int m = 0; m < 3; m++) mean[m] /= (double)std::max(count, 1);
+        double dir[3];
+        Sub(mean, At(p), dir);
+        if (!Normalize(dir))
+        {
+          for (size_t i = 0; i < fan.size(); i++) staying.push_back(fan[i]);
+          continue;
+        }
+        double step = std::min(0.25*nearest, sizeBound);
+        double at[3];
+        for (int m = 0; m < 3; m++) at[m] = At(p)[m] + step*dir[m];
+        ll fresh = (ll)(points.size()/3);
+        for (int m = 0; m < 3; m++) points.push_back(at[m]);
+        // The fan as it will be: nothing may cross.
+        std::vector<std::array<ll, 3> > newTris;
+        std::vector<ll> changedIds, none;
+        for (size_t i = 0; i < fan.size(); i++)
+        {
+          std::array<ll, 3> nt;
+          for (int j = 0; j < 3; j++)
+          {
+            ll q = tris[(size_t)3*fan[i] + j];
+            nt[(size_t)j] = (q == p) ? fresh : q;
+          }
+          newTris.push_back(nt);
+          changedIds.push_back(fan[i]);
+        }
+        bool crosses = false;
+        for (size_t i = 0; i < newTris.size() && !crosses; i++)
+        {
+          std::vector<std::array<ll, 3> > others;
+          for (size_t k = 0; k < newTris.size(); k++) if (k != i) others.push_back(newTris[k]);
+          crosses = WouldCross(newTris[i].data(), changedIds, others, none);
+        }
+        if (crosses)
+        {
+          points.resize(points.size() - 3);
+          for (size_t i = 0; i < fan.size(); i++) staying.push_back(fan[i]);
+          continue;
+        }
+        crease.push_back(crease[(size_t)p]);
+        fixed.push_back(0);
+        star.push_back(fan);
+        for (int m = 0; m < 3; m++) origin.push_back(at[m]);
+        if (kind) kind->push_back((*kind)[(size_t)p]);
+        for (size_t i = 0; i < fan.size(); i++)
+        {
+          ll t = fan[i];
+          for (int j = 0; j < 3; j++) tris[(size_t)3*t + j] = newTris[i][(size_t)j];
+          reshaped[(size_t)t] = 1;
+          NoteReshaped(t);
+        }
+        numMade++;
+      }
+      star[(size_t)p] = staying;
+    }
+    return numMade;
   }
 
   // Flips edge j of triangle t when every check passes.
@@ -4226,6 +4863,7 @@ int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &f
     }
   };
   survey(report.numSliversBefore, report.worstBefore);
+  report.numUnpinched = mesh.Unpinch(0.1*mesh.meanEdgeAll);
 
   // The allowance a sliver gives its own removal. A piece a crease cut thin
   // is an artefact of the cutting, and the crumple of a fold around a crease
@@ -4328,6 +4966,26 @@ int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &f
           {
             done = true;
             report.numRemoved++;
+          }
+        }
+      }
+      // A short edge whose collapse the link condition refused closes a
+      // 3-cycle with a third point: the neck of a handle no wider than the
+      // cycle, which is cut when it is below the mesh's resolution.
+      if (!done)
+      {
+        for (int j = 0; j < 3 && !done; j++)
+        {
+          ll x = mesh.tris[(size_t)3*t + j], y = mesh.tris[(size_t)3*t + (j+1)%3];
+          std::vector<ll> extra;
+          mesh.ExtraCommon(x, y, extra);
+          for (size_t k = 0; k < extra.size() && !done; k++)
+          {
+            if (mesh.CutNeck(x, y, extra[k], 0.5*mesh.meanEdgeAll))
+            {
+              done = true;
+              report.numNecksCut++;
+            }
           }
         }
       }
