@@ -127,6 +127,8 @@ struct Report
   long long numUndecided = 0;          // pieces no ray could classify; they are dropped
   long long numPockets = 0;            // components of the kept surface, off the rims, that the rest of the closed surface winds around: the slits of a fold, dropped
   long long numPocketPieces = 0;       // pieces dropped with them
+  long long numShreds = 0;             // components of the kept surface, off the rims, that are not closed: the kept wall of a slit whose other wall is turned over, dropped
+  long long numShredPieces = 0;        // pieces dropped with them
   long long numArrangementFaults = 0;  // a triangle whose pieces do not add up to it, a segment with one end, and the like
   long long numNonManifoldEdges = 0;   // edges of the kept surface on more than two pieces
   long long numMiswoundEdges = 0;      // edges of the kept surface traversed the same way twice

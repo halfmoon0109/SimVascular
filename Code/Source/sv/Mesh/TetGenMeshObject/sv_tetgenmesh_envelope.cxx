@@ -850,10 +850,28 @@ struct LocalGraph
     }
     double r[3];
     Sub(p, origin, r);
+    return VertexAt(gid, Dot(r, axisU), Dot(r, axisV));
+  }
+
+  // A vertex at a given place in the plane. A point on one of the
+  // triangle's edges is put exactly on that edge's line, at its parameter
+  // along it, rather than where its coordinates project to: the registry
+  // takes two crossing points within a hair of each other for one, and the
+  // one point may then be a hair off the edge it is on - and a crease
+  // grazing that edge, run in from the corner it was snapped to, would
+  // cross the edge's pieces there, so that the graph is no longer planar
+  // and the face tracing goes astray.
+  int VertexAt(ll gid, double px, double py)
+  {
+    std::map<ll, int>::iterator found = local.find(gid);
+    if (found != local.end())
+    {
+      return found->second;
+    }
     int v = (int)id.size();
     id.push_back(gid);
-    x.push_back(Dot(r, axisU));
-    y.push_back(Dot(r, axisV));
+    x.push_back(px);
+    y.push_back(py);
     adj.push_back(std::vector<int>());
     local[gid] = v;
     return v;
@@ -1165,13 +1183,37 @@ struct LocalGraph
       {
         continue;
       }
-      // The first occurrence of P; a vertex a previous bridge doubled is the
-      // same point either way.
-      size_t idx = 0;
-      for (; idx < n; idx++)
+      // The occurrence of P whose angle the bridge leaves through. A vertex
+      // a previous bridge doubled, or one two loops of a crease component
+      // share, is on the polygon twice, with an angle at each pass, and the
+      // bridge belongs to the pass whose angle holds it: joined in at the
+      // other, the two passes lie across each other and the polygon is no
+      // longer weakly simple - no ear clipping can take it then. The same
+      // holds for M's occurrences on the hole. The first occurrence is the
+      // fallback if rounding lets neither angle claim the bridge.
+      size_t idx = n;
+      for (size_t i = 0; i < n; i++)
       {
-        if (outer[idx] == P)
+        if (outer[i] != P)
         {
+          continue;
+        }
+        if (idx == n)
+        {
+          idx = i;
+        }
+        if (InsideAngle(outer[(i + n - 1) % n], P, outer[(i + 1) % n], M))
+        {
+          idx = i;
+          break;
+        }
+      }
+      size_t at = mi;
+      for (size_t k = 0; k < hs; k++)
+      {
+        if (hole[k] == M && InsideAngle(hole[(k + hs - 1) % hs], M, hole[(k + 1) % hs], P))
+        {
+          at = k;
           break;
         }
       }
@@ -1183,7 +1225,7 @@ struct LocalGraph
       }
       for (size_t k = 0; k <= hs; k++)
       {
-        merged.push_back(hole[(mi + k) % hs]);
+        merged.push_back(hole[(at + k) % hs]);
       }
       for (size_t i = idx; i < n; i++)
       {
@@ -1219,38 +1261,142 @@ struct LocalGraph
     }
   }
 
-  // Ear clipping of a counter-clockwise polygon. Returns false if no ear
-  // could be found at some step, in which case the remainder was fanned.
+  // The signed distance of a vertex from the directed line through two
+  // others, positive on the left: the cross product over the edge's length,
+  // so that it is a length whatever the edge's own length is. A test on the
+  // bare cross product is not that: against an edge a hundred thousand times
+  // shorter than the others of a needle ear, any point at all sits within a
+  // tolerance set by the ear's size.
+  double LeftOf(int u, int v, int p) const
+  {
+    double ux = x[(size_t)u], uy = y[(size_t)u];
+    double dx = x[(size_t)v] - ux, dy = y[(size_t)v] - uy;
+    double length = std::sqrt(dx*dx + dy*dy);
+    if (!(length > 0.0))
+    {
+      return 0.0;
+    }
+    return (dx*(y[(size_t)p] - uy) - dy*(x[(size_t)p] - ux))/length;
+  }
+
+  // The counter-clockwise angle, in [0, 2 pi), from the ray u->v to the ray
+  // u->w.
+  double Turn(int u, int v, int w) const
+  {
+    double ux = x[(size_t)u], uy = y[(size_t)u];
+    double angle = std::atan2(y[(size_t)w] - uy, x[(size_t)w] - ux) - std::atan2(y[(size_t)v] - uy, x[(size_t)v] - ux);
+    const double twoPi = 6.283185307179586;
+    while (angle < 0.0)
+    {
+      angle += twoPi;
+    }
+    while (angle >= twoPi)
+    {
+      angle -= twoPi;
+    }
+    return angle;
+  }
+
+  // Whether the ray from vertex u of a counter-clockwise ring towards w runs
+  // strictly inside the ring's angle at u, which sweeps counter-clockwise
+  // from the ray to the next vertex round to the ray to the previous one.
+  // Both the convex and the reflex case are the same comparison of turns.
+  bool InsideAngle(int prev, int u, int next, int w) const
+  {
+    const double tiny = 1.0e-9;
+    double toW = Turn(u, next, w), toPrev = Turn(u, next, prev);
+    return toW > tiny && toW < toPrev - tiny;
+  }
+
+  // Whether the segment from ring vertex i to ring vertex j is a diagonal of
+  // the counter-clockwise ring: it leaves both ends into the ring's inside,
+  // passes over no other vertex and crosses no edge. The ring may be weakly
+  // simple - a vertex may occur twice, where a hole was bridged in or a
+  // crease loop hangs off a point - and the tests hold for that: the angle
+  // tests at the ends see the edges of the occurrence in hand, and an edge
+  // out of another occurrence of the same point that would enter the
+  // diagonal's triangle fails the angle test there too, the angles at one
+  // point's occurrences being disjoint.
+  bool IsDiagonal(const std::vector<int> &ring, size_t i, size_t j, double eps) const
+  {
+    size_t n = ring.size();
+    int a = ring[i], c = ring[j];
+    if (a == c || (i + 1) % n == j || (j + 1) % n == i)
+    {
+      return false;
+    }
+    if (!InsideAngle(ring[(i + n - 1) % n], a, ring[(i + 1) % n], c) ||
+        !InsideAngle(ring[(j + n - 1) % n], c, ring[(j + 1) % n], a))
+    {
+      return false;
+    }
+    double ax = x[(size_t)a], ay = y[(size_t)a], cx = x[(size_t)c], cy = y[(size_t)c];
+    double dx = cx - ax, dy = cy - ay, length2 = dx*dx + dy*dy;
+    for (size_t o = 0; o < n; o++)
+    {
+      int p = ring[o], q = ring[(o + 1) % n];
+      if (p != a && p != c)
+      {
+        // On the diagonal, within eps of it, between its ends.
+        double t = ((x[(size_t)p] - ax)*dx + (y[(size_t)p] - ay)*dy)/length2;
+        if (t > 0.0 && t < 1.0 && std::abs(LeftOf(a, c, p)) <= eps)
+        {
+          return false;
+        }
+      }
+      if (SegmentsCross(a, c, p, q))
+      {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Ear clipping of a counter-clockwise polygon, weakly simple or simple.
+  // Returns false if some remainder had neither an ear nor a diagonal and
+  // was fanned.
   bool Triangulate(const std::vector<int> &polygon, std::vector<int> &triangles) const
   {
     std::vector<int> ring(polygon);
+    return TriangulateRing(ring, triangles, 0);
+  }
+
+  bool TriangulateRing(std::vector<int> &ring, std::vector<int> &triangles, int depth) const
+  {
     bool clean = true;
     while (ring.size() > 3)
     {
       size_t n = ring.size();
+      // The polygon's size sets the tolerances: a point within a billionth
+      // of it of an ear's edge is on that edge.
+      double minX = x[(size_t)ring[0]], maxX = minX, minY = y[(size_t)ring[0]], maxY = minY;
+      for (size_t m = 1; m < n; m++)
+      {
+        minX = std::min(minX, x[(size_t)ring[m]]);
+        maxX = std::max(maxX, x[(size_t)ring[m]]);
+        minY = std::min(minY, y[(size_t)ring[m]]);
+        maxY = std::max(maxY, y[(size_t)ring[m]]);
+      }
+      double eps = 1.0e-9*std::max(maxX - minX, maxY - minY);
       bool clipped = false;
       for (size_t m = 0; m < n && !clipped; m++)
       {
         int a = ring[(m + n - 1) % n], b = ring[m], c = ring[(m + 1) % n];
-        double ax = x[(size_t)a], ay = y[(size_t)a];
-        double bx = x[(size_t)b], by = y[(size_t)b];
-        double cx = x[(size_t)c], cy = y[(size_t)c];
-        double cross = (bx - ax)*(cy - ay) - (by - ay)*(cx - ax);
-        // An ear of no area - three points in a line, which a crease
-        // running straight across a triangle leaves in every polygon it
-        // bounds - is not an ear: rounding can make its turn look convex,
-        // and clipping it would leave a sliver whose third edge is on
-        // nothing.
-        double span = (bx - ax)*(bx - ax) + (by - ay)*(by - ay) + (cx - ax)*(cx - ax) + (cy - ay)*(cy - ay);
-        if (!(cross > 1.0e-12*span))
+        if (a == c)
+        {
+          continue;
+        }
+        // Convex at b, by the height of b over the closing edge: an ear of
+        // no area - three points in a line, which a crease running straight
+        // across a triangle leaves in every polygon it bounds - is not an
+        // ear, as rounding can make its turn look convex, and clipping it
+        // would leave a sliver whose third edge is on nothing.
+        if (!(LeftOf(a, c, b) < -eps))
         {
           continue;
         }
         // A vertex on the ear's closing edge - the next point of a crease
-        // running straight on - blocks it as surely as one inside it, and
-        // rounding must not be allowed to say otherwise, so the test is
-        // widened by a little.
-        double blockTol = 1.0e-9*span;
+        // running straight on - blocks it as surely as one inside it.
         bool blocked = false;
         for (size_t o = 0; o < n && !blocked; o++)
         {
@@ -1259,13 +1405,18 @@ struct LocalGraph
           {
             continue;
           }
-          double px = x[(size_t)p], py = y[(size_t)p];
-          double s1 = (bx - ax)*(py - ay) - (by - ay)*(px - ax);
-          double s2 = (cx - bx)*(py - by) - (cy - by)*(px - bx);
-          double s3 = (ax - cx)*(py - cy) - (ay - cy)*(px - cx);
-          blocked = s1 >= -blockTol && s2 >= -blockTol && s3 >= -blockTol;
+          blocked = LeftOf(a, b, p) >= -eps && LeftOf(b, c, p) >= -eps && LeftOf(c, a, p) >= -eps;
         }
         if (blocked)
+        {
+          continue;
+        }
+        // The closing edge must run inside the polygon's angle at both its
+        // ends. For a simple polygon the two tests above see to that; for a
+        // weakly simple one an edge out of another occurrence of a, b or c
+        // can enter the ear with both its ends outside it, and only the
+        // angle at the end in hand tells.
+        if (!InsideAngle(ring[(m + n - 2) % n], a, b, c) || !InsideAngle(b, c, ring[(m + 2) % n], a))
         {
           continue;
         }
@@ -1275,17 +1426,63 @@ struct LocalGraph
         ring.erase(ring.begin() + (long)m);
         clipped = true;
       }
-      if (!clipped)
+      if (clipped)
       {
-        clean = false;
-        for (size_t m = 1; m + 1 < ring.size(); m++)
+        continue;
+      }
+      // No ear: split along the shortest diagonal and clip each side. A
+      // weakly simple polygon can have no ear at all when every convex
+      // vertex has a hole's vertex in its ear and the hole's own vertices
+      // are all reflex.
+      size_t bestI = n, bestJ = n;
+      double bestLength2 = std::numeric_limits<double>::max();
+      if (depth < 64)
+      {
+        for (size_t i = 0; i < n; i++)
         {
-          triangles.push_back(ring[0]);
-          triangles.push_back(ring[m]);
-          triangles.push_back(ring[m + 1]);
+          for (size_t j = i + 2; j < n; j++)
+          {
+            double dx = x[(size_t)ring[j]] - x[(size_t)ring[i]], dy = y[(size_t)ring[j]] - y[(size_t)ring[i]];
+            double length2 = dx*dx + dy*dy;
+            if (length2 >= bestLength2 || !IsDiagonal(ring, i, j, eps))
+            {
+              continue;
+            }
+            bestLength2 = length2;
+            bestI = i;
+            bestJ = j;
+          }
+        }
+      }
+      if (bestI < n)
+      {
+        std::vector<int> first(ring.begin() + (long)bestI, ring.begin() + (long)bestJ + 1);
+        std::vector<int> second;
+        for (size_t m = bestJ; m != bestI; m = (m + 1) % n)
+        {
+          second.push_back(ring[m]);
+        }
+        second.push_back(ring[bestI]);
+        Simplify(first);
+        Simplify(second);
+        if (first.size() >= 3 && !TriangulateRing(first, triangles, depth + 1))
+        {
+          clean = false;
+        }
+        if (second.size() >= 3 && !TriangulateRing(second, triangles, depth + 1))
+        {
+          clean = false;
         }
         return clean;
       }
+      clean = false;
+      for (size_t m = 1; m + 1 < ring.size(); m++)
+      {
+        triangles.push_back(ring[0]);
+        triangles.push_back(ring[m]);
+        triangles.push_back(ring[m + 1]);
+      }
+      return clean;
     }
     if (ring.size() == 3)
     {
@@ -1665,19 +1862,24 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
       if (on != registry.onEdge.end())
       {
         const std::vector<std::pair<double, ll> > &list = on->second;
-        // The list runs from the lower id; the edge runs p -> q.
+        // The list runs from the lower id; the edge runs p -> q. Each point
+        // goes exactly on the edge's line at its parameter along it.
+        double x0 = graph.x[(size_t)corner[j]], y0 = graph.y[(size_t)corner[j]];
+        double x1 = graph.x[(size_t)corner[(j+1)%3]], y1 = graph.y[(size_t)corner[(j+1)%3]];
         if (p < q)
         {
           for (size_t m = 0; m < list.size(); m++)
           {
-            chain.push_back(graph.Vertex(list[m].second, &points[(size_t)3*list[m].second]));
+            double u = list[m].first;
+            chain.push_back(graph.VertexAt(list[m].second, x0 + u*(x1 - x0), y0 + u*(y1 - y0)));
           }
         }
         else
         {
           for (size_t m = list.size(); m-- > 0;)
           {
-            chain.push_back(graph.Vertex(list[m].second, &points[(size_t)3*list[m].second]));
+            double u = 1.0 - list[m].first;
+            chain.push_back(graph.VertexAt(list[m].second, x0 + u*(x1 - x0), y0 + u*(y1 - y0)));
           }
         }
       }
@@ -2198,6 +2400,35 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
       const Component &comp = it->second;
       if (comp.rimmed)
       {
+        continue;
+      }
+      // A component that touches no rim and is not closed cannot be part of
+      // any envelope, whatever its winding number says: the envelope is a
+      // closed surface whose only boundary is the rims. Such a shred is the
+      // wall of a pocket whose other wall is turned over - where the
+      // extrusion folds back onto itself within a hair, the slit between the
+      // two layers has winding number zero, the layer whose front faces the
+      // slit is kept and the layer whose back faces it is dropped, and the
+      // ray cast below cannot tell, as the dropped layer lies between the
+      // kept one and everything that surrounds them.
+      bool open = false;
+      for (size_t i = 0; i < comp.pieces.size() && !open; i++)
+      {
+        const ll *pp = &pieceTris[(size_t)3*comp.pieces[i]];
+        for (int j = 0; j < 3 && !open; j++)
+        {
+          open = keptOn[EdgeKey(pp[j], pp[(j+1)%3])].size() == 1;
+        }
+      }
+      if (open)
+      {
+        report.numShreds++;
+        for (size_t i = 0; i < comp.pieces.size(); i++)
+        {
+          pocket[(size_t)comp.pieces[i]] = 1;
+          keep[(size_t)comp.pieces[i]] = 0;
+          report.numShredPieces++;
+        }
         continue;
       }
       for (size_t i = 0; i < comp.pieces.size(); i++)

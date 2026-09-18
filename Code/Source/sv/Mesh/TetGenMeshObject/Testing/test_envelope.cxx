@@ -356,6 +356,52 @@ static void SheetNormals(const Surface &inner, Surface &s)
 
 // Watertight apart from the given number of boundary edges: every edge on two
 // triangles traversed once each way.
+// The slab [-5, 5] x [-5, 5] x [-1, 0], twelve triangles wound outward; its
+// top is the two triangles (t0, t1, t2), the half x > y, and (t0, t2, t3).
+static void AddSlab(Surface &s)
+{
+  ll b0 = AddPoint(s, -5, -5, -1), b1 = AddPoint(s, 5, -5, -1), b2 = AddPoint(s, 5, 5, -1), b3 = AddPoint(s, -5, 5, -1);
+  ll t0 = AddPoint(s, -5, -5, 0), t1 = AddPoint(s, 5, -5, 0), t2 = AddPoint(s, 5, 5, 0), t3 = AddPoint(s, -5, 5, 0);
+  AddTriangle(s, t0, t1, t2); AddTriangle(s, t0, t2, t3);          // top, up
+  AddTriangle(s, b0, b2, b1); AddTriangle(s, b0, b3, b2);          // bottom, down
+  AddTriangle(s, b0, b1, t1); AddTriangle(s, b0, t1, t0);          // -y
+  AddTriangle(s, b1, b2, t2); AddTriangle(s, b1, t2, t1);          // +x
+  AddTriangle(s, b2, b3, t3); AddTriangle(s, b2, t3, t2);          // +y
+  AddTriangle(s, b3, b0, t0); AddTriangle(s, b3, t0, t3);          // -x
+}
+
+// A tetrahedron wound outward: a base triangle at height zb, counter-clockwise
+// seen from above, and an apex.
+static void AddTetrahedron(Surface &s, const double b0[2], const double b1[2], const double b2[2], double zb, const double apex[3])
+{
+  ll a0 = AddPoint(s, b0[0], b0[1], zb), a1 = AddPoint(s, b1[0], b1[1], zb), a2 = AddPoint(s, b2[0], b2[1], zb);
+  ll ap = AddPoint(s, apex[0], apex[1], apex[2]);
+  AddTriangle(s, a0, a2, a1);
+  AddTriangle(s, a0, a1, ap); AddTriangle(s, a1, a2, ap); AddTriangle(s, a2, a0, ap);
+}
+
+// The valley block of AddValleyBlock with its inner grid points jittered by
+// up to 0.4 of a cell in x and y (and z following the valley), by a seed;
+// seed 0 is the regular grid.
+static void AddJitteredValley(Surface &inner, int nx, int ny, int seed)
+{
+  AddValleyBlock(inner, 2.0, nx, ny);
+  unsigned long long state = 12345ULL + 977ULL*(unsigned long long)seed;
+  auto next = [&]() { state = state*6364136223846793005ULL + 1442695040888963407ULL; return (double)(state >> 11)/9007199254740992.0 - 0.5; };
+  for (int i = 1; i < nx; i++)
+  {
+    for (int j = 1; j < ny; j++)
+    {
+      size_t p = (size_t)i*(ny+1) + j;
+      double x = inner.points[3*p] + 0.8*(2.0/nx)*next()*(seed == 0 ? 0.0 : 1.0);
+      double y = inner.points[3*p + 1] + 0.8*(3.0/ny)*next()*(seed == 0 ? 0.0 : 1.0);
+      inner.points[3*p] = x;
+      inner.points[3*p + 1] = y;
+      inner.points[3*p + 2] = 2.0*x*x;
+    }
+  }
+}
+
 static bool Watertight(const Envelope &e, ll expectedBoundary, ll &boundary, ll &bad)
 {
   std::map<std::pair<ll, ll>, std::pair<int, int> > use;
@@ -478,9 +524,9 @@ static void PrintReport(const Report &r)
   {
     printf("  first fault: %s at (%g, %g, %g)\n", r.firstFault.c_str(), r.firstFaultAt[0], r.firstFaultAt[1], r.firstFaultAt[2]);
   }
-  if (r.numPockets > 0)
+  if (r.numPockets > 0 || r.numShreds > 0)
   {
-    printf("  pockets and shreds: %lld components cut off from the rims, %lld pieces dropped with them\n", r.numPockets, r.numPocketPieces);
+    printf("  pockets and shreds: %lld components cut off from the rims, %lld pieces dropped with them; %lld open shreds, %lld pieces\n", r.numPockets, r.numPocketPieces, r.numShreds, r.numShredPieces);
   }
   printf("  winding histogram:");
   for (size_t i = 0; i < r.windingHistogram.size(); i++)
@@ -1138,22 +1184,7 @@ int main(int argc, char **argv)
   for (int variant = 0; variant < 12; variant++)
   {
     Surface inner;
-    AddValleyBlock(inner, 2.0, 40, 30);
-    unsigned long long state = 12345ULL + 977ULL*(unsigned long long)variant;
-    auto next = [&]() { state = state*6364136223846793005ULL + 1442695040888963407ULL; return (double)(state >> 11)/9007199254740992.0 - 0.5; };
-    const int nx = 40, ny = 30;
-    for (int i = 1; i < nx; i++)
-    {
-      for (int j = 1; j < ny; j++)
-      {
-        size_t p = (size_t)i*(ny+1) + j;
-        double x = inner.points[3*p] + 0.8*(2.0/nx)*next()*(variant == 0 ? 0.0 : 1.0);
-        double y = inner.points[3*p + 1] + 0.8*(3.0/ny)*next()*(variant == 0 ? 0.0 : 1.0);
-        inner.points[3*p] = x;
-        inner.points[3*p + 1] = y;
-        inner.points[3*p + 2] = 2.0*x*x;
-      }
-    }
+    AddJitteredValley(inner, 40, 30, variant);
     Surface s = inner;
     Extrude(s, 0.5);
     s.numSheetTriangles = (ll)(s.triangles.size()/3);
@@ -1169,6 +1200,93 @@ int main(int argc, char **argv)
     char what[200];
     snprintf(what, sizeof(what), "12.%d jittered valley seed %d: built %d, faults %lld, watertight %d, crossings %lld, pockets %lld", variant, variant, rc == 0, r.numArrangementFaults, rc == 0 && Watertight(e, 0, boundary, bad), numCrossing, r.numPockets);
     Check(rc == 0 && r.numArrangementFaults == 0 && Watertight(e, 0, boundary, bad) && numCrossing == 0, what);
+  }
+
+  // 13. Crease loops closed inside one triangle, in the arrangements the
+  // hole bridging has to get right: two islands in one face, where the
+  // right one, a tall thin loop, screens the left one's rightmost vertex
+  // from every outer vertex to its right, so that the bridge of the left
+  // island has to go to a vertex of the right island already joined in;
+  // an island inside another's loop (the small tip pokes through inside
+  // the big loop, whose inside is a piece of its own with a hole); and an
+  // island whose loop touches the triangle's edge at a vertex, exactly and
+  // within a hair. Either order of the islands in the input.
+  for (int variant = 0; variant < 6; variant++)
+  {
+    Surface s;
+    AddSlab(s);
+    const char *name = "";
+    double expected = 100.0;
+    if (variant < 2)
+    {
+      name = (variant == 0) ? "13.0 two islands in one face, left first" : "13.1 two islands in one face, right first";
+      const double l0[2] = {1.5, -3.5}, l1[2] = {2.5, -3.5}, l2[2] = {2.0, -2.5}, lap[3] = {2.0, -3.0, 0.5};
+      const double r0[2] = {3.4, -4.89}, r1[2] = {3.6, -4.89}, r2[2] = {3.5, 3.975}, rap[3] = {3.5, -0.75, 3.0};
+      if (variant == 0) { AddTetrahedron(s, l0, l1, l2, -0.5, lap); AddTetrahedron(s, r0, r1, r2, -0.5, rap); }
+      else { AddTetrahedron(s, r0, r1, r2, -0.5, rap); AddTetrahedron(s, l0, l1, l2, -0.5, lap); }
+      // The tips above z = 0: the left one as in test 11, the right one the
+      // tetrahedron scaled by 3/3.5 about its apex.
+      double baseArea = 0.5*0.2*(3.975 + 4.89);
+      expected += 1.0/48.0 + (1.0/3.0)*baseArea*3.5*std::pow(3.0/3.5, 3);
+    }
+    else if (variant < 4)
+    {
+      name = (variant == 2) ? "13.2 an island inside another's loop, big first" : "13.3 an island inside another's loop, small first";
+      const double A0[2] = {0.0, -4.0}, A1[2] = {4.0, -4.0}, A2[2] = {2.0, -1.0}, Aap[3] = {2.0, -3.0, 1.0};
+      const double B0[2] = {1.7, -3.3}, B1[2] = {2.3, -3.3}, B2[2] = {2.0, -2.8}, Bap[3] = {2.0, -3.1, 0.5};
+      if (variant == 2) { AddTetrahedron(s, A0, A1, A2, -0.5, Aap); AddTetrahedron(s, B0, B1, B2, -0.5, Bap); }
+      else { AddTetrahedron(s, B0, B1, B2, -0.5, Bap); AddTetrahedron(s, A0, A1, A2, -0.5, Aap); }
+      // The big tip above z = 0 is the big tetrahedron scaled by 2/3 about
+      // its apex; the small one lies wholly inside it.
+      expected += (1.0/3.0)*6.0*1.5*std::pow(1.0/1.5, 3);
+    }
+    else
+    {
+      name = (variant == 4) ? "13.4 an island touching the triangle's edge at a vertex" : "13.5 an island a hair off the triangle's edge";
+      double d = (variant == 4) ? 0.0 : 2.0e-7;
+      const double A0[2] = {1.5 + d, 1.5}, A1[2] = {2.5, 1.5}, A2[2] = {2.5, 2.0}, Aap[3] = {2.0 + d, 2.0, 0.5};
+      AddTetrahedron(s, A0, A1, A2, -0.5, Aap);
+      expected += (1.0/3.0)*0.25*1.0/8.0;
+    }
+    s.numSheetTriangles = (ll)(s.triangles.size()/3);
+    Envelope e;
+    Report r;
+    RunAndCheckClosed(name, s, e, r, 0);
+    double v = EnclosedVolume(e);
+    char what[160];
+    snprintf(what, sizeof(what), "volume %.6f of %.6f", v, expected);
+    Check(std::abs(v - expected) < 1.0e-6*expected, what);
+  }
+
+  // 14. The jittered valley at the resolution of a real wall: 200 x 150
+  // cells, the seeds that once faulted. Near the fold the extrusion folds
+  // back onto itself within a hair, and the arrangement there has crease
+  // points a hundred thousand times closer together than the triangles
+  // are wide: ear clipping has to take needle ears and bridged holes, the
+  // pieces of two layers a hair apart have to come out consistently, and
+  // a point on an edge has to be on it.
+  {
+    const int seeds[3] = {1, 2, 6};
+    for (int k = 0; k < 3; k++)
+    {
+      Surface inner;
+      AddJitteredValley(inner, 200, 150, seeds[k]);
+      Surface s = inner;
+      Extrude(s, 0.5);
+      s.numSheetTriangles = (ll)(s.triangles.size()/3);
+      SheetNormals(inner, s);
+      Envelope e;
+      Report r;
+      std::string error;
+      int rc = svenvelope::BuildOuterEnvelope(s, e, r, error);
+      ll boundary = 0, bad = 0;
+      std::vector<unsigned char> crossing;
+      double at[3];
+      ll numCrossing = (rc == 0) ? svenvelope::CountCrossingTriangles(e.points, e.triangles, crossing, at) : -1;
+      char what[240];
+      snprintf(what, sizeof(what), "14.%d jittered valley 200 x 150 seed %d: built %d, faults %lld, watertight %d, crossings %lld, pockets %lld, shreds %lld", k, seeds[k], rc == 0, r.numArrangementFaults, rc == 0 && Watertight(e, 0, boundary, bad), numCrossing, r.numPockets, r.numShreds);
+      Check(rc == 0 && r.numArrangementFaults == 0 && Watertight(e, 0, boundary, bad) && numCrossing == 0, what);
+    }
   }
 
   if (perf)
