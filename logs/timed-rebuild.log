@@ -1,0 +1,93 @@
+04:56:46 [  0%] Copying dicom2 to /work/build/SimVascular-build/bin/dicom2
+04:56:46 [  0%] Built target dcmdump-copy
+04:56:46 [  0%] Built target dcmodify-copy
+04:56:46 [  0%] Built target dicom2-copy
+04:56:46 [  0%] Built target _simvascular_thirdparty_tetgen
+04:56:47 [  1%] Built target _simvascular_thirdparty_zlib
+04:56:47 [  1%] Built target _simvascular_thirdparty_solverio
+04:56:47 [  2%] Built target _simvascular_vtksvio
+04:56:48 Consolidate compiler generated dependencies of target _simvascular_vtksvcommon
+04:56:48 Consolidate compiler generated dependencies of target _simvascular_module_ml
+04:56:48 Consolidate compiler generated dependencies of target _simvascular_utils
+04:56:49 Consolidate compiler generated dependencies of target _simvascular_module_imageprocessing
+04:56:49 [  2%] Built target _simvascular_vtksvcommon
+04:56:49 [  3%] Built target _simvascular_utils
+04:56:49 [  7%] Built target _simvascular_thirdparty_vmtk
+04:56:51 [  8%] Built target _simvascular_vtksvgeometry
+04:56:52 [ 10%] Built target _simvascular_vtksvmisc
+04:56:52 Consolidate compiler generated dependencies of target _simvascular_vtksvboolean
+04:56:52 [ 11%] Built target _simvascular_module_multiphysics
+04:56:53 Consolidate compiler generated dependencies of target _simvascular_repository
+04:56:53 [ 12%] Built target _simvascular_module_imageprocessing
+04:56:53 [ 13%] Built target _simvascular_vtksvboolean
+04:56:53 [ 14%] Built target _simvascular_vtksvnurbs
+04:56:54 [ 14%] Built target _simvascular_module_ml
+04:56:54 [ 15%] Built target _simvascular_repository
+04:56:55 [ 16%] Built target _simvascular_vtksvparameterization
+04:56:55 Consolidate compiler generated dependencies of target _simvascular_solid
+04:56:56 Consolidate compiler generated dependencies of target _simvascular_vmtk_utils
+04:56:56 Consolidate compiler generated dependencies of target _simvascular_post
+04:56:56 [ 16%] Built target _simvascular_solid
+04:56:57 [ 16%] Built target _simvascular_vmtk_utils
+04:56:57 Consolidate compiler generated dependencies of target _simvascular_itk_lset
+04:56:58 [ 16%] Built target _simvascular_post
+04:56:58 Consolidate compiler generated dependencies of target _simvascular_mesh
+04:56:59 Consolidate compiler generated dependencies of target _simvascular_geom
+04:56:59 [ 16%] Built target _simvascular_mesh
+04:57:00 [ 17%] Built target _simvascular_geom
+04:57:01 Consolidate compiler generated dependencies of target _simvascular_adaptor
+04:57:01 Consolidate compiler generated dependencies of target _simvascular_common
+04:57:02 Consolidate compiler generated dependencies of target _simvascular_vtksvsegmentation
+04:57:02 [ 17%] Built target _simvascular_common
+04:57:03 [ 17%] Built target _simvascular_adaptor
+04:57:03 Consolidate compiler generated dependencies of target _simvascular_polydata_solid
+04:57:04 [ 19%] Built target _simvascular_vtksvsegmentation
+04:57:04 Consolidate compiler generated dependencies of target _simvascular_image
+04:57:04 Consolidate compiler generated dependencies of target _simvascular_opencascade_solid
+04:57:04 [ 20%] Built target _simvascular_itk_lset
+04:57:04 [ 21%] Built target _simvascular_polydata_solid
+04:57:05 Consolidate compiler generated dependencies of target _simvascular_path
+04:57:05 [ 21%] Built target _simvascular_image
+04:57:06 Consolidate compiler generated dependencies of target _simvascular_mmg_mesh
+04:57:07 [ 22%] Built target _simvascular_path
+04:57:07 [ 22%] Built target _simvascular_mmg_mesh
+04:57:09 Consolidate compiler generated dependencies of target _simvascular_tetgen_mesh
+04:57:10 Consolidate compiler generated dependencies of target _simvascular_module_common
+04:57:11 [ 22%] Built target _simvascular_opencascade_solid
+04:57:11 [ 23%] Built target _simvascular_tetgen_mesh
+04:57:12 Consolidate compiler generated dependencies of target _simvascular_segmentation
+04:57:13 Consolidate compiler generated dependencies of target _simvascular_tetgen_adaptor
+04:57:14 [ 23%] Built target _simvascular_tetgen_adaptor
+04:57:15 [ 24%] Built target _simvascular_module_common
+04:57:18 [ 25%] Built target _simvascular_segmentation
+04:57:21 Consolidate compiler generated dependencies of target _simvascular_module_path
+04:57:27 [ 26%] Built target _simvascular_module_path
+04:57:42 Consolidate compiler generated dependencies of target _simvascular_module_segmentation
+04:57:51 [ 29%] Built target _simvascular_module_segmentation
+04:57:54 Consolidate compiler generated dependencies of target _simvascular_module_qtwidgets
+04:58:01 [ 29%] Built target _simvascular_module_qtwidgets
+04:58:02 Consolidate compiler generated dependencies of target _simvascular_module_model
+04:58:08 [ 31%] Built target _simvascular_module_model
+04:58:12 Consolidate compiler generated dependencies of target _simvascular_module_model_occt
+04:58:17 [ 32%] Built target _simvascular_module_model_occt
+04:58:18 Consolidate compiler generated dependencies of target _simvascular_module_mesh
+04:58:24 [ 33%] Built target _simvascular_module_mesh
+04:58:28 Consolidate compiler generated dependencies of target _simvascular_module_rom_simulation
+04:58:28 Consolidate compiler generated dependencies of target _simvascular_module_simulation
+04:58:31 [ 34%] Built target _simvascular_module_rom_simulation
+04:58:33 [ 35%] Built target _simvascular_module_simulation
+04:58:41 Consolidate compiler generated dependencies of target _simvascular_module_projectmanagement
+04:58:48 [ 37%] Built target _simvascular_module_projectmanagement
+04:58:53 [ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.projectdatanodes/CMakeFiles/org_sv_projectdatanodes.dir/sv4gui_ProjectDataNodesPluginActivator.cxx.o
+04:58:54 [ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectAddImageAction.cxx.o
+04:58:54 [ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectSaveAction.cxx.o
+04:58:54 [ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectDuplicateAction.cxx.o
+04:58:54 [ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectShowModelEdgesAction.cxx.o
+04:58:54 [ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectShowModelFullAction.cxx.o
+04:58:55 [ 41%] Built target org_sv_gui_qt_datamanager
+04:59:01 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshCreate.cxx.o
+04:59:01 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathCreate.cxx.o
+04:59:02 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_LoftingUtils.cxx.o
+04:59:03 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobCreate.cxx.o
+04:59:03 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImageProcessing.cxx.o
+04:59:04 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileOpenProjectAction.cxx.o

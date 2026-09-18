@@ -1,66 +1,1172 @@
-[  0%] Built target dcmdump-copy
+-- [Code/CMakeLists]  
+-- [Code/CMakeLists]  =============================================
+-- [Code/CMakeLists]  +++++ Code/CMakeLists.tx                     
+-- [Code/CMakeLists]  =============================================
+-- [Code/CMakeLists]  SV_Qt6_DIR: /work/externals/install/qt6
+-- [Code/CMakeLists]  Set SV project 
+-- SimVascular Version: simvascular 2026-09-18
+SV_BUILD_TYPE_DIR: release
+-- [Code/CMakeLists]  Include SimVascularExternalsVersions 
+-- [Code/CMakeLists]  Include SimVascularOptions
+-- [Code/CMake/SimVascularOptions.cmake]  
+-- [Code/CMake/SimVascularOptions.cmake]  ========================================
+-- [Code/CMake/SimVascularOptions.cmake]  +++++ SimVascularOptions.cmake          
+-- [Code/CMake/SimVascularOptions.cmake]  ========================================
+-- [Code/CMake/SimVascularOptions.cmake]  SV_EXTERNALS_VERSION_NUMBER: 2024.05
+-- [Code/CMake/SimVascularOptions.cmake]  HDF5_VERSION: 1.14.3
+-- [Code/CMake/SimVascularOptions.cmake]  Add Qt external ...
+-- [Code/CMake/SimVascularOptions.cmake]  Qt6_VERSION: 6.6.2
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  Qt6 ----------
+-- [simvascular_add_new_external]  proj: Qt6
+-- [simvascular_add_new_external]  version: 6.6.2
+-- [simvascular_add_new_external]  SV_Qt6_DIR: /work/externals/install/qt6
+-- [simvascular_add_new_external]  SV_Qt6_DIR: /work/externals/install/qt6
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  Qt6 
+-- [simvascular_add_new_external]  Add ML external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  ML ----------
+-- [simvascular_add_new_external]  proj: ML
+-- [simvascular_add_new_external]  version: 1.0.0
+-- [simvascular_add_new_external]  SV_ML_DIR: /work/externals/install/ml
+-- [simvascular_add_new_external]  SV_ML_DIR: /work/externals/install/ml
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  ML 
+-- [simvascular_add_new_external]  Add HDF5 external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  HDF5 ----------
+-- [simvascular_add_new_external]  proj: HDF5
+-- [simvascular_add_new_external]  version: 1.14.3
+-- [simvascular_add_new_external]  SV_HDF5_DIR: /work/externals/install/hdf5
+-- [simvascular_add_new_external]  SV_HDF5_DIR: /work/externals/install/hdf5
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  HDF5 
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  TINYXML2 ----------
+-- [simvascular_add_new_external]  proj: TINYXML2
+-- [simvascular_add_new_external]  version: 8.0.0
+-- [simvascular_add_new_external]  SV_TINYXML2_DIR: /work/externals/install/tinyxml2
+-- [simvascular_add_new_external]  SV_TINYXML2_DIR: /work/externals/install/tinyxml2
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  TINYXML2 
+-- [simvascular_add_new_external]  Add PYTHON external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  PYTHON ----------
+-- [simvascular_add_new_external]  proj: PYTHON
+-- [simvascular_add_new_external]  version: 3.11.0
+-- [simvascular_add_new_external]  SV_PYTHON_DIR: /work/externals/install/python
+-- [simvascular_add_new_external]  SV_PYTHON_DIR: /work/externals/install/python
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  PYTHON 
+-- [simvascular_add_new_external]  Add FREETYPE external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  FREETYPE ----------
+-- [simvascular_add_new_external]  proj: FREETYPE
+-- [simvascular_add_new_external]  version: 2.13.0
+-- [simvascular_add_new_external]  SV_FREETYPE_DIR: /work/externals/install/freetype
+-- [simvascular_add_new_external]  SV_FREETYPE_DIR: /work/externals/install/freetype
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  FREETYPE 
+-- [simvascular_add_new_external]  Add MMG external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  MMG ----------
+-- [simvascular_add_new_external]  proj: MMG
+-- [simvascular_add_new_external]  version: 5.3.9
+-- [simvascular_add_new_external]  SV_MMG_DIR: /work/externals/install/mmg
+-- [simvascular_add_new_external]  SV_MMG_DIR: /work/externals/install/mmg
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE;MMG
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  MMG 
+-- [simvascular_add_new_external]  Add VTK external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  VTK ----------
+-- [simvascular_add_new_external]  proj: VTK
+-- [simvascular_add_new_external]  version: 9.3.0
+-- [simvascular_add_new_external]  SV_VTK_DIR: /work/externals/install/vtk
+-- [simvascular_add_new_external]  SV_VTK_DIR: /work/externals/install/vtk
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE;MMG;VTK
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  VTK 
+-- [simvascular_add_new_external]  Add GDCM external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  GDCM ----------
+-- [simvascular_add_new_external]  proj: GDCM
+-- [simvascular_add_new_external]  version: 3.0.10
+-- [simvascular_add_new_external]  SV_GDCM_DIR: /work/externals/install/gdcm
+-- [simvascular_add_new_external]  SV_GDCM_DIR: /work/externals/install/gdcm
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE;MMG;VTK;GDCM
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  GDCM 
+-- [simvascular_add_new_external]  Add ITK external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  ITK ----------
+-- [simvascular_add_new_external]  proj: ITK
+-- [simvascular_add_new_external]  version: 5.4.0
+-- [simvascular_add_new_external]  SV_ITK_DIR: /work/externals/install/itk
+-- [simvascular_add_new_external]  SV_ITK_DIR: /work/externals/install/itk
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE;MMG;VTK;GDCM;ITK
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  ITK 
+-- [simvascular_add_new_external]  Add OpenCASCADE external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  OpenCASCADE ----------
+-- [simvascular_add_new_external]  proj: OpenCASCADE
+-- [simvascular_add_new_external]  version: 7.6.0
+-- [simvascular_add_new_external]  SV_OpenCASCADE_DIR: /work/externals/install/opencascade
+-- [simvascular_add_new_external]  SV_OpenCASCADE_DIR: /work/externals/install/opencascade
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE;MMG;VTK;GDCM;ITK;OpenCASCADE
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  OpenCASCADE 
+-- [simvascular_add_new_external]  Add MITK external ...
+-- [simvascular_add_new_external]  
+-- [simvascular_add_new_external]  ---------- simvascular_add_new_external  MITK ----------
+-- [simvascular_add_new_external]  proj: MITK
+-- [simvascular_add_new_external]  version: 2022.10
+-- [simvascular_add_new_external]  SV_MITK_DIR: /work/externals/install/mitk
+-- [simvascular_add_new_external]  SV_MITK_DIR: /work/externals/install/mitk
+-- [simvascular_add_new_external]  # SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE;MMG;VTK;GDCM;ITK;OpenCASCADE;MITK
+-- [simvascular_add_new_external]  ----- Done simvascular_add_new_external  MITK 
+-- [simvascular_add_new_external]  Include SimVascularDependentOptions
+-- [simvascular_add_new_external]  Include SimVascularInternals
+-- [simvascular_add_new_external]  Include SimVascularExternals
+-- [Code/CMake/SimVascularExternals.cmake]  
+-- [Code/CMake/SimVascularExternals.cmake]  ----------------------------------------------------------------------
+-- [Code/CMake/SimVascularExternals.cmake]  +++++                     SimVascularExternals.cmake                  
+-- [Code/CMake/SimVascularExternals.cmake]  ----------------------------------------------------------------------
+-- [Code/CMake/SimVascularExternals.cmake]  SV_SOURCE_DIR: /work/SimVascular/Code
+-- [Code/CMake/SimVascularExternals.cmake]  SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE;MMG;VTK;GDCM;ITK;OpenCASCADE;MITK
+-- [Code/CMake/SimVascularExternals.cmake]  Process externals 
+-- [Code/CMake/SimVascularExternals.cmake]  SV_EXTERNALS_LIST: Qt6;ML;HDF5;TINYXML2;PYTHON;FREETYPE;MMG;VTK;GDCM;ITK;OpenCASCADE;MITK
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : Qt6 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/Qt6.cmake
+-- =============== Code/CMake/Externals    Qt6.cmake ===============
+-- [Code/CMake/SimVascularExternals.cmake]  proj: Qt6
+-- [Code/CMake/SimVascularExternals.cmake]  SV_USE_Qt6: ON
+-- [Code/CMake/SimVascularExternals.cmake]  SV_Qt6_DIR: /work/externals/install/qt6
+-- [Code/CMake/SimVascularExternals.cmake]  Qt6_DIR: /work/externals/install/qt6/lib/cmake/Qt6
+-- [Code/CMake/SimVascularExternals.cmake]  SV_EXTERNALS_USE_PREBUILT_QT: OFF
+-- [Code/CMake/SimVascularExternals.cmake]  SV_EXTERNALS_PREBUILT_QT_PATH: 
+-- [Code/CMake/SimVascularExternals.cmake]  SV_USE_MITK_CONFIG: OFF
+-- [Code/CMake/SimVascularExternals.cmake]  SV_USE_Qt6 true
+-- [Code/CMake/SimVascularExternals.cmake]  Qt6_DIR: /work/externals/install/qt6/lib/cmake/Qt6
+-- [Code/CMake/SimVascularExternals.cmake]  SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [Code/CMake/SimVascularExternals.cmake]  Qt6_DIR: /work/externals/install/qt6/lib/cmake/Qt6
+-- [Code/CMake/SimVascularExternals.cmake]  Qt6 version: Qt6_VERSION
+-- [Code/CMake/SimVascularExternals.cmake]  Find Qt6 using simvascular_external ...
+-- [Code/CMake/SimVascularExternals.cmake]  Qt6 version: 6.6.2
+-- [Code/CMake/SimVascularExternals.cmake]  QT_HOST_PATH: /work/externals/install/qt6
+-- [simvascular_external.Qt6] 
+-- [simvascular_external.Qt6] ========== simvascular_external  Qt6 ==========
+-- [simvascular_external.Qt6] _pkg: Qt6 
+-- [simvascular_external.Qt6] PATHS:  
+-- [simvascular_external.Qt6] 
+-- [simvascular_external.Qt6] simvascular_external_PATHS:  
+-- [simvascular_external.Qt6] Search paths for Qt6Config.cmake: /work/SimVascular/Code/CMake;
+-- [simvascular_external.Qt6] EXTRA_ARGS: 6.6.2;COMPONENTS;Concurrent;Core;Designer;Gui;Help;OpenGL;PrintSupport;Sql;Svg;Widgets;Xml;UiTools;Core5Compat;WebEngineCore;WebEngineWidgets;WebView;REQUIRED
+-- [simvascular_external.Qt6] Find package ... 
+-- Found OpenGL: /usr/lib/x86_64-linux-gnu/libOpenGL.so   
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- Could NOT find WrapVulkanHeaders (missing: Vulkan_INCLUDE_DIR) 
+-- [simvascular_external.Qt6] --- Done find package 
+-- [simvascular_external.Qt6] Package Qt6 found!
+-- [simvascular_external.Qt6] ----- Done finding Qt6 
+-- [simvascular_external.Qt6]
+-- [simvascular_external.Qt6] Qt6_DIR: /work/externals/install/qt6/lib/cmake/Qt6
+-- [simvascular_external.Qt6] QT_INCLUDE_DIRS: 
+-- ----- Done Code/CMake/Externals Qt6.cmake
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: Qt6
+-- [simvascular_install_external]  SV_Qt6_DIR: /work/externals/install/qt6
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/qt6/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : ML 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/ML.cmake
+-- [Code/CMake/Externals/ML.cmake] =============== Code/CMake/Externals    ML.cmake ===============
+-- [Code/CMake/Externals/ML.cmake] proj: ML
+-- [Code/CMake/Externals/ML.cmake] SV_USE_DIR: 
+-- [Code/CMake/Externals/ML.cmake] SV_ML_DIR: /work/externals/install/ml
+-- [Code/CMake/Externals/ML.cmake] SV_ML_FILE_NAME: networks.tar
+-- [Code/CMake/Externals/ML.cmake] SOURCE_FILE: /work/externals/install/ml/networks.tar
+-- [Code/CMake/Externals/ML.cmake] DESTINATION_DIR: /work/SimVascular/Code/../Python/site-packages/sv_ml/
+CMake Warning at CMake/Externals/ML.cmake:51 (message):
+  The machine learning network file /work/externals/install/ml/networks.tar
+  can't be found.
+Call Stack (most recent call first):
+  CMake/SimVascularExternals.cmake:55 (include)
+  CMakeLists.txt:113 (include)
+
+
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: ML
+-- [simvascular_install_external]  SV_ML_DIR: /work/externals/install/ml
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  **** Does not EXISTS /work/externals/install/ml/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : HDF5 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/HDF5.cmake
+-- [Code/CMake/Externals/HDF5.cmake]  =============== Code/CMake/Externals    HDF5.cmake ===============
+-- [Code/CMake/Externals/HDF5.cmake]  proj: HDF5
+-- [Code/CMake/Externals/HDF5.cmake]  SV_HDF5_DIR: /work/externals/install/hdf5
+-- [Code/CMake/Externals/HDF5.cmake]  HDF5_DIR: /work/externals/install/hdf5/cmake
+-- [Code/CMake/Externals/HDF5.cmake]  SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [Code/CMake/Externals/HDF5.cmake]  Find HDF5 ... 
+-- [simvascular_external.HDF5] 
+-- [simvascular_external.HDF5] ========== simvascular_external  HDF5 ==========
+-- [simvascular_external.HDF5] _pkg: HDF5 
+-- [simvascular_external.HDF5] PATHS:  
+-- [simvascular_external.HDF5] 
+-- [simvascular_external.HDF5] simvascular_external_PATHS:  
+-- [simvascular_external.HDF5] Search paths for HDF5Config.cmake: /work/SimVascular/Code/CMake;;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin
+-- [simvascular_external.HDF5] EXTRA_ARGS: 1.14.3;REQUIRED
+-- [simvascular_external.HDF5] Find package ... 
+-- [simvascular_external.HDF5] --- Done find package 
+-- [simvascular_external.HDF5] Package HDF5 found!
+-- [simvascular_external.HDF5] Include dir /work/externals/install/hdf5/include
+-- [simvascular_external.HDF5] Include dirs: /work/externals/install/hdf5/include
+-- [simvascular_external.HDF5] ----- Done finding HDF5 
+-- [simvascular_external.HDF5]
+-- [simvascular_external.HDF5] --- Done find HDF5 
+-- [simvascular_external.HDF5] HDF5_DIR: /work/externals/install/hdf5/cmake
+-- [simvascular_external.HDF5] ----- Done Code/CMake/Externals    HDF5.cmake 
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: HDF5
+-- [simvascular_install_external]  SV_HDF5_DIR: /work/externals/install/hdf5
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/hdf5/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : TINYXML2 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/TINYXML2.cmake
+-- [Code/CMake/Externals/TINYXML2.cmake]  =============== Code/CMake/Externals    TINYXML2.cmake ===============
+-- [Code/CMake/Externals/TINYXML2.cmake]  proj: TINYXML2
+-- [Code/CMake/Externals/TINYXML2.cmake]  SV_TINYXML2_DIR: /work/externals/install/tinyxml2
+-- [Code/CMake/Externals/TINYXML2.cmake]  TINYXML2_DIR: /work/externals/install/tinyxml2/lib/cmake/tinyxml2
+-- [Code/CMake/Externals/TINYXML2.cmake]  SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [simvascular_external.tinyxml2] 
+-- [simvascular_external.tinyxml2] ========== simvascular_external  tinyxml2 ==========
+-- [simvascular_external.tinyxml2] _pkg: tinyxml2 
+-- [simvascular_external.tinyxml2] PATHS:  
+-- [simvascular_external.tinyxml2] 
+-- [simvascular_external.tinyxml2] simvascular_external_PATHS:  
+-- [simvascular_external.tinyxml2] Search paths for tinyxml2Config.cmake: /work/SimVascular/Code/CMake;;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin
+-- [simvascular_external.tinyxml2] EXTRA_ARGS: REQUIRED
+-- [simvascular_external.tinyxml2] Find package ... 
+-- [simvascular_external.tinyxml2] --- Done find package 
+-- [simvascular_external.tinyxml2] Package tinyxml2 found!
+-- [simvascular_external.tinyxml2] Include dir /work/externals/install/tinyxml2/include/
+-- [simvascular_external.tinyxml2] ----- Done finding tinyxml2 
+-- [simvascular_external.tinyxml2]
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: TINYXML2
+-- [simvascular_install_external]  SV_TINYXML2_DIR: /work/externals/install/tinyxml2
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/tinyxml2/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : PYTHON 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/PYTHON.cmake
+-- [Code/CMake/Externals/PYTHON.cmake] =============== Code/CMake/Externals    PYTHON.cmake ===============
+-- [Code/CMake/Externals/PYTHON.cmake] proj: PYTHON
+-- [Code/CMake/Externals/PYTHON.cmake] SV_USE_PYTHON: ON
+-- [Code/CMake/Externals/PYTHON.cmake] SV_PYTHON_DIR: /work/externals/install/python
+-- [Code/CMake/Externals/PYTHON.cmake] Python_DIR: /work/externals/install/python
+-- [Code/CMake/Externals/PYTHON.cmake] PYTHON_DIR: /work/externals/install/python
+-- [Code/CMake/Externals/PYTHON.cmake] PYTHON_VERISON: 3.11.0
+-- [Code/CMake/Externals/PYTHON.cmake] SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [simvascular_external.PYTHON] 
+-- [simvascular_external.PYTHON] ========== simvascular_external  PYTHON ==========
+-- [simvascular_external.PYTHON] _pkg: PYTHON 
+-- [simvascular_external.PYTHON] PATHS:  
+-- [simvascular_external.PYTHON] /work/externals/install/python
+-- [simvascular_external.PYTHON] simvascular_external_PATHS: /work/externals/install/python 
+-- [simvascular_external.PYTHON] Search paths for PYTHONConfig.cmake: /work/externals/install/python
+-- [simvascular_external.PYTHON] EXTRA_ARGS: 3.11.0;REQUIRED
+-- [simvascular_external.PYTHON] Find package ... 
+-- [Code/CMake/FindPYTHON.cmake]  
+-- [Code/CMake/FindPYTHON.cmake]  ==========================================================
+-- [Code/CMake/FindPYTHON.cmake]  =============== Code/CMake  FindPYTHON.cmake =============
+-- [Code/CMake/FindPYTHON.cmake]  ==========================================================
+-- [Code/CMake/FindPYTHON.cmake]  PYTHON_DIR: /work/externals/install/python
+-- [Code/CMake/FindPYTHON.cmake]  --- Done find package 
+-- [Code/CMake/FindPYTHON.cmake]  Package PYTHON found!
+-- [Code/CMake/FindPYTHON.cmake]  Include dir /work/externals/install/python/include/python3.11
+-- [Code/CMake/FindPYTHON.cmake]  Include dirs: /work/externals/install/python/include/python3.11
+-- [Code/CMake/FindPYTHON.cmake]  ----- Done finding PYTHON 
+-- [Code/CMake/FindPYTHON.cmake] 
+-- [Code/CMake/FindPYTHON.cmake]  Python_FOUND: 
+-- [Code/CMake/FindPYTHON.cmake]  Python3_FOUND: 
+-- [Code/CMake/FindPYTHON.cmake]  PYTHON_INCLUDE_DIR: /work/externals/install/python/include/python3.11
+-- [Code/CMake/FindPYTHON.cmake]  PYTHON_INCLUDE_DIRS: /work/externals/install/python/include/python3.11
+-- [Code/CMake/FindPYTHON.cmake]  PYTHON_LIBRARY: /work/externals/install/python/lib/libpython3.11.so
+-- [Code/CMake/FindPYTHON.cmake]  PYTHON_EXECUTABLE: /work/externals/install/python/bin/python3.11
+-- ----- Done Code/CMake/Externals    PYTHON.cmake 
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: PYTHON
+-- [simvascular_install_external]  SV_PYTHON_DIR: /work/externals/install/python
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/python/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : FREETYPE 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/FREETYPE.cmake
+-- [Code/CMake/Externals/FREETYPE.cmake] =============== Code/CMake/Externals    FREETYPE.cmake ===============
+-- [Code/CMake/Externals/FREETYPE.cmake] proj: FREETYPE
+-- [Code/CMake/Externals/FREETYPE.cmake] SV_USE_FREETYPE: ON
+-- [Code/CMake/Externals/FREETYPE.cmake] SV_FREETYPE_DIR: /work/externals/install/freetype
+-- [Code/CMake/Externals/FREETYPE.cmake] FREETYPE_VERISON: 2.13.0
+-- [Code/CMake/Externals/FREETYPE.cmake] SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [simvascular_external.FREETYPE] 
+-- [simvascular_external.FREETYPE] ========== simvascular_external  FREETYPE ==========
+-- [simvascular_external.FREETYPE] _pkg: FREETYPE 
+-- [simvascular_external.FREETYPE] PATHS:  
+-- [simvascular_external.FREETYPE] 
+-- [simvascular_external.FREETYPE] simvascular_external_PATHS:  
+-- [simvascular_external.FREETYPE] Search paths for FREETYPEConfig.cmake: /work/SimVascular/Code/CMake;;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin
+-- [simvascular_external.FREETYPE] EXTRA_ARGS: 2.13.0;REQUIRED
+-- [simvascular_external.FREETYPE] Find package ... 
+-- [simvascular_external.FREETYPE] --- Done find package 
+-- [simvascular_external.FREETYPE] Package FREETYPE found!
+-- [simvascular_external.FREETYPE] Include dirs: /work/externals/install/freetype/include/freetype2;/work/externals/install/freetype/include/freetype2/freetype
+-- [simvascular_external.FREETYPE] ----- Done finding FREETYPE 
+-- [simvascular_external.FREETYPE]
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: FREETYPE
+-- [simvascular_install_external]  SV_FREETYPE_DIR: /work/externals/install/freetype
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/freetype/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : MMG 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/MMG.cmake
+-- [Code/CMake/Externals/MMG.cmake] =============== Code/CMake/Externals    MMG.cmake ===============
+-- [Code/CMake/Externals/MMG.cmake] proj: MMG
+-- [Code/CMake/Externals/MMG.cmake] SV_USE_MMG: ON
+-- [Code/CMake/Externals/MMG.cmake] SV_MMG_DIR: /work/externals/install/mmg
+-- [Code/CMake/Externals/MMG.cmake] MMG_VERISON: 5.3.9
+-- [Code/CMake/Externals/MMG.cmake] SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [simvascular_external.MMG] 
+-- [simvascular_external.MMG] ========== simvascular_external  MMG ==========
+-- [simvascular_external.MMG] _pkg: MMG 
+-- [simvascular_external.MMG] PATHS:  
+-- [simvascular_external.MMG] 
+-- [simvascular_external.MMG] simvascular_external_PATHS:  
+-- [simvascular_external.MMG] Search paths for MMGConfig.cmake: /work/SimVascular/Code/CMake;;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin
+-- [simvascular_external.MMG] EXTRA_ARGS: 5.3.9
+-- [simvascular_external.MMG] Find package ... 
+-- [simvascular_external.MMG] --- Done find package 
+-- [simvascular_external.MMG] Package MMG found!
+-- [simvascular_external.MMG] Include dir /work/externals/install/mmg/include
+-- [simvascular_external.MMG] ----- Done finding MMG 
+-- [simvascular_external.MMG]
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : VTK 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/VTK.cmake
+-- [Code/CMake/Externals/VTK.cmake] =============== Code/CMake/Externals    VTK.cmake ===============
+-- [Code/CMake/Externals/VTK.cmake] proj: VTK
+-- [Code/CMake/Externals/VTK.cmake] SV_USE_VTK: ON
+-- [Code/CMake/Externals/VTK.cmake] SV_VTK_DIR: /work/externals/install/vtk
+-- [Code/CMake/Externals/VTK.cmake] VTK_VERISON: 9.3.0
+-- [Code/CMake/Externals/VTK.cmake] SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [Code/CMake/Externals/VTK.cmake] PYTHON_LIBRARY: /work/externals/install/python/lib/libpython3.11.so
+-- [Code/CMake/Externals/VTK.cmake] VTK_DIR: /work/externals/install/vtk/lib/cmake/vtk-9.3
+-- [simvascular_external.VTK] 
+-- [simvascular_external.VTK] ========== simvascular_external  VTK ==========
+-- [simvascular_external.VTK] _pkg: VTK 
+-- [simvascular_external.VTK] PATHS:  
+-- [simvascular_external.VTK] 
+-- [simvascular_external.VTK] simvascular_external_PATHS:  
+-- [simvascular_external.VTK] Search paths for VTKConfig.cmake: /work/SimVascular/Code/CMake;;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin
+-- [simvascular_external.VTK] EXTRA_ARGS: 9.3.0;COMPONENTS;FiltersFlowPaths;RenderingLabel;CommonDataModel;CommonCore;ChartsCore;CommonExecutionModel;FiltersCore;FiltersTexture;FiltersVerdict;IOGeometry;IOLegacy;IOPLY;IOXML;ImagingStencil;ParallelCore;tiff;WrappingPythonCore;REQUIRED;NO_DEFAULT_PATH
+-- [simvascular_external.VTK] Find package ... 
+-- [simvascular_external.VTK] --- Done find package 
+-- [simvascular_external.VTK] Package VTK found!
+-- [simvascular_external.VTK] ----- Done finding VTK 
+-- [simvascular_external.VTK]
+-- [simvascular_external.VTK] VTK_DIR: /work/externals/install/vtk/lib/cmake/vtk-9.3
+[simvascular_external.VTK] begin variable vtkCommonCoreTCL_LIBRARIES=
+-- [simvascular_external.VTK] ----- Done Code/CMake/Externals    VTK.cmake 
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: VTK
+-- [simvascular_install_external]  SV_VTK_DIR: /work/externals/install/vtk
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/vtk/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : GDCM 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/GDCM.cmake
+-- [Code/CMake/Externals/GDCM.cmake] =============== Code/CMake/Externals    GDCM.cmake ===============
+-- [Code/CMake/Externals/GDCM.cmake] proj: GDCM
+-- [Code/CMake/Externals/GDCM.cmake] SV_USE_GDCM: ON
+-- [Code/CMake/Externals/GDCM.cmake] SV_GDCM_DIR: /work/externals/install/gdcm
+-- [Code/CMake/Externals/GDCM.cmake] GDCM_VERISON: 3.0.10
+-- [Code/CMake/Externals/GDCM.cmake] SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [Code/CMake/Externals/GDCM.cmake] PYTHON_LIBRARY: /work/externals/install/python/lib/libpython3.11.so
+-- [simvascular_external.GDCM] 
+-- [simvascular_external.GDCM] ========== simvascular_external  GDCM ==========
+-- [simvascular_external.GDCM] _pkg: GDCM 
+-- [simvascular_external.GDCM] PATHS:  
+-- [simvascular_external.GDCM] 
+-- [simvascular_external.GDCM] simvascular_external_PATHS:  
+-- [simvascular_external.GDCM] Search paths for GDCMConfig.cmake: /work/SimVascular/Code/CMake;;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin
+-- [simvascular_external.GDCM] EXTRA_ARGS: 3.0.10;REQUIRED
+-- [simvascular_external.GDCM] Find package ... 
+-- [simvascular_external.GDCM] --- Done find package 
+-- [simvascular_external.GDCM] Package GDCM found!
+-- [simvascular_external.GDCM] Include dirs: /work/externals/install/gdcm/include/gdcm-3.0
+-- [simvascular_external.GDCM] ----- Done finding GDCM 
+-- [simvascular_external.GDCM]
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: GDCM
+-- [simvascular_install_external]  SV_GDCM_DIR: /work/externals/install/gdcm
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/gdcm/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : ITK 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/ITK.cmake
+-- [Code/CMake/Externals/ITK.cmake] =============== Code/CMake/Externals    ITK.cmake ===============
+-- [Code/CMake/Externals/ITK.cmake] proj: ITK
+-- [Code/CMake/Externals/ITK.cmake] SV_USE_ITK: ON
+-- [Code/CMake/Externals/ITK.cmake] SV_ITK_DIR: /work/externals/install/itk
+-- [Code/CMake/Externals/ITK.cmake] ITK_VERISON: 5.4.0
+-- [Code/CMake/Externals/ITK.cmake] SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [Code/CMake/Externals/ITK.cmake] PYTHON_LIBRARY: /work/externals/install/python/lib/libpython3.11.so
+-- [Code/CMake/Externals/ITK.cmake] SV_VTK_DIR: /work/externals/install/vtk
+-- [Code/CMake/Externals/ITK.cmake] VTK_LIBRARIES: VTK::FiltersFlowPaths;VTK::RenderingLabel;VTK::CommonDataModel;VTK::CommonCore;VTK::ChartsCore;VTK::CommonExecutionModel;VTK::FiltersCore;VTK::FiltersTexture;VTK::FiltersVerdict;VTK::IOGeometry;VTK::IOLegacy;VTK::IOPLY;VTK::IOXML;VTK::ImagingStencil;VTK::ParallelCore;VTK::tiff;VTK::WrappingPythonCore
+-- [Code/CMake/Externals/ITK.cmake] HDF5_DIR: /work/externals/install/hdf5/cmake
+-- [Code/CMake/Externals/ITK.cmake] HDF5_LIB_DIR: 
+-- [Code/CMake/Externals/ITK.cmake] ITK_DIR: /work/externals/install/itk/lib/cmake/ITK-5.4
+-- [simvascular_external.ITK] 
+-- [simvascular_external.ITK] ========== simvascular_external  ITK ==========
+-- [simvascular_external.ITK] _pkg: ITK 
+-- [simvascular_external.ITK] PATHS:  
+-- [simvascular_external.ITK] 
+-- [simvascular_external.ITK] simvascular_external_PATHS:  
+-- [simvascular_external.ITK] Search paths for ITKConfig.cmake: /work/SimVascular/Code/CMake;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin;
+-- [simvascular_external.ITK] EXTRA_ARGS: 5.4.0;REQUIRED
+-- [simvascular_external.ITK] Find package ... 
+-- Found OpenGL: /usr/lib/x86_64-linux-gnu/libOpenGL.so  found components: OpenGL GLX 
+-- [simvascular_external.ITK] --- Done find package 
+-- [simvascular_external.ITK] Package ITK found!
+-- [simvascular_external.ITK] Include dirs: /work/externals/install/itk/include/ITK-5.4;/work/externals/install/gdcm/include/gdcm-3.0;/work/externals/install/hdf5/include
+-- [simvascular_external.ITK] ----- Done finding ITK 
+-- [simvascular_external.ITK]
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: ITK
+-- [simvascular_install_external]  SV_ITK_DIR: /work/externals/install/itk
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/itk/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : OpenCASCADE 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/OpenCASCADE.cmake
+-- [Code/CMake/Externals/OpenCASCADE.cmake]  =============== Code/CMake/Externals    OpenCASCADE.cmake ===============
+-- [Code/CMake/Externals/OpenCASCADE.cmake]  proj: OpenCASCADE
+-- [Code/CMake/Externals/OpenCASCADE.cmake]  SV_OpenCASCADE_DIR: /work/externals/install/opencascade
+-- [Code/CMake/Externals/OpenCASCADE.cmake]  OpenCASCADE_DIR: /work/externals/install/opencascade/lib/cmake/opencascade
+-- [Code/CMake/Externals/OpenCASCADE.cmake]  SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [simvascular_external.OpenCASCADE] 
+-- [simvascular_external.OpenCASCADE] ========== simvascular_external  OpenCASCADE ==========
+-- [simvascular_external.OpenCASCADE] _pkg: OpenCASCADE 
+-- [simvascular_external.OpenCASCADE] PATHS:  
+-- [simvascular_external.OpenCASCADE] 
+-- [simvascular_external.OpenCASCADE] simvascular_external_PATHS:  
+-- [simvascular_external.OpenCASCADE] Search paths for OpenCASCADEConfig.cmake: /work/SimVascular/Code/CMake;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin;
+-- [simvascular_external.OpenCASCADE] EXTRA_ARGS: 7.6.0;REQUIRED
+-- [simvascular_external.OpenCASCADE] Find package ... 
+-- [simvascular_external.OpenCASCADE] --- Done find package 
+-- [simvascular_external.OpenCASCADE] Package OpenCASCADE found!
+-- [simvascular_external.OpenCASCADE] Include dir /work/externals/install/opencascade/include/opencascade
+-- [simvascular_external.OpenCASCADE] ----- Done finding OpenCASCADE 
+-- [simvascular_external.OpenCASCADE]
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: OpenCASCADE
+-- [simvascular_install_external]  SV_OpenCASCADE_DIR: /work/externals/install/opencascade
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/opencascade/lib
+-- [Code/CMake/SimVascularExternals.cmake]  -------------------------------------------------------- 
+-- [Code/CMake/SimVascularExternals.cmake]  foreach proj : MITK 
+-- [Code/CMake/SimVascularExternals.cmake]  Use proj: ON 
+-- [Code/CMake/SimVascularExternals.cmake]  Include /work/SimVascular/Code/CMake/Externals/MITK.cmake
+-- [Code/CMake/Externals/MITK.cmake]  =============== Code/CMake/Externals    MITK.cmake ===============
+-- [Code/CMake/Externals/MITK.cmake]  proj: MITK
+-- [Code/CMake/Externals/MITK.cmake]  SV_MITK_DIR: /work/externals/install/mitk
+-- [Code/CMake/Externals/MITK.cmake]  MITK_DIR: /work/externals/install/mitk
+-- [Code/CMake/Externals/MITK.cmake]  SV_USE_MITK_CONFIG: OFF
+-- [Code/CMake/Externals/MITK.cmake]  SV_EXTERNALS_USE_TOPLEVEL_BIN_DIR: ON
+-- [Code/CMake/Externals/MITK.cmake]  MITK_DIR: /work/externals/install/mitk
+-- [Code/CMake/Externals/MITK.cmake]  Don't use MITK config
+-- [Code/CMake/Externals/MITK.cmake]  Find MITK ... 
+-- [simvascular_external.MITK] 
+-- [simvascular_external.MITK] ========== simvascular_external  MITK ==========
+-- [simvascular_external.MITK] _pkg: MITK 
+-- [simvascular_external.MITK] PATHS:  
+-- [simvascular_external.MITK] 
+-- [simvascular_external.MITK] simvascular_external_PATHS:  
+-- [simvascular_external.MITK] Search paths for MITKConfig.cmake: /work/SimVascular/Code/CMake;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/extra-cmake-modules/find-modules;/work/externals/install/qt6-dist/6.6.2/gcc_64/lib/cmake/Qt6/3rdparty/kwin;
+-- [simvascular_external.MITK] EXTRA_ARGS: 2022.10;REQUIRED
+-- [simvascular_external.MITK] Find package ... 
+-- [Code/CMake/FindMITK.cmake]  
+-- [Code/CMake/FindMITK.cmake]  ==========================================================
+-- [Code/CMake/FindMITK.cmake]  =============== Code/CMake  FindMITK.cmake ===============
+-- [Code/CMake/FindMITK.cmake]  ==========================================================
+-- [Code/CMake/FindMITK.cmake]  MITK_DIR: /work/externals/install/mitk
+-- [Code/CMake/FindMITK.cmake]  Find libraries ... 
+-- [Code/CMake/FindMITK.cmake]  ----- Done find libraries 
+-- [Code/CMake/FindMITK.cmake]  Find plugins ... 
+-- [Code/CMake/FindMITK.cmake]  ----- Done find plugins 
+-- [Code/CMake/FindMITK.cmake]  Find headers ...
+-- [Code/CMake/FindMITK.cmake]  52 headers kept from the cache
+-- [Code/CMake/FindMITK.cmake]  ----- Done find headers 
+-- [Code/CMake/FindMITK.cmake]  --- Done find package 
+-- [Code/CMake/FindMITK.cmake]  Package MITK found!
+-- [Code/CMake/FindMITK.cmake]  Include dir /work/externals/install/mitk/include
+-- [Code/CMake/FindMITK.cmake]  Include dirs: /work/externals/install/mitk/include;/work/externals/install/mitk/include/ctk;/work/externals/install/mitk/include/ctk/PluginFramework;/work/externals/install/mitk/include/mitk;/work/externals/install/mitk/include/mitk/configs;/work/externals/install/mitk/include/mitk/exports;/work/externals/install/mitk/include/mitk/ui_files;/work/externals/install/mitk/include/mitk/Modules/AlgorithmsExt/include;/work/externals/install/mitk/include/mitk/Modules/AppUtil/include;/work/externals/install/mitk/include/mitk/Modules/Core/include;/work/externals/install/mitk/include/mitk/Modules/CppMicroServices/core/include;/work/externals/install/mitk/include/mitk/Modules/DataTypesExt/include;/work/externals/install/mitk/include/mitk/Modules/MapperExt/include;/work/externals/install/mitk/include/mitk/Modules/PlanarFigure/include;/work/externals/install/mitk/include/mitk/ui_files;/work/externals/install/mitk/include/mitk/Modules/QtWidgets/include;/work/externals/install/mitk/include/mitk/ui_files;/work/externals/install/mitk/include/mitk/Modules/QtWidgetsExt/include;/work/externals/install/mitk/include/mitk/Modules/SceneSerialization/include;/work/externals/install/mitk/include/mitk/Modules/Log/include;/work/externals/install/mitk/include/mitk/Modules/ContourModel/DataManagement;/work/externals/install/mitk/include/mitk/Modules/CppMicroServices/core/src/module;/work/externals/install/mitk/include/mitk/Modules/CppMicroServices/core/src/service;/work/externals/install/mitk/include/mitk/Modules/CppMicroServices/core/src/util;/work/externals/install/mitk/include/mitk/Modules/ImageDenoising;/work/externals/install/mitk/include/mitk/Modules/LegacyGL;/work/externals/install/mitk/include/mitk/Modules/Multilabel;/work/externals/install/mitk/include/mitk/Modules/Segmentation/Algorithms;/work/externals/install/mitk/include/mitk/Modules/Segmentation/Controllers;/work/externals/install/mitk/include/mitk/Modules/SurfaceInterpolation;/work/externals/install/mitk/include/mitk/ui_files;/work/externals/install/mitk/include/mitk/Plugins/org.mitk.core.services/src;/work/externals/install/mitk/include/mitk/Plugins/org.mitk.gui.common/src;/work/externals/install/mitk/include/mitk/Plugins/org.mitk.gui.qt.application/src;/work/externals/install/mitk/include/mitk/Plugins/org.mitk.gui.qt.common/src;/work/externals/install/mitk/include/mitk/Plugins/org.mitk.gui.qt.application/src;/work/externals/install/mitk/include/mitk/Plugins/org.mitk.gui.qt.stdmultiwidgeteditor/src;/work/externals/install/mitk/include/mitk/Plugins/org.mitk.gui.qt.ext/src;/work/externals/install/mitk/include/mitk/Plugins/org.blueberry.core.runtime/src;/work/externals/install/mitk/include/mitk/Plugins/org.blueberry.core.runtime/src/application;/work/externals/install/mitk/include/mitk/Plugins/org.blueberry.core.runtime/src/registry;/work/externals/install/mitk/include/mitk/Plugins/org.blueberry.ui.qt/src;/work/externals/install/mitk/include/mitk/Plugins/org.blueberry.ui.qt/src/application;/work/externals/install/mitk/include/mitk/Plugins/org.blueberry.ui.qt/src/intro;/work/externals/install/mitk/include/mitk/Modules/SegmentationUI/Qmitk;/work/externals/install/mitk/include/mitk/Modules/SegmentationUI/Qmitk;/work/externals/install/mitk/include/mitk/Modules/SegmentationUI/Qmitk;/work/externals/install/mitk/include/mitk/Modules/Segmentation/Interactions;/work/externals/install/mitk/include/mitk/Plugins/org.mitk.gui.qt.segmentation/src;/work/externals/install/mitk/include/mitk/Modules/Annotation/include;/work/externals/install/mitk/include/mitk/Modules/Multilabel;/work/externals/install/mitk/include/mitk/Modules/Segmentation/SegmentationUtilities/BooleanOperations;/work/externals/install/mitk/include/mitk/Modules/Segmentation/SegmentationUtilities/MorphologicalOperations
+-- [Code/CMake/FindMITK.cmake]  ----- Done finding MITK 
+-- [Code/CMake/FindMITK.cmake] 
+-- [Code/CMake/FindMITK.cmake]  ----- Done find MITK 
+-- [Code/CMake/FindMITK.cmake]  ----- Done Code/CMake/Externals    MITK.cmake 
+-- [simvascular_install_external]  
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  +++++                     simvascular_install_external                
+-- [simvascular_install_external]  ----------------------------------------------------------------------
+-- [simvascular_install_external]  ######################################################################
+-- [simvascular_install_external]  project_name: MITK
+-- [simvascular_install_external]  SV_MITK_DIR: /work/externals/install/mitk
+-- [simvascular_install_external]  ENABLE_DISTRIBUTION: SV_ENABLE_DISTRIBUTION
+-- [simvascular_install_external]  DISTRIBUTION is enabled
+-- [simvascular_install_external]  EXISTS /work/externals/install/mitk/lib
+-- /work/build/SimVascular-build/ThirdParty/zlib
+-- /work/SimVascular/Code/ThirdParty/zlib
+-- /work/build/SimVascular-build/ThirdParty/tetgen
+-- /work/SimVascular/Code/ThirdParty/tetgen
+CMake Deprecation Warning at ThirdParty/tetgen/simvascular_tetgen/CMakeLists.txt:32 (cmake_minimum_required):
+  Compatibility with CMake < 2.8.12 will be removed from a future version of
+  CMake.
+
+  Update the VERSION argument <min> value or use a ...<max> suffix to tell
+  CMake that the project does not need compatibility with older versions.
+
+
+-- /work/build/SimVascular-build/ThirdParty/vmtk
+-- /work/SimVascular/Code/ThirdParty/vmtk
+-- /work/build/SimVascular-build/ThirdParty/SolverIO
+-- /work/SimVascular/Code/ThirdParty/SolverIO
+-- 
+-- Install timestamp: 260918032651
+-- [Distribution]  ========== Distribution/CMakeLists.txt ==========
+-- [Distribution]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Distribution
+-- [Distribution]  CMAKE_CURRENT_BINARY_DIR: /work/build/SimVascular-build/Distribution
+-- [Distribution]  CMAKE_CURRENT_LIST_DIR: /work/SimVascular/Distribution
+-- [Distribution]  SV_INSTALL_VERSION_DIR: 
+-- [Distribution]  SV_INSTALL_RUNTIME_DIR: bin
+-- [Distribution]  Qt6_DIR: /work/externals/install/qt6/lib/cmake/Qt6
+-- CPACK_COMPONENTS_ALL: CoreExecutables;CoreLibraries;CoreHeaders;CoreScripts;CoreFiles;ThirdPartyExecutables;ThirdPartyLibraries;ThirdPartyHeaders;ExternalExecutables;ExternalLibraries;ExternalHeaders;CMake;Unspecified
+-- Packname name: SimVascular-linux-x64-2026.09.18
+-- 
+-- Libraries:
+-- 	Source/PythonAPI
+-- 	Source/sv/Utils
+-- 	Source/sv/Repository
+-- 	Source/sv3/Path
+-- 	Source/sv3/Common
+-- 	Source/vtkSV/Common
+-- 	Source/vtkSV/IO
+-- 	Source/vtkSV/Modules/Misc
+-- 	Source/vtkSV/Modules/Geometry
+-- 	Source/vtkSV/Modules/Boolean
+-- 	Source/vtkSV/Modules/NURBS
+-- 	Source/vtkSV/Modules/Parameterization
+-- 	Source/vtkSV/Modules/Segmentation
+-- 	Source/sv2/ImageProcessing
+-- 	Source/sv/Geometry
+-- 	Source/sv/Model/SolidModel
+-- 	Source/sv2/PostProcessing
+-- 	Source/sv/Mesh/MeshObject
+-- 	Source/sv/Model/PolyDataSolidModel
+-- 	Source/sv3/Segmentation
+-- 	Source/sv/Mesh/TetGenMeshObject
+-- 	Source/sv/Mesh/AdaptObject
+-- 	Source/sv/Mesh/TetGenAdapt
+-- 	Source/sv/Mesh/VMTKUtils
+-- 	Source/sv/Mesh/MMGMeshUtils
+-- 	Source/sv3/ITKSegmentation
+-- 	Source/sv/Model/OCCTSolidModel
+-- Modules:
+-- 	Source/sv4gui/Modules/Common
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/Common
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_common 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+-- 	Source/sv4gui/Modules/Path
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/Path
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_path 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+--  
+-- ================ usFunctionAddResources ============== 
+-- [usFunctionAddResources] US_RCC_EXECUTABLE: /work/externals/install/mitk/bin/usResourceCompiler
+-- 	Source/sv4gui/Modules/Segmentation
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/Segmentation
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_segmentation 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+--  
+-- ================ usFunctionAddResources ============== 
+-- [usFunctionAddResources] US_RCC_EXECUTABLE: /work/externals/install/mitk/bin/usResourceCompiler
+-- 	Source/sv4gui/Modules/Model/Common
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/Model/Common
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_model 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+--  
+-- ================ usFunctionAddResources ============== 
+-- [usFunctionAddResources] US_RCC_EXECUTABLE: /work/externals/install/mitk/bin/usResourceCompiler
+-- 	Source/sv4gui/Modules/Mesh/Common
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/Mesh/Common
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_mesh 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+-- 	Source/sv4gui/Modules/Simulation
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/Simulation
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_simulation 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+-- 	Source/sv4gui/Modules/ROMSimulation
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/ROMSimulation
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_rom_simulation 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+-- 	Source/sv4gui/Modules/ProjectManagement
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/ProjectManagement
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_projectmanagement 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+-- 	Source/sv4gui/Modules/QtWidgets
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/QtWidgets
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_qtwidgets 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES: sv4gui_ResliceSlider.h 
+-- 	Source/sv4gui/Modules/ImageProcessing
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/ImageProcessing
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_imageprocessing 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+--  
+-- ================ usFunctionAddResources ============== 
+-- [usFunctionAddResources] US_RCC_EXECUTABLE: /work/externals/install/mitk/bin/usResourceCompiler
+-- 	Source/sv4gui/Modules/MultiPhysics
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/MultiPhysics
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_multiphysics 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+-- 	Source/sv4gui/Modules/MachineLearning
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/MachineLearning
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_ml 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+-- 	Source/sv4gui/Modules/Model/OCCT
+-- [simvascular_create_module]  
+-- [simvascular_create_module]  ---------- simvascular_create_module ----------
+-- [simvascular_create_module]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Code/Source/sv4gui/Modules/Model/OCCT
+-- [simvascular_create_module]  _MODULE_TARGET: _simvascular_module_model_occt 
+-- [simvascular_create_module]  UI_FILES:  
+-- [simvascular_create_module]  QRC_FILES:  
+-- [simvascular_create_module]  MOC_H_FILES:  
+-- Plugins:
+-- 	Source/sv4gui/Plugins/org.sv.projectdatanodes
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.datamanager
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.segmentation
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.modeling
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.meshing
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.simulation
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.application
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics
+-- 	Source/sv4gui/Plugins/org.sv.pythondatanodes
+-- 	Source/sv4gui/Plugins/org.sv.gui.qt.mitksegmentation
+-- [Code/CMake/FindMITK.cmake]  Executables ...
+-- [Code/CMake/FindMITK.cmake]   Source/Application
+-- [Application]  ========== Coude/Source/Application/CMakeLists.txt ==========
+-- [Application]  SV_EXE: simvascular 
+-- [Application]  SV_USE_MITK_CONFIG: OFF 
+-- [simvascular_add_executable]  ========== simvascular_add_executable ==========
+-- [simvascular_add_executable]  TARGET_NAME: simvascular
+-- [simvascular_add_executable]  simvascular_add_executable_NO_SCRIPT: FALSE
+-- [simvascular_add_executable]  simvascular_add_executable_INSTALL_DESTINATION: bin
+-- [simvascular_add_executable]  simvascular_add_executable_INSTALL_COMPONENT: CoreExecutables
+-- [simvascular_add_executable]  _COMPARGS: 
+-- [simvascular_add_executable]  Install Linux
+-- [Code/CMake/FindMITK.cmake]  Add git submodules ...
+-- [Code/CMake/FindMITK.cmake]  +++++ Don't update git submodules 
+--  qt libexec exists
+-- [SimVascularInstallLibs]  
+-- [SimVascularInstallLibs]  ========== SimVascularInstallLibs.cmake ==========
+-- [SimVascularInstallLibs]  SV_ENABLE_DISTRIBUTION: ON 
+-- [SimVascularInstallLibs]  SV_EXTERNAL_SHARED_LIBS: Qt6;HDF5;tinyxml2;PYTHON;FREETYPE;VTK;GDCM;ITK;OpenCASCADE;MITK 
+-- [SimVascularInstallLibs]  ------ for SV_EXTERNAL_SHARED_LIBS ...
+-- [SimVascularInstallLibs]  ----- var: Qt6 ----- 
+-- [SimVascularInstallLibs]  ----- var: HDF5 ----- 
+-- [SimVascularInstallLibs]  ----- var: tinyxml2 ----- 
+[SimVascularInstallLibs]  [tinyxml2]  SV_INSTALL_tinyxml2_RUNTIME_DIR does not exist,  installing into externals
+-- [SimVascularInstallLibs]  ----- var: PYTHON ----- 
+-- [SimVascularInstallLibs]  ----- var: FREETYPE ----- 
+-- [SimVascularInstallLibs]  ----- var: VTK ----- 
+-- [SimVascularInstallLibs]  ----- var: GDCM ----- 
+-- [SimVascularInstallLibs]  ----- var: ITK ----- 
+-- [SimVascularInstallLibs]  ----- var: OpenCASCADE ----- 
+-- [SimVascularInstallLibs]  ----- var: MITK ----- 
+-- [Code/Scripts]  ==================== SimVascular/Code/Scripts/CMakeLists.txt ====================
+-- Generating simvascular scripts. Dev name: sv, install name:  simvascular
+-- [SimVascularConfigSetup]  
+-- [SimVascularConfigSetup]  ========== SimVascularConfigSetup.cmake ==========
+-- [SimVascularConfigSetup]  SV_LIB_NAMES: _simvascular_adaptor;_simvascular_geom;_simvascular_image;_simvascular_itk_lset;_simvascular_math;_simvascular_path;_simvascular_common;_simvascular_mesh;_simvascular_meshsim_mesh;_simvascular_meshsim_adaptor;_simvascular_meshsim_discrete_solid;_simvascular_meshsim_solid;_simvascular_mmg_mesh;_simvascular_opencascade_solid;_simvascular_parasolid_solid;_simvascular_polydata_solid;_simvascular_post;_simvascular_repository;_simvascular_python_api;_simvascular_solid;_simvascular_segmentation;_simvascular_multiphysics;_simvascular_tcl_interp;_simvascular_tetgen_mesh;_simvascular_tetgen_adaptor;_simvascular_utils;_simvascular_vmtk_utils;_simvascular_thirdparty_metis;_simvascular_thirdparty_nspcg;_simvascular_thirdparty_sparse;_simvascular_thirdparty_tetgen;_simvascular_thirdparty_vmtk;_simvascular_thirdparty_zlib;_simvascular_thirdparty_solverio;_simvascular_module_common;_simvascular_module_imageprocessing;_simvascular_module_mesh;_simvascular_module_meshsim;_simvascular_module_ml;_simvascular_module_model;_simvascular_module_model_occt;_simvascular_module_model_parasolid;_simvascular_module_path;_simvascular_module_projectmanagement;_simvascular_module_qtwidgets;_simvascular_module_segmentation;_simvascular_module_simulation;_simvascular_module_rom_simulation;_simvascular_module_multiphysics;_simvascular_presolver;_simvascular_threedsolver_dummy_leslib;_simvascular_threedsolver_fortran;_simvascular_threedsolver_write_restart;_simvascular_threedsolver_vtk;_simvascular_postsolver;_simvascular_svls;_simvascular_vtksvboolean;_simvascular_vtksvcommon;_simvascular_vtksvio;_simvascular_vtksvmisc;_simvascular_vtksvgeometry;_simvascular_vtksvnurbs;_simvascular_vtksvparameterization;_simvascular_vtksvsegmentation 
+-- Configuring done
+-- Generating done
+-- Build files have been written to: /work/build/SimVascular-build
+Consolidate compiler generated dependencies of target _simvascular_thirdparty_tetgen
+Consolidate compiler generated dependencies of target _simvascular_thirdparty_zlib
+Consolidate compiler generated dependencies of target _simvascular_vtksvio
+Consolidate compiler generated dependencies of target _simvascular_vtksvcommon
+Consolidate compiler generated dependencies of target _simvascular_utils
+Consolidate compiler generated dependencies of target _simvascular_module_ml
+Consolidate compiler generated dependencies of target _simvascular_module_imageprocessing
 [  0%] Copying dicom2 to /work/build/SimVascular-build/bin/dicom2
+[  0%] Built target dcmdump-copy
 [  0%] Built target dcmodify-copy
 [  0%] Built target _simvascular_thirdparty_tetgen
 [  1%] Built target _simvascular_thirdparty_zlib
+Consolidate compiler generated dependencies of target _simvascular_module_multiphysics
+[  1%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_misc_utils.cxx.o
 [  2%] Built target _simvascular_vtksvio
-[  3%] Built target _simvascular_utils
-[  3%] Built target _simvascular_vtksvcommon
-[  7%] Built target _simvascular_thirdparty_vmtk
-[  8%] Built target _simvascular_module_imageprocessing
-[  9%] Built target _simvascular_module_multiphysics
-[  9%] Built target dicom2-copy
-[  9%] Built target _simvascular_module_ml
-[ 10%] Built target _simvascular_thirdparty_solverio
-[ 11%] Built target _simvascular_vtksvgeometry
-[ 12%] Built target _simvascular_repository
-[ 13%] Built target _simvascular_vtksvboolean
-[ 15%] Built target _simvascular_vtksvmisc
+[  2%] Building CXX object Source/vtkSV/Common/CMakeFiles/_simvascular_vtksvcommon.dir/vtkSVGeneralUtils.cxx.o
+[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_vtk_utils.cxx.o
+[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_cgeom.cxx.o
+[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_Math.cxx.o
+[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_FactoryRegistrar.cxx.o
+[  3%] Building CXX object Source/sv4gui/Modules/ImageProcessing/CMakeFiles/_simvascular_module_imageprocessing.dir/sv4gui_ImageProcessingUtils.cxx.o
+Consolidate compiler generated dependencies of target _simvascular_thirdparty_solverio
+[  3%] Built target dicom2-copy
+[  3%] Building CXX object Source/sv4gui/Modules/MachineLearning/CMakeFiles/_simvascular_module_ml.dir/sv4gui_MachineLearningUtils.cxx.o
+Consolidate compiler generated dependencies of target _simvascular_thirdparty_vmtk
+[  3%] Built target _simvascular_thirdparty_solverio
+[  4%] Built target _simvascular_module_multiphysics
+[  8%] Built target _simvascular_thirdparty_vmtk
+[  8%] Linking CXX shared library ../../../lib/lib_simvascular_utils.so
+[  8%] Built target _simvascular_utils
+Consolidate compiler generated dependencies of target _simvascular_repository
+[  8%] Linking CXX shared library ../../../lib/lib_simvascular_vtksvcommon.so
+[  8%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_RepositoryData.cxx.o
+[  8%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_PolyData.cxx.o
+[  8%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_DataObject.cxx.o
+[  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_StrPts.cxx.o
+[  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_UnstructuredGrid.cxx.o
+[  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_DataSet.cxx.o
+[  9%] Built target _simvascular_vtksvcommon
+Consolidate compiler generated dependencies of target _simvascular_vtksvboolean
+Consolidate compiler generated dependencies of target _simvascular_vtksvgeometry
+Consolidate compiler generated dependencies of target _simvascular_vtksvmisc
+[  9%] Building CXX object Source/vtkSV/Modules/Boolean/CMakeFiles/_simvascular_vtksvboolean.dir/vtkSVLoopBooleanPolyDataFilter.cxx.o
+[  9%] Building CXX object Source/vtkSV/Modules/Boolean/CMakeFiles/_simvascular_vtksvboolean.dir/vtkSVLoopIntersectionPolyDataFilter.cxx.o
+[  9%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvgeometry.so
+[  9%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvmisc.so
+[ 10%] Built target _simvascular_vtksvgeometry
+[ 12%] Built target _simvascular_vtksvmisc
+Consolidate compiler generated dependencies of target _simvascular_vtksvnurbs
+[ 12%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvnurbs.so
+[ 13%] Built target _simvascular_vtksvnurbs
+Consolidate compiler generated dependencies of target _simvascular_vtksvparameterization
+[ 13%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvparameterization.so
+[ 14%] Built target _simvascular_vtksvparameterization
+Consolidate compiler generated dependencies of target _simvascular_vtksvsegmentation
+[ 14%] Building CXX object Source/vtkSV/Modules/Segmentation/CMakeFiles/_simvascular_vtksvsegmentation.dir/vtkSVCenterlines.cxx.o
+[ 14%] Building CXX object Source/vtkSV/Modules/Segmentation/CMakeFiles/_simvascular_vtksvsegmentation.dir/vtkSVCenterlineGraph.cxx.o
+[ 14%] Linking CXX shared library ../../../../lib/lib_simvascular_module_ml.so
+[ 15%] Linking CXX shared library ../../../../lib/lib_simvascular_module_imageprocessing.so
+[ 15%] Built target _simvascular_module_ml
+Appending zipped resources to _simvascular_module_imageprocessing
+[ 15%] Built target _simvascular_module_imageprocessing
+[ 15%] Linking CXX shared library ../../../lib/lib_simvascular_repository.so
+[ 15%] Built target _simvascular_repository
+Consolidate compiler generated dependencies of target _simvascular_solid
 Consolidate compiler generated dependencies of target _simvascular_vmtk_utils
-[ 15%] Built target _simvascular_solid
-[ 15%] Built target _simvascular_post
-[ 16%] Built target _simvascular_vtksvnurbs
-[ 16%] Built target _simvascular_vmtk_utils
-[ 17%] Built target _simvascular_itk_lset
-[ 17%] Built target _simvascular_mesh
-[ 18%] Built target _simvascular_geom
-[ 19%] Built target _simvascular_vtksvparameterization
-[ 19%] Built target _simvascular_adaptor
-[ 20%] Built target _simvascular_polydata_solid
+Consolidate compiler generated dependencies of target _simvascular_post
+Consolidate compiler generated dependencies of target _simvascular_itk_lset
+[ 15%] Building CXX object Source/sv/Model/SolidModel/CMakeFiles/_simvascular_solid.dir/sv_SolidModel.cxx.o
+[ 15%] Building CXX object Source/sv/Mesh/VMTKUtils/CMakeFiles/_simvascular_vmtk_utils.dir/sv_vmtk_utils.cxx.o
+[ 15%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_CalculateWallShearStress.cxx.o
+[ 15%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_ConvertVisFiles.cxx.o
+[ 15%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_CalculateTKE.cxx.o
+[ 15%] Building CXX object Source/sv3/ITKSegmentation/CMakeFiles/_simvascular_itk_lset.dir/sv3_ITKUtils.cxx.o
+[ 16%] Building CXX object Source/sv3/ITKSegmentation/CMakeFiles/_simvascular_itk_lset.dir/sv3_ITKLevelSet.cxx.o
+[ 16%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvboolean.so
+[ 17%] Built target _simvascular_vtksvboolean
+[ 17%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvsegmentation.so
+[ 19%] Built target _simvascular_vtksvsegmentation
+[ 19%] Linking CXX shared library ../../../../lib/lib_simvascular_solid.so
+[ 19%] Linking CXX shared library ../../../lib/lib_simvascular_post.so
+[ 19%] Built target _simvascular_solid
+Consolidate compiler generated dependencies of target _simvascular_mesh
+Consolidate compiler generated dependencies of target _simvascular_geom
+[ 19%] Built target _simvascular_post
+[ 19%] Building CXX object Source/sv/Mesh/MeshObject/CMakeFiles/_simvascular_mesh.dir/sv_MeshSystem.cxx.o
+[ 19%] Building CXX object Source/sv/Mesh/MeshObject/CMakeFiles/_simvascular_mesh.dir/sv_MeshObject.cxx.o
+[ 19%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_sys_geom.cxx.o
+[ 19%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_ggems.cxx.o
+[ 19%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_spline.cxx.o
+[ 19%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_integrate_surface.cxx.o
+[ 19%] Linking CXX shared library ../../../../lib/lib_simvascular_vmtk_utils.so
+[ 19%] Built target _simvascular_vmtk_utils
+[ 19%] Linking CXX shared library ../../../lib/lib_simvascular_itk_lset.so
+[ 19%] Built target _simvascular_itk_lset
+[ 19%] Linking CXX shared library ../../../../lib/lib_simvascular_mesh.so
+[ 19%] Built target _simvascular_mesh
+Consolidate compiler generated dependencies of target _simvascular_adaptor
+[ 19%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_adapt_utils.cxx.o
+[ 19%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_AdaptObject.cxx.o
+[ 19%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_eispack.cxx.o
+[ 20%] Linking CXX shared library ../../../lib/lib_simvascular_geom.so
+[ 20%] Built target _simvascular_geom
+Consolidate compiler generated dependencies of target _simvascular_common
+Consolidate compiler generated dependencies of target _simvascular_polydata_solid
+Consolidate compiler generated dependencies of target _simvascular_opencascade_solid
+Consolidate compiler generated dependencies of target _simvascular_image
+[ 20%] Building CXX object Source/sv3/Common/CMakeFiles/_simvascular_common.dir/sv3_XmlIOUtil.cxx.o
+[ 20%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_polydatasolid_utils.cxx.o
+[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_image.cxx.o
+[ 20%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_PolyDataSolid.cxx.o
+[ 20%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_vtkGetBoundaryFaces.cxx.o
+[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_read_header.cxx.o
+[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_calc_correction_eqn.cxx.o
+[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_decode.cxx.o
+[ 20%] Building CXX object Source/sv/Model/OCCTSolidModel/CMakeFiles/_simvascular_opencascade_solid.dir/sv_OCCTSolidModel.cxx.o
+[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_img_threshold.cxx.o
+[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_DistanceMap.cxx.o
+[ 20%] Linking CXX shared library ../../../lib/lib_simvascular_common.so
+[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_mask_image_in_place.cxx.o
 [ 20%] Built target _simvascular_common
-[ 20%] Built target _simvascular_image
-[ 20%] Built target _simvascular_opencascade_solid
-[ 20%] Built target _simvascular_mmg_mesh
-[ 22%] Built target _simvascular_vtksvsegmentation
-[ 23%] Built target _simvascular_path
+[ 20%] Building CXX object Source/sv/Model/OCCTSolidModel/CMakeFiles/_simvascular_opencascade_solid.dir/sv_occtsolid_utils.cxx.o
+[ 20%] Linking CXX shared library ../../../../lib/lib_simvascular_adaptor.so
+[ 20%] Built target _simvascular_adaptor
+Consolidate compiler generated dependencies of target _simvascular_path
+[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathUtils.cxx.o
+[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathElement.cxx.o
+[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathGroup.cxx.o
+[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_VtkParametricSpline.cxx.o
+[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_Spline.cxx.o
+[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathIO.cxx.o
+[ 22%] Linking CXX shared library ../../../../lib/lib_simvascular_polydata_solid.so
+[ 22%] Built target _simvascular_polydata_solid
+Consolidate compiler generated dependencies of target _simvascular_mmg_mesh
+[ 22%] Building CXX object Source/sv/Mesh/MMGMeshUtils/CMakeFiles/_simvascular_mmg_mesh.dir/sv_mmg_mesh_utils.cxx.o
+[ 22%] Linking CXX shared library ../../../lib/lib_simvascular_image.so
+[ 22%] Built target _simvascular_image
+[ 22%] Linking CXX shared library ../../../lib/lib_simvascular_path.so
+[ 22%] Built target _simvascular_path
+Consolidate compiler generated dependencies of target _simvascular_module_common
+Consolidate compiler generated dependencies of target _simvascular_segmentation
+[ 22%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_Spline.cxx.o
+[ 22%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_Math3.cxx.o
+[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_VtkParametricSpline.cxx.o
+[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_XmlIOUtil.cxx.o
+[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_VtkUtils.cxx.o
+[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_StringUtils.cxx.o
+[ 23%] Linking CXX shared library ../../../../lib/lib_simvascular_mmg_mesh.so
+[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_Contour.cxx.o
+[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_LevelSetContour.cxx.o
+[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_SegmentationUtils.cxx.o
+[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_CircleContour.cxx.o
+[ 23%] Linking CXX shared library ../../../../lib/lib_simvascular_opencascade_solid.so
+[ 23%] Built target _simvascular_mmg_mesh
+[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_PolygonContour.cxx.o
+[ 23%] Built target _simvascular_opencascade_solid
 Consolidate compiler generated dependencies of target _simvascular_tetgen_mesh
-[ 23%] Built target _simvascular_tetgen_mesh
+[ 23%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshObject.cxx.o
+[ 23%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshSystem.cxx.o
+[ 23%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_utils.cxx.o
+[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_SplinePolygonContour.cxx.o
+[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_ThresholdContour.cxx.o
+[ 24%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_envelope.cxx.o
+[ 24%] Linking CXX shared library ../../../../lib/lib_simvascular_module_common.so
 [ 24%] Built target _simvascular_module_common
-[ 25%] Built target _simvascular_segmentation
+Consolidate compiler generated dependencies of target _simvascular_module_path
+[ 24%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_PathElement.cxx.o
+[ 24%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_Path.cxx.o
+[ 25%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_PathOperation.cxx.o
+[ 25%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_PathDataInteractor.cxx.o
+[ 25%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_PathVtkMapper2D.cxx.o
+[ 25%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_PathVtkMapper3D.cxx.o
+[ 25%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_PathIO.cxx.o
+[ 25%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_PathLegacyIO.cxx.o
+[ 25%] Building CXX object Source/sv4gui/Modules/Path/CMakeFiles/_simvascular_module_path.dir/sv4gui_PathObjectFactory.cxx.o
+[ 26%] Linking CXX shared library ../../../../lib/lib_simvascular_tetgen_mesh.so
+[ 26%] Built target _simvascular_tetgen_mesh
 Consolidate compiler generated dependencies of target _simvascular_tetgen_adaptor
-[ 25%] Built target _simvascular_tetgen_adaptor
+[ 26%] Building CXX object Source/sv/Mesh/TetGenAdapt/CMakeFiles/_simvascular_tetgen_adaptor.dir/sv_TetGenAdapt.cxx.o
+[ 26%] Linking CXX shared library ../../../lib/lib_simvascular_segmentation.so
+[ 26%] Built target _simvascular_segmentation
+[ 26%] Linking CXX shared library ../../../../lib/lib_simvascular_module_path.so
+[ 26%] Linking CXX shared library ../../../../lib/lib_simvascular_tetgen_adaptor.so
+[ 26%] Built target _simvascular_tetgen_adaptor
+Appending zipped resources to _simvascular_module_path
 [ 26%] Built target _simvascular_module_path
+Consolidate compiler generated dependencies of target _simvascular_module_segmentation
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationUtils.cxx.o
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourCircle.cxx.o
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Contour.cxx.o
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourEllipse.cxx.o
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourPolygon.cxx.o
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourTensionPolygon.cxx.o
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourSplinePolygon.cxx.o
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourOperation.cxx.o
+[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourModel.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourModelThresholdInteractor.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourModelVtkMapper2D.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroup.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupVtkMapper2D.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupVtkMapper3D.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupDataInteractor.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupIO.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationLegacyIO.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Surface.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SurfaceVtkMapper3D.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3D.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DOperation.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DIO.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DVtkMapper3D.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DDataInteractor.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationObjectFactory.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Seg3DUtils.cxx.o
+[ 29%] Linking CXX shared library ../../../../lib/lib_simvascular_module_segmentation.so
+Appending zipped resources to _simvascular_module_segmentation
 [ 29%] Built target _simvascular_module_segmentation
-[ 29%] Built target _simvascular_module_qtwidgets
+Consolidate compiler generated dependencies of target _simvascular_module_qtwidgets
+Consolidate compiler generated dependencies of target _simvascular_module_model
+[ 29%] Building CXX object Source/sv4gui/Modules/QtWidgets/CMakeFiles/_simvascular_module_qtwidgets.dir/sv4gui_ResliceSlider.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/QtWidgets/CMakeFiles/_simvascular_module_qtwidgets.dir/moc_sv4gui_ResliceSlider.cpp.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelUtils.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementPolyData.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElement.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementAnalytic.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementFactory.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_Model.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelOperation.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelVtkMapper2D.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelVtkMapper3D.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelDataInteractor.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelIO.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelLegacyIO.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelObjectFactory.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_RegisterPolyDataFunction.cxx.o
+[ 30%] Linking CXX shared library ../../../../lib/lib_simvascular_module_qtwidgets.so
+[ 30%] Built target _simvascular_module_qtwidgets
+[ 30%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model.so
+Appending zipped resources to _simvascular_module_model
 [ 31%] Built target _simvascular_module_model
-[ 32%] Built target _simvascular_module_model_occt
+Consolidate compiler generated dependencies of target _simvascular_module_model_occt
+Consolidate compiler generated dependencies of target _simvascular_module_mesh
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_ModelUtilsOCCT.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_ModelElementOCCT.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_RegisterOCCTFunction.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_Mesh.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshTetGen.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshFactory.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_RegisterTetGenFunction.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMesh.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshOperation.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshMapper3D.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshMapper2D.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshIO.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshLegacyIO.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshObjectFactory.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshTetGenAdaptor.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshAdaptor.cxx.o
+[ 32%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model_occt.so
+[ 33%] Built target _simvascular_module_model_occt
+[ 33%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_mesh.so
 [ 33%] Built target _simvascular_module_mesh
+Consolidate compiler generated dependencies of target _simvascular_module_rom_simulation
+Consolidate compiler generated dependencies of target _simvascular_module_simulation
+[ 33%] Building CXX object Source/sv4gui/Modules/ROMSimulation/CMakeFiles/_simvascular_module_rom_simulation.dir/sv4gui_MitkROMSimJobIO.cxx.o
+[ 33%] Building CXX object Source/sv4gui/Modules/Simulation/CMakeFiles/_simvascular_module_simulation.dir/sv4gui_MitkSimJobIO.cxx.o
+[ 33%] Building CXX object Source/sv4gui/Modules/ROMSimulation/CMakeFiles/_simvascular_module_rom_simulation.dir/sv4gui_ROMSimulationUtils.cxx.o
+[ 33%] Building CXX object Source/sv4gui/Modules/Simulation/CMakeFiles/_simvascular_module_simulation.dir/sv4gui_SimulationUtils.cxx.o
+[ 33%] Linking CXX shared library ../../../../lib/lib_simvascular_module_rom_simulation.so
+[ 33%] Linking CXX shared library ../../../../lib/lib_simvascular_module_simulation.so
 [ 34%] Built target _simvascular_module_rom_simulation
 [ 35%] Built target _simvascular_module_simulation
+Consolidate compiler generated dependencies of target _simvascular_module_projectmanagement
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataFolder.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ProjectManager.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataNodeOperationInterface.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataNodeOperation.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ImageFolder.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_MeshFolder.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ModelFolder.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_PathFolder.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_RepositoryFolder.cxx.o
+[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ProjectFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_SegmentationFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_SimulationFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ROMSimulationFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_MultiPhysicsFolder.cxx.o
+[ 37%] Linking CXX shared library ../../../../lib/lib_simvascular_module_projectmanagement.so
 [ 37%] Built target _simvascular_module_projectmanagement
-[ 38%] Built target org_sv_projectdatanodes
-[ 42%] Built target org_sv_gui_qt_datamanager
-[ 45%] Built target org_sv_gui_qt_projectmanager
-[ 48%] Built target org_sv_gui_qt_pathplanning
-[ 51%] Built target org_sv_gui_qt_meshing
-[ 55%] Built target org_sv_gui_qt_imageprocessing
-[ 59%] Built target org_sv_gui_qt_multiphysics
-[ 66%] Built target org_sv_gui_qt_simulation
-[ 73%] Built target org_sv_gui_qt_mitksegmentation
-[ 78%] Built target org_sv_gui_qt_segmentation
-[ 84%] Built target org_sv_gui_qt_application
-[ 89%] Built target org_sv_gui_qt_modeling
-[ 97%] Built target org_sv_gui_qt_romsimulation
-[ 98%] Built target _simvascular_python_api
-[ 99%] Built target org_sv_pythondatanodes
-[100%] Built target simvascular
+Consolidate compiler generated dependencies of target org_sv_projectdatanodes
+Consolidate compiler generated dependencies of target org_sv_gui_qt_projectmanager
+Consolidate compiler generated dependencies of target org_sv_gui_qt_datamanager
+[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.projectdatanodes/CMakeFiles/org_sv_projectdatanodes.dir/sv4gui_ProjectDataNodesPluginActivator.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectAddImageAction.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectSaveAction.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectDuplicateAction.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectShowModelEdgesAction.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectShowModelFullAction.cxx.o
+[ 37%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_datamanager.so
+[ 41%] Built target org_sv_gui_qt_datamanager
+Consolidate compiler generated dependencies of target org_sv_gui_qt_imageprocessing
+Consolidate compiler generated dependencies of target org_sv_gui_qt_meshing
+Consolidate compiler generated dependencies of target org_sv_gui_qt_pathplanning
+Consolidate compiler generated dependencies of target org_sv_gui_qt_application
+Consolidate compiler generated dependencies of target org_sv_gui_qt_simulation
+Consolidate compiler generated dependencies of target org_sv_gui_qt_segmentation
+[ 41%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathCreate.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshCreate.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImageProcessing.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileOpenProjectAction.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobCreate.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_LoftingUtils.cxx.o
+[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_ContourGroupCreate.cxx.o
+[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileSaveProjectAction.cxx.o
+[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileSaveProjectAsAction.cxx.o
+[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshCreateAction.cxx.o
+[ 43%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_projectmanager.so
+[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImagePathsContainer.cxx.o
+[ 46%] Built target org_sv_gui_qt_projectmanager
+[ 47%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_CloseProjectAction.cxx.o
+[ 47%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshEdit.cxx.o
+[ 48%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathCreateAction.cxx.o
+[ 48%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_projectdatanodes.so
+[ 49%] Built target org_sv_projectdatanodes
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_ProjectCreate.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_WorkbenchWindowAdvisor.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobCreateAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimulationView.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImagePathsMapper.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobStopAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_VtkMeshSphereWidget.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_ContourGroupCreateAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshLegacySaveAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathLoadAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLegacyLoadAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathLegacySaveAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshLoadSurfaceAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLegacySaveAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImageSeedMapper2D.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_AppWorkbenchAdvisor.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_AboutDialog.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobExportAction.cxx.o
+Consolidate compiler generated dependencies of target org_sv_gui_qt_multiphysics
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/sv4gui_MultiPhysicsJobCreate.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLoadAction.cxx.o

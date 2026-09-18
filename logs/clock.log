@@ -1,0 +1,5 @@
+Fri Sep 18 05:16:29 Etc 2026
+--- 미래 시각이 찍힌 파일 ---
+--- 샘플 비교 (소스 vs 오브젝트) ---
+-rwxrwxrwx 1 root root  9637 2026-07-04 12:13:10.991816200 +0000 /work/SimVascular/Code/Source/sv4gui/Plugins/org.sv.gui.qt.meshing/sv4gui_MeshCreate.cxx
+-rw-r--r-- 1 sv   sv   51560 2026-09-18 05:03:11.299121400 +0000 Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshCreate.cxx.o

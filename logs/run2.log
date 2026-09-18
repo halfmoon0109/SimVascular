@@ -1,0 +1,77 @@
+06:54:57 [  0%] Built target dcmdump-copy
+06:54:57 [  0%] Built target dcmodify-copy
+06:54:57 [  0%] Copying dicom2 to /work/build/SimVascular-build/bin/dicom2
+06:54:57 [  0%] Built target dicom2-copy
+06:54:57 [  0%] Built target _simvascular_thirdparty_tetgen
+06:54:58 [  1%] Built target _simvascular_thirdparty_zlib
+06:54:58 [  2%] Built target _simvascular_vtksvio
+06:54:58 [  2%] Built target _simvascular_thirdparty_solverio
+06:54:58 [  2%] Built target _simvascular_vtksvcommon
+06:54:58 [  3%] Built target _simvascular_utils
+06:54:59 [  4%] Built target _simvascular_vtksvgeometry
+06:54:59 [  5%] Built target _simvascular_vtksvboolean
+06:54:59 [  6%] Built target _simvascular_repository
+06:54:59 [ 10%] Built target _simvascular_thirdparty_vmtk
+06:54:59 [ 12%] Built target _simvascular_vtksvmisc
+06:54:59 [ 12%] Built target _simvascular_solid
+06:54:59 [ 12%] Built target _simvascular_post
+06:54:59 [ 12%] Built target _simvascular_module_ml
+06:54:59 [ 13%] Built target _simvascular_module_imageprocessing
+06:55:00 [ 13%] Built target _simvascular_vmtk_utils
+06:55:00 [ 14%] Built target _simvascular_vtksvnurbs
+06:55:00 [ 14%] Built target _simvascular_mesh
+06:55:00 [ 14%] Built target _simvascular_adaptor
+06:55:00 [ 15%] Built target _simvascular_geom
+06:55:00 [ 16%] Built target _simvascular_module_multiphysics
+06:55:00 [ 17%] Built target _simvascular_vtksvparameterization
+06:55:01 [ 17%] Built target _simvascular_common
+06:55:01 [ 18%] Built target _simvascular_polydata_solid
+06:55:01 [ 18%] Built target _simvascular_image
+06:55:01 [ 20%] Built target _simvascular_itk_lset
+06:55:01 [ 21%] Built target _simvascular_vtksvsegmentation
+06:55:01 [ 21%] Built target _simvascular_mmg_mesh
+06:55:02 [ 22%] Built target _simvascular_path
+06:55:02 Consolidate compiler generated dependencies of target _simvascular_tetgen_mesh
+06:55:03 [ 22%] Built target _simvascular_opencascade_solid
+06:55:03 [ 23%] Built target _simvascular_tetgen_mesh
+06:55:03 [ 24%] Built target _simvascular_module_common
+06:55:03 [ 24%] Built target _simvascular_tetgen_adaptor
+06:55:03 [ 25%] Built target _simvascular_segmentation
+06:55:06 [ 26%] Built target _simvascular_module_path
+06:55:11 [ 29%] Built target _simvascular_module_segmentation
+06:55:13 [ 29%] Built target _simvascular_module_qtwidgets
+06:55:14 [ 31%] Built target _simvascular_module_model
+06:55:16 [ 32%] Built target _simvascular_module_model_occt
+06:55:17 [ 33%] Built target _simvascular_module_mesh
+06:55:18 [ 34%] Built target _simvascular_module_rom_simulation
+06:55:18 [ 35%] Built target _simvascular_module_simulation
+06:55:22 [ 37%] Built target _simvascular_module_projectmanagement
+06:55:24 [ 38%] Built target org_sv_projectdatanodes
+06:55:25 [ 41%] Built target org_sv_gui_qt_projectmanager
+06:55:25 [ 45%] Built target org_sv_gui_qt_datamanager
+06:55:30 Consolidate compiler generated dependencies of target org_sv_gui_qt_multiphysics
+06:55:31 Consolidate compiler generated dependencies of target org_sv_gui_qt_imageprocessing
+06:55:32 Consolidate compiler generated dependencies of target org_sv_gui_qt_meshing
+06:55:33 Consolidate compiler generated dependencies of target org_sv_gui_qt_pathplanning
+06:55:34 Consolidate compiler generated dependencies of target org_sv_gui_qt_application
+06:55:35 Consolidate compiler generated dependencies of target org_sv_gui_qt_simulation
+06:55:37 [ 49%] Built target org_sv_gui_qt_multiphysics
+06:55:37 [ 53%] Built target org_sv_gui_qt_imageprocessing
+06:55:37 Consolidate compiler generated dependencies of target org_sv_gui_qt_mitksegmentation
+06:55:37 Consolidate compiler generated dependencies of target org_sv_gui_qt_segmentation
+06:55:37 [ 56%] Built target org_sv_gui_qt_pathplanning
+06:55:37 [ 59%] Built target org_sv_gui_qt_meshing
+06:55:40 [ 69%] Built target org_sv_gui_qt_application
+06:55:40 [ 71%] Built target org_sv_gui_qt_simulation
+06:55:41 [ 78%] Built target org_sv_gui_qt_mitksegmentation
+06:55:41 [ 83%] Built target org_sv_gui_qt_segmentation
+06:55:46 Consolidate compiler generated dependencies of target org_sv_gui_qt_modeling
+06:55:51 [ 88%] Built target org_sv_gui_qt_modeling
+06:55:58 Consolidate compiler generated dependencies of target org_sv_gui_qt_romsimulation
+06:56:02 [ 96%] Built target org_sv_gui_qt_romsimulation
+06:56:05 Consolidate compiler generated dependencies of target _simvascular_python_api
+06:56:08 [ 97%] Built target _simvascular_python_api
+06:56:09 Consolidate compiler generated dependencies of target org_sv_pythondatanodes
+06:56:13 [ 98%] Built target org_sv_pythondatanodes
+06:56:14 Consolidate compiler generated dependencies of target simvascular
+06:56:17 [100%] Built target simvascular
