@@ -4592,9 +4592,13 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
  * @param surface The inner surface with its 'Normals' point data.
  * @param array The extrusion length per point, all positive.
  * @param outer Set to the envelope, with 'TrimRole' (0 an uncut triangle, 1 a
- * piece of a cut one) and 'TrimCrossing' on its cells; it is also written to
- * wall_outer_trimmed.vtp, and the pieces cut away to wall_outer_dropped.vtp
- * with the winding number that dropped them.
+ * piece of a cut one, 2 a piece reshaped by the sliver cleanup) and
+ * 'TrimCrossing' on its cells and 'TrimPointKind' (0 extruded, 1 on a
+ * crease, 2 a triple point) and 'TrimFoot' (the interface point an extruded
+ * point came from, -1 for a crease point) on its points; it is also written
+ * to wall_outer_trimmed.vtp, and the pieces cut away to
+ * wall_outer_dropped.vtp with the winding number that dropped them (-998
+ * for a pocket).
  * @param caps Set to the rim pairs of the vessel ends.
  * @param numUnresolved Set to the number of faults that would make the volume
  * mesher refuse the surface: triangles crossing, holes, edges on more than
@@ -4664,6 +4668,9 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
       closed.points[(size_t)3*ptId + k] = p[k] + t*n[k];
     }
   }
+  // Each sheet triangle also carries the direction it faced before the
+  // extrusion, so that the envelope knows exactly which triangles the
+  // extrusion turned over.
   for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
   {
     vtkIdType npts;
@@ -4673,9 +4680,17 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     {
       continue;
     }
+    double a[3], b[3], c[3], e1[3], e2[3], n[3];
+    surface->GetPoint(pts[0], a);
+    surface->GetPoint(pts[1], b);
+    surface->GetPoint(pts[2], c);
+    vtkMath::Subtract(b, a, e1);
+    vtkMath::Subtract(c, a, e2);
+    vtkMath::Cross(e1, e2, n);
     for (int j = 0; j < 3; j++)
     {
       closed.triangles.push_back((long long)pts[j]);
+      closed.sheetNormal.push_back(n[j]);
     }
   }
   closed.numSheetTriangles = (long long)(closed.triangles.size()/3);
@@ -4783,6 +4798,66 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     return SV_ERROR;
   }
 
+  // What the volume mesher would refuse. The envelope's own accounting
+  // first, then its triangles against each other, which is the check the
+  // mesher makes.
+  int numFaults = (int)(report.numArrangementFaults + report.numUndecided +
+      report.numNonManifoldEdges + report.numMiswoundEdges);
+  std::vector<unsigned char> crossing;
+  double firstCrossingAt[3];
+  long long numCrossing = svenvelope::CountCrossingTriangles(envelope.points, envelope.triangles,
+      crossing, firstCrossingAt);
+
+  // The slivers. A crease that passes close to a corner of a triangle or
+  // nearly along one of its edges leaves a piece with almost no altitude,
+  // and the volume mesher has to stand a tetrahedron as flat as that piece
+  // on it: measured, those pieces were the worst elements of the whole
+  // mesh by two orders of magnitude. The crease is exact and stays; the
+  // extruded points around it are free, since the outer surface has no
+  // point-for-point relation to the interface, so the pieces are reshaped
+  // by collapsing them onto the crease or flipping their long edge. The
+  // cap rims stay too, for the annuli that close the vessel ends. A sound
+  // envelope only; and if the reshaping makes the surface cross itself,
+  // which it checks, the envelope is used as it was.
+  svenvelope::CleanReport clean;
+  int cleanState = 0;   // 0 not run, 1 done, 2 undone for crossing, 3 refused
+  long long numCrossingAfterClean = 0;
+  if (numFaults == 0 && numCrossing == 0)
+  {
+    svenvelope::Envelope raw = envelope;
+    std::vector<unsigned char> fixedPoint(envelope.points.size()/3, 0);
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      if (rimOfPoint[(size_t)ptId] >= 0)
+      {
+        fixedPoint[(size_t)ptId] = 1;
+      }
+    }
+    const double sliverAspect = 10.0;
+    if (svenvelope::CleanEnvelopeSlivers(envelope, fixedPoint, sliverAspect, clean) == 0)
+    {
+      std::vector<unsigned char> crossingAfter;
+      double at[3];
+      numCrossingAfterClean = svenvelope::CountCrossingTriangles(envelope.points, envelope.triangles,
+          crossingAfter, at);
+      if (numCrossingAfterClean > 0)
+      {
+        envelope = raw;
+        cleanState = 2;
+      }
+      else
+      {
+        crossing.swap(crossingAfter);
+        cleanState = 1;
+      }
+    }
+    else
+    {
+      envelope = raw;
+      cleanState = 3;
+    }
+  }
+
   // The envelope as the outer surface, on the points it uses. The input
   // points keep their ids in the envelope, so a point below numPts is an
   // extruded inner point and the rest are crease points.
@@ -4825,15 +4900,23 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
   outer->SetPoints(outerPoints);
   outer->SetPolys(outerCells);
 
-  // What the volume mesher would refuse. The envelope's own accounting
-  // first, then its triangles against each other, which is the check the
-  // mesher makes.
-  int numFaults = (int)(report.numArrangementFaults + report.numUndecided +
-      report.numNonManifoldEdges + report.numMiswoundEdges);
-  std::vector<unsigned char> crossing;
-  double firstCrossingAt[3];
-  long long numCrossing = svenvelope::CountCrossingTriangles(envelope.points, envelope.triangles,
-      crossing, firstCrossingAt);
+  // Which point is which, for reading the thickness diagnostics: an extruded
+  // point carries the interface point it was extruded from, a crease point
+  // none.
+  {
+    auto kindArray = vtkSmartPointer<vtkIntArray>::New();
+    kindArray->SetName("TrimPointKind");
+    auto footArray = vtkSmartPointer<vtkIdTypeArray>::New();
+    footArray->SetName("TrimFoot");
+    for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
+    {
+      long long id = outerToEnvelope[(size_t)ptId];
+      kindArray->InsertNextValue(envelope.pointKind[(size_t)id]);
+      footArray->InsertNextValue((id < (long long)numPts) ? (vtkIdType)id : (vtkIdType)-1);
+    }
+    outer->GetPointData()->AddArray(kindArray);
+    outer->GetPointData()->AddArray(footArray);
+  }
 
   // The surface with its tags, and the pieces cut away with the winding
   // number that cut them, for looking at what the log can only list.
@@ -4846,7 +4929,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     sourceArray->SetName("TrimSource");
     for (size_t c = 0; c < numOuterCells; c++)
     {
-      roleArray->InsertNextValue(envelope.whole[c] ? 0 : 1);
+      roleArray->InsertNextValue((envelope.whole[c] == 1) ? 0 : ((envelope.whole[c] == 2) ? 2 : 1));
       crossingArray->InsertNextValue(crossing[c] ? 1 : 0);
       sourceArray->InsertNextValue((int)envelope.source[c]);
     }
@@ -5027,8 +5110,29 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     }
   }
   fprintf(stdout,"; %lld could not be classified\n", report.numUndecided);
-  fprintf(stdout,"  kept %lld whole triangles and %lld pieces, dropped %lld whole triangles inside the wall; %lld triangles had turned over in the extrusion\n",
-      report.numWholeKept, report.numPiecesKept - report.numWholeKept, report.numWholeDropped, report.numInverted);
+  fprintf(stdout,"  %lld triangles turned over in the extrusion; %lld pockets and shreds (pieces cut off from the rims that enclose nothing, the slits of a fold) of %lld pieces were dropped\n",
+      report.numInverted, report.numPockets, report.numPocketPieces);
+  fprintf(stdout,"  kept %lld whole triangles and %lld pieces, dropped %lld whole triangles inside the wall\n",
+      report.numWholeKept, report.numPiecesKept - report.numWholeKept, report.numWholeDropped);
+  if (cleanState == 0)
+  {
+    fprintf(stdout,"  the sliver cleanup did not run: the envelope has faults or crosses itself\n");
+  }
+  else if (cleanState == 3)
+  {
+    fprintf(stdout,"  the sliver cleanup refused the envelope as malformed; it is used as it was\n");
+  }
+  else
+  {
+    fprintf(stdout,"  sliver cleanup (aspect ratio above %g): %lld slivers before, %lld after (worst %.0f -> %.0f); %lld edges collapsed onto a point that stays and %lld flipped in %d passes, no crease or rim point moved; %.1f s%s\n",
+        10.0, clean.numSliversBefore, clean.numSliversAfter, clean.worstBefore, clean.worstAfter,
+        clean.numCollapsed, clean.numFlipped, clean.numPasses, clean.seconds,
+        (cleanState == 2) ? " - UNDONE: the cleaned surface crossed itself, so the envelope is used as it was" : "");
+    if (cleanState == 2)
+    {
+      fprintf(stdout,"    %lld triangles of the cleaned surface passed through another\n", numCrossingAfterClean);
+    }
+  }
   fprintf(stdout,"  the envelope has %lld points (%lld extruded, %lld on creases) and %zu triangles; %.1f s\n",
       (long long)numOuterPts, (long long)numKeptOriginal, (long long)numCreasePts, numOuterCells, seconds);
   if (report.numArrangementFaults > 0)
@@ -5048,7 +5152,7 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
     fprintf(stdout,"  %d holes in the envelope besides the cap rims, the first at (%.5g, %.5g, %.5g)\n",
         numHoles, firstHoleAt[0], firstHoleAt[1], firstHoleAt[2]);
   }
-  fprintf(stdout,"  %lld triangles of the envelope pass through another%s; the surface is written to wall_outer_trimmed.vtp with TrimRole (0 whole, 1 piece), TrimCrossing and TrimSource on its cells, and the pieces cut away to wall_outer_dropped.vtp with TrimWinding\n",
+  fprintf(stdout,"  %lld triangles of the envelope pass through another%s; the surface is written to wall_outer_trimmed.vtp with TrimRole (0 whole, 1 piece, 2 reshaped by the cleanup), TrimCrossing and TrimSource on its cells and TrimPointKind (0 extruded, 1 crease, 2 triple) and TrimFoot on its points, and the pieces cut away to wall_outer_dropped.vtp with TrimWinding (-998 pocket, -999 unclassified)\n",
       numCrossing, (numCrossing > 0) ? " - the volume mesher will refuse them" : "");
   if (numCrossing > 0)
   {
@@ -5886,11 +5990,25 @@ int TGenUtils_ReportOffsetWallThickness(vtkPolyData *surface, vtkDoubleArray *ar
 
   fprintf(stdout,"Offset wall thickness [%s]:\n", label);
 
+  // What the outer surface knows about its points, when it was built as the
+  // envelope: which are crease points and which interface point an extruded
+  // point came from. With that, a shortfall can be read: an extruded point
+  // standing its own foot's wall next to a face that asks for more is a step
+  // in the thickness table, not a defect of the construction.
+  auto kindArray = vtkIntArray::SafeDownCast(outer->GetPointData()->GetArray("TrimPointKind"));
+  auto footArray = vtkIdTypeArray::SafeDownCast(outer->GetPointData()->GetArray("TrimFoot"));
+  auto innerNormals = surface->GetPointData()->GetArray("Normals");
+  if (kindArray != nullptr && kindArray->GetNumberOfTuples() != outer->GetNumberOfPoints()) kindArray = nullptr;
+  if (footArray != nullptr && footArray->GetNumberOfTuples() != outer->GetNumberOfPoints()) footArray = nullptr;
+  if (innerNormals != nullptr && (innerNormals->GetNumberOfComponents() != 3 || innerNormals->GetNumberOfTuples() != numPts)) innerNormals = nullptr;
+
   // Outward: how far each offset point ended up from the inner surface against
   // the thickness asked for where it sits.
   {
     vtkIdType numOuterPts = outer->GetNumberOfPoints();
     std::vector<double> ratio((size_t)numOuterPts, 1.0);
+    std::vector<vtkIdType> nearestOf((size_t)numOuterPts, -1);
+    std::vector<double> offNormal((size_t)numOuterPts, 0.0);   // degrees between the offset direction and the nearest interface normal
     std::vector<std::pair<double,vtkIdType> > flagged;
     int numBelow90 = 0, numBelow50 = 0, numBelow25 = 0, numMeasured = 0;
     double worst = 0.0;
@@ -5919,6 +6037,17 @@ int TGenUtils_ReportOffsetWallThickness(vtkPolyData *surface, vtkDoubleArray *ar
 
       double value = std::sqrt(distanceSquared)/want;
       ratio[(size_t)ptId] = value;
+      nearestOf[(size_t)ptId] = nearest;
+      if (innerNormals != nullptr)
+      {
+        double n[3], d[3];
+        innerNormals->GetTuple(nearest, n);
+        vtkMath::Subtract(x, closest, d);
+        if (vtkMath::Normalize(n) > 0.0 && vtkMath::Normalize(d) > 0.0)
+        {
+          offNormal[(size_t)ptId] = vtkMath::DegreesFromRadians(std::acos(std::max(-1.0, std::min(1.0, vtkMath::Dot(n, d)))));
+        }
+      }
       numMeasured++;
       if (numMeasured == 1 || value < worst)
       {
@@ -5932,6 +6061,32 @@ int TGenUtils_ReportOffsetWallThickness(vtkPolyData *surface, vtkDoubleArray *ar
     fprintf(stdout,"  offset surface to inner surface, over %d of its points: below 90%%/50%%/25%% of the requested thickness at %d/%d/%d, worst %.3f\n",
         numMeasured, numBelow90, numBelow50, numBelow25, worst);
     fprintf(stdout,"    this is the construction, not the shape: every outer point was put a wall from the interface, so a shortfall is the construction giving it back - a vertex normal leaning against its facets reads a percent or two short, and a point left inside a fold reads far shorter\n");
+    // What the short points are, when the surface says.
+    if (kindArray != nullptr && footArray != nullptr && !flagged.empty())
+    {
+      int numCrease = 0, numExtruded = 0, numStep = 0, numOffNormal = 0, numOwnFoot = 0;
+      for (size_t i = 0; i < flagged.size(); i++)
+      {
+        vtkIdType ptId = flagged[i].second;
+        if (kindArray->GetValue(ptId) != 0)
+        {
+          numCrease++;
+          continue;
+        }
+        numExtruded++;
+        vtkIdType foot = footArray->GetValue(ptId);
+        vtkIdType nearest = nearestOf[(size_t)ptId];
+        if (foot >= 0 && foot < numPts && nearest >= 0)
+        {
+          double tFoot = array->GetValue(foot), tNear = array->GetValue(nearest);
+          if (foot == nearest) numOwnFoot++;
+          if (tFoot > 0.0 && tNear > 1.25*tFoot) numStep++;
+        }
+        if (offNormal[(size_t)ptId] > 30.0) numOffNormal++;
+      }
+      fprintf(stdout,"    of the %d short points, %d are crease points and %d extruded points; of the extruded, %d sit nearest their own foot, %d stand next to an interface point asking over 1.25x their foot's thickness (a step in the thickness table), and %d lie more than 30 degrees off the nearest interface normal (outside that point's sweep)\n",
+          (int)flagged.size(), numCrease, numExtruded, numOwnFoot, numStep, numOffNormal);
+    }
 
     if (!flagged.empty())
     {
@@ -5952,9 +6107,34 @@ int TGenUtils_ReportOffsetWallThickness(vtkPolyData *surface, vtkDoubleArray *ar
       {
         double seed[3];
         outer->GetPoint(regions[i].seedId, seed);
-        fprintf(stdout,"      [%d] ratio %.3f at (%.5g, %.5g, %.5g), %d points\n",
-            (int)(i+1), ratio[(size_t)regions[i].seedId], seed[0], seed[1], seed[2],
+        vtkIdType seedId = regions[i].seedId;
+        fprintf(stdout,"      [%d] ratio %.3f at (%.5g, %.5g, %.5g), %d points",
+            (int)(i+1), ratio[(size_t)seedId], seed[0], seed[1], seed[2],
             regions[i].numPoints);
+        if (kindArray != nullptr && footArray != nullptr)
+        {
+          if (kindArray->GetValue(seedId) != 0)
+          {
+            fprintf(stdout,"; the seed is a crease point");
+          }
+          else
+          {
+            vtkIdType foot = footArray->GetValue(seedId);
+            vtkIdType nearest = nearestOf[(size_t)seedId];
+            if (foot >= 0 && foot < numPts && nearest >= 0)
+            {
+              double footPt[3];
+              surface->GetPoint(foot, footPt);
+              fprintf(stdout,"; the seed was extruded %.4g from a foot asking %.4g and its nearest interface point asks %.4g",
+                  std::sqrt(vtkMath::Distance2BetweenPoints(seed, footPt)), array->GetValue(foot), array->GetValue(nearest));
+            }
+          }
+          if (innerNormals != nullptr)
+          {
+            fprintf(stdout,", %.0f degrees off the interface normal there", offNormal[(size_t)seedId]);
+          }
+        }
+        fprintf(stdout,"\n");
       }
       if (numOutside > 0)
       {
