@@ -200,6 +200,11 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface
     double maxThickness,
     std::vector<TGenUtilsCapRim> &caps);
 
+SV_EXPORT_TETGEN_MESH int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    vtkPolyData *outer,
+    int &numUnresolved);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,
     vtkPolyData *outer,

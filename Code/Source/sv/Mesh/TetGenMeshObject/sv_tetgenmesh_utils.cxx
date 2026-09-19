@@ -77,6 +77,7 @@
 #include "sv_misc_utils.h"
 #include "sv_vtk_utils.h"
 #include "sv_tetgenmesh_envelope.h"
+#include "sv_tetgenmesh_offset.h"
 
 #ifdef _WIN32
 #include <direct.h>
@@ -84,6 +85,7 @@
 #include <unistd.h>
 #endif
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <deque>
@@ -2026,7 +2028,7 @@ int TGenUtils_SmoothPointArray(vtkPolyData *surface, vtkDoubleArray *array, int 
  * average of its one-ring neighbors' normals so the converging directions
  * spread apart, and renormalizes it. Only the normal direction changes: the
  * wall thickness (taken from a separate array) and the surface points (the
- * fluid/wall interface) never move.
+ * fluid/wall inner) never move.
  *
  * Each point is relaxed in proportion to how concave it is. The concavity is
  * the average, over the one-ring neighbors that rise above the point's
@@ -2262,7 +2264,7 @@ int TGenUtils_SmoothWarpVectorsInConcaveRegions(vtkPolyData *surface, const char
  * global self-intersections of the extruded outer wall.
  * Convex and flat regions (h <= 0 for all neighbors) are left unchanged.
  * Only the thickness values change; the surface points (the fluid/wall
- * interface) never move.
+ * inner) never move.
  * @param surface The surface being extruded; must have a 3-component
  * 'Normals' point data array with the outward point normals.
  * @param array The wall thickness point array to clamp; must have exactly
@@ -4196,10 +4198,12 @@ int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface, vtkDoubleArray *arra
 /**
  * @brief Trims the offset outer surface back to the cap planes of the inner
  * surface, and reports the rim it was trimmed to alongside the inner rim.
- * @note The offset is built from a surface whose cap openings were filled, so
- * it covers each vessel end with a dome a thickness deep. The wall does not
- * extend over the end - the lumen opens there - so the dome comes off and the
- * two rims left behind are closed to each other instead.
+ * @note The offset is built from a surface continued past each cap rim by a
+ * collar a thickness and an edge long, so it runs on past the cap plane as
+ * a straight tube and closes with a dome over the collar's end. The wall
+ * does not extend over the end - the lumen opens there - so everything past
+ * the plane comes off and the two rims left behind are closed to each
+ * other instead.
  *
  * The cut is the cap plane, but only near the cap. An infinite plane would also
  * cut whatever else of the model happens to lie on its far side, which for a
@@ -4249,6 +4253,7 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
 
   std::vector<double> capRadius(innerLoops.size(), 0.0);
   std::vector<double> capThickness(innerLoops.size(), maxThickness);
+  std::vector<double> capEdge(innerLoops.size(), 0.0);
   caps.resize(innerLoops.size());
 
   for (size_t c = 0; c < innerLoops.size(); c++)
@@ -4300,9 +4305,11 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
 
     for (size_t m = 0; m < loop.size(); m++)
     {
-      double p[3];
+      double p[3], q[3];
       surface->GetPoint(loop[m], p);
+      surface->GetPoint(loop[(m+1)%loop.size()], q);
       capRadius[c] = std::max(capRadius[c], std::sqrt(vtkMath::Distance2BetweenPoints(p, cap.origin)));
+      capEdge[c] += std::sqrt(vtkMath::Distance2BetweenPoints(p, q))/(double)loop.size();
     }
     if (capRadius[c] <= 0.0)
     {
@@ -4348,9 +4355,12 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
   // edge length. That is a rim pulled off its cap plane, and the pass below
   // pairs rims to caps by how well they lie on one.
   //
-  // The dome of a rim of radius R under a wall of thickness t meets the cap
-  // plane at R + t, so the window has to hold that and no more than it needs
-  // to. Sizing it off the thickness rather than off R keeps it tight where the
+  // Past the plane the offset runs on as a tube of radius R + t for the
+  // collar's length, a thickness and a rim edge e, and closes with a dome a
+  // thickness beyond that: the farthest point of it is 2t + e along the
+  // outward direction and R + t off the axis, within R + 2.5t + 2e of the
+  // rim centre. The window has to hold that and no more than it needs to.
+  // Sizing it off the thickness rather than off R keeps it tight where the
   // vessel is wide, and keeps it valid where the wall is thick relative to the
   // vessel - a window of a fixed multiple of R would fall inside the rim it is
   // meant to cut once t approached R. The t is this cap's own: a window built
@@ -4359,7 +4369,7 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
   for (size_t c = 0; c < caps.size(); c++)
   {
     const TGenUtilsCapRim &cap = caps[c];
-    double window = capRadius[c] + 2.5*capThickness[c];
+    double window = capRadius[c] + 2.5*capThickness[c] + 2.0*capEdge[c];
 
     auto level = vtkSmartPointer<vtkDoubleArray>::New();
     level->SetName("CapTrimLevel");
@@ -4566,9 +4576,298 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
     fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): inner rim %zu points, trimmed rim %zu points, cut within %.5g of the rim centre (radius %.5g, wall %.5g)\n",
         caps[c].origin[0], caps[c].origin[1], caps[c].origin[2],
         caps[c].innerLoop.size(), caps[c].outerLoop.size(),
-        capRadius[c] + 2.5*capThickness[c], capRadius[c], capThickness[c]);
+        capRadius[c] + 2.5*capThickness[c] + 2.0*capEdge[c], capRadius[c], capThickness[c]);
   }
 
+  return SV_OK;
+}
+
+// -------------------------------------
+// OffsetDelaunayWithTetGen
+// -------------------------------------
+/**
+ * @brief The Delaunay tetrahedralization the offset core samples its field
+ * on, by TetGen: the point cloud alone, no facets, so nothing can fail on a
+ * self-intersection. TetGen keeps the points in their input order, which is
+ * checked by position rather than assumed.
+ */
+
+static bool OffsetDelaunayWithTetGen(const std::vector<double> &points,
+    std::vector<long long> &tetrahedra, void *, std::string &error)
+{
+  tetrahedra.clear();
+  size_t numPts = points.size()/3;
+  if (numPts < 4)
+  {
+    error = "fewer than four points to tetrahedralize";
+    return false;
+  }
+  auto in = new tetgenio;
+  auto out = new tetgenio;
+  in->firstnumber = 0;
+  in->numberofpoints = (int)numPts;
+  in->pointlist = new REAL[points.size()];
+  for (size_t i = 0; i < points.size(); i++)
+  {
+    in->pointlist[i] = points[i];
+  }
+  auto behavior = new tetgenbehavior;
+  behavior->quiet = 1;
+  bool ok = true;
+  try
+  {
+    tetrahedralize(behavior, in, out);
+  }
+  catch (...)
+  {
+    error = "TetGen could not tetrahedralize the offset field's point cloud";
+    ok = false;
+  }
+  if (ok)
+  {
+    // Every output point should be an input point at the same position.
+    std::map<std::array<long long, 3>, long long> byPosition;
+    auto keyOf = [](const double *p)
+    {
+      std::array<long long, 3> key = {(long long)std::llround(p[0]*1.0e6), (long long)std::llround(p[1]*1.0e6), (long long)std::llround(p[2]*1.0e6)};
+      return key;
+    };
+    for (size_t i = 0; i < numPts; i++)
+    {
+      byPosition[keyOf(&points[3*i])] = (long long)i;
+    }
+    std::vector<long long> toInput((size_t)out->numberofpoints, -1);
+    long long numMissed = 0;
+    for (int i = 0; i < out->numberofpoints; i++)
+    {
+      const double *p = &out->pointlist[3*i];
+      std::map<std::array<long long, 3>, long long>::iterator it = byPosition.find(keyOf(p));
+      if (it != byPosition.end() && vtkMath::Distance2BetweenPoints(p, &points[(size_t)3*it->second]) < 1.0e-18)
+      {
+        toInput[(size_t)i] = it->second;
+      }
+      else
+      {
+        numMissed++;
+      }
+    }
+    if (numMissed > 0)
+    {
+      char what[160];
+      snprintf(what, sizeof(what), "%lld points of TetGen's tetrahedralization are not points of the cloud", numMissed);
+      error = what;
+      ok = false;
+    }
+    else
+    {
+      tetrahedra.resize((size_t)4*out->numberoftetrahedra);
+      for (int t = 0; t < out->numberoftetrahedra; t++)
+      {
+        for (int m = 0; m < 4; m++)
+        {
+          tetrahedra[(size_t)4*t + m] = toInput[(size_t)out->tetrahedronlist[4*t + m]];
+        }
+      }
+    }
+  }
+  delete behavior;
+  delete in;
+  delete out;
+  return ok;
+}
+
+// -------------------------------------
+// TGenUtils_BuildContouredOuterSurface
+// -------------------------------------
+/**
+ * @brief Builds the outer surface of the wall as the offset of the inner
+ * surface at the requested thickness: the zero level of the signed distance
+ * to the inner surface less the thickness there, contoured over a point cloud
+ * that follows the inner surface's own resolution (sv_tetgenmesh_offset.h).
+ * @note Every construction that gave each outer point one inner point -
+ * the wedge extrusion, the trimmed extrusion, the exact envelope of the
+ * extrusion - thinned the wall at concave junctions, because the wall of one
+ * vessel fills the crotch up to the other vessel's wall and the interface
+ * points in the crotch have no outer point at all. The envelope cut the
+ * extrusion exactly where its sheets crossed and still stood a fraction of
+ * the wall over the interface wherever the extrusion folded or dipped
+ * (measured 0.2 to 0.5 of the thickness at every junction of a carotid
+ * model): the extrusion does not contain the surface that belongs there,
+ * and no classification of its pieces can supply it. The offset has it by
+ * construction. A uniform grid could not afford the thin vessels; the cloud
+ * can, being made of the inner points and their offsets.
+ *
+ * The result is closed except where the caller trims it back to the cap
+ * planes: the field continues the inner surface past each cap rim with a
+ * collar, so the offset is a straight tube through the plane there.
+ *
+ * Nothing of the inner surface is touched.
+ * @param surface The inner surface with its 'Normals' point data.
+ * @param array The thickness per point, all positive.
+ * @param outer Set to the offset surface, with 'TrimPointKind' (3, an offset
+ * point) and 'TrimFoot' (-1: no offset point comes from one inner point) on
+ * its points and 'TrimCrossing' on its cells, for the thickness diagnostics
+ * that read them; it is also written to wall_outer_offset.vtp.
+ * @param numUnresolved Set to the number of faults that would make the
+ * volume mesher refuse the surface: triangles crossing and edges on more
+ * than two triangles or wound against each other.
+ * @return SV_OK if the surface was built; its faults are counted, not failed.
+ */
+
+int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
+    vtkPolyData *outer, int &numUnresolved)
+{
+  numUnresolved = 0;
+  if (surface == nullptr || array == nullptr || outer == nullptr)
+  {
+    fprintf(stderr,"Cannot build the offset outer surface without a surface, a thickness array and an output\n");
+    return SV_ERROR;
+  }
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+  auto normals = surface->GetPointData()->GetArray("Normals");
+  if (normals == nullptr || normals->GetNumberOfComponents() != 3 ||
+      normals->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface has no 'Normals' point data to offset along\n");
+    return SV_ERROR;
+  }
+  auto start = std::chrono::steady_clock::now();
+
+  svoffset::Interface inner;
+  inner.points.resize((size_t)3*numPts);
+  inner.normals.resize((size_t)3*numPts);
+  inner.thickness.resize((size_t)numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double p[3], n[3];
+    surface->GetPoint(ptId, p);
+    normals->GetTuple(ptId, n);
+    double t = array->GetValue(ptId);
+    if (!(t > 0.0))
+    {
+      fprintf(stderr,"The wall thickness at (%.5g, %.5g, %.5g) is %.5g; every point has to be offset by a positive thickness\n",
+          p[0], p[1], p[2], t);
+      return SV_ERROR;
+    }
+    for (int k = 0; k < 3; k++)
+    {
+      inner.points[(size_t)3*ptId + k] = p[k];
+      inner.normals[(size_t)3*ptId + k] = n[k];
+    }
+    inner.thickness[(size_t)ptId] = t;
+  }
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+    for (int j = 0; j < 3; j++)
+    {
+      inner.triangles.push_back((long long)pts[j]);
+    }
+  }
+  if (inner.triangles.empty())
+  {
+    fprintf(stderr,"The surface has no triangles to offset\n");
+    return SV_ERROR;
+  }
+
+  svoffset::Options options;
+  svoffset::Surface offset;
+  svoffset::Report report;
+  std::string error;
+  if (svoffset::BuildOffsetSurface(inner, options, OffsetDelaunayWithTetGen, nullptr,
+        offset, report, error) != 0)
+  {
+    fprintf(stderr,"Problem building the offset outer surface: %s\n", error.c_str());
+    return SV_ERROR;
+  }
+
+  // What the volume mesher would refuse: the surface's own accounting, then
+  // its triangles against each other.
+  std::vector<unsigned char> crossing;
+  double firstCrossingAt[3];
+  long long numCrossing = svenvelope::CountCrossingTriangles(offset.points, offset.triangles,
+      crossing, firstCrossingAt);
+  numUnresolved = (int)(report.numNonManifoldEdges + report.numMiswoundEdges + numCrossing);
+
+  // The surface as polydata, with the tags the thickness diagnostics read.
+  vtkIdType numOuterPts = (vtkIdType)(offset.points.size()/3);
+  auto outerPoints = vtkSmartPointer<vtkPoints>::New();
+  outerPoints->SetDataTypeToDouble();
+  outerPoints->SetNumberOfPoints(numOuterPts);
+  for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
+  {
+    outerPoints->SetPoint(ptId, &offset.points[(size_t)3*ptId]);
+  }
+  auto outerCells = vtkSmartPointer<vtkCellArray>::New();
+  size_t numOuterCells = offset.triangles.size()/3;
+  for (size_t cc = 0; cc < numOuterCells; cc++)
+  {
+    vtkIdType triangle[3];
+    for (int j = 0; j < 3; j++)
+    {
+      triangle[j] = (vtkIdType)offset.triangles[3*cc + j];
+    }
+    outerCells->InsertNextCell(3, triangle);
+  }
+  outer->Initialize();
+  outer->SetPoints(outerPoints);
+  outer->SetPolys(outerCells);
+  {
+    auto kindArray = vtkSmartPointer<vtkIntArray>::New();
+    kindArray->SetName("TrimPointKind");
+    auto footArray = vtkSmartPointer<vtkIdTypeArray>::New();
+    footArray->SetName("TrimFoot");
+    for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
+    {
+      kindArray->InsertNextValue(3);
+      footArray->InsertNextValue((vtkIdType)-1);
+    }
+    outer->GetPointData()->AddArray(kindArray);
+    outer->GetPointData()->AddArray(footArray);
+    auto crossingArray = vtkSmartPointer<vtkIntArray>::New();
+    crossingArray->SetName("TrimCrossing");
+    for (size_t cc = 0; cc < numOuterCells; cc++)
+    {
+      crossingArray->InsertNextValue(crossing[cc] ? 1 : 0);
+    }
+    outer->GetCellData()->AddArray(crossingArray);
+    char offsetFile[] = "wall_outer_offset.vtp";
+    TGenUtils_WriteVTP(offsetFile, outer);
+  }
+
+  double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  fprintf(stdout,"Wall outer surface as the offset of the inner, contoured from the distance field:\n");
+  fprintf(stdout,"  %lld interface points and %lld triangles, thickness %.4g to %.4g; %lld cap rims continued by collars of %lld triangles\n",
+      report.numInterfacePoints, report.numInterfaceTriangles, report.smallestThickness, report.largestThickness,
+      report.numRims, report.numCollarTriangles);
+  fprintf(stdout,"  the field was sampled on %lld points (the inner, its offsets at %.2g and %.2g of the thickness and every %dth point's at %.2g) in %lld tetrahedra, %lld of them cut by the zero level; %.1f s for the field, %.1f s for the tetrahedra\n",
+      report.numCloudPoints, options.innerLayer, options.outerLayer, options.farStride, options.farLayer,
+      report.numTetrahedra, report.numTetrahedraCut, report.secondsField, report.secondsDelaunay);
+  fprintf(stdout,"  the contour had %lld points and %lld triangles (%.1f s); %lld edges collapsed onto the zero level to the interface's own size, leaving %lld points and %lld triangles (%.1f s); %lld field evaluations in all\n",
+      report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numCollapsed,
+      report.numPoints, report.numTriangles, report.secondsDecimate, report.numFieldEvaluations);
+  fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another; %.1f s\n",
+      report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing, seconds);
+  if (!report.firstFault.empty())
+  {
+    fprintf(stdout,"  the first fault is %s at (%.5g, %.5g, %.5g)\n", report.firstFault.c_str(),
+        report.firstFaultAt[0], report.firstFaultAt[1], report.firstFaultAt[2]);
+  }
+  if (numCrossing > 0)
+  {
+    fprintf(stdout,"  the first crossing is at (%.5g, %.5g, %.5g)\n", firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
+  }
   return SV_OK;
 }
 

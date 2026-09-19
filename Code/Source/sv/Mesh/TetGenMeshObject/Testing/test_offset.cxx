@@ -1,0 +1,353 @@
+/* Copyright (c) Stanford University, The Regents of the University of
+ *               California, and others.
+ *
+ * All Rights Reserved.
+ *
+ * See Copyright-SimVascular.txt for additional details.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject
+ * to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
+ * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+
+// Standalone checks of sv_tetgenmesh_offset on synthetic interfaces. Build
+// and run with a plain C++17 compiler and TetGen from the source tree, no
+// VTK or SimVascular needed (from this directory):
+//
+//   T=../../../../../ThirdParty/tetgen/simvascular_tetgen
+//   c++ -std=c++17 -O2 -DTETLIBRARY -I.. -I$T test_offset.cxx ../sv_tetgenmesh_offset.cxx
+//       ../sv_tetgenmesh_envelope.cxx $T/tetgen.cxx $T/predicates.cxx -o test_offset && ./test_offset
+//
+// (one command line; TetGen takes a while to compile)
+//
+// Every case builds an interface open at its vessel ends, takes its offset
+// surface, trims it at the cap planes as the glue does, and checks that the
+// result is a manifold whose only boundary is the cap rims, that no two of
+// its triangles cross, that the wall it makes over the interface is the
+// thickness asked for, and that it puts nothing where the wall is solid.
+
+#include "sv_tetgenmesh_offset.h"
+#include "sv_tetgenmesh_envelope.h"
+
+#define TETLIBRARY
+#include "tetgen.h"
+
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <string>
+#include <vector>
+
+using svoffset::Interface;
+using svoffset::Options;
+using svoffset::Surface;
+using svoffset::Report;
+typedef long long ll;
+
+static int numFailed = 0;
+
+static void Check(bool ok, const char *what)
+{
+  if (!ok)
+  {
+    numFailed++;
+  }
+  printf("  %s %s\n", ok ? "ok  " : "FAIL", what);
+}
+
+static double Dot(const double *a, const double *b) { return a[0]*b[0] + a[1]*b[1] + a[2]*b[2]; }
+static void Sub(const double *a, const double *b, double *r) { r[0] = a[0]-b[0]; r[1] = a[1]-b[1]; r[2] = a[2]-b[2]; }
+static void Cross(const double *a, const double *b, double *r) { r[0] = a[1]*b[2]-a[2]*b[1]; r[1] = a[2]*b[0]-a[0]*b[2]; r[2] = a[0]*b[1]-a[1]*b[0]; }
+static double Norm(const double *a) { return std::sqrt(Dot(a, a)); }
+static double Dist(const double *a, const double *b) { double d[3]; Sub(a, b, d); return Norm(d); }
+
+// The Delaunay tetrahedralization by TetGen, points only.
+static bool DelaunayWithTetGen(const std::vector<double> &points, std::vector<ll> &tets, void *, std::string &error)
+{
+  tetgenio in, out;
+  in.firstnumber = 0;
+  in.numberofpoints = (int)(points.size()/3);
+  in.pointlist = new REAL[points.size()];
+  for (size_t i = 0; i < points.size(); i++) in.pointlist[i] = points[i];
+  char switches[] = "Q";
+  try { tetrahedralize(switches, &in, &out); } catch (...) { error = "TetGen threw"; return false; }
+  std::map<std::array<ll, 3>, ll> byPos;
+  auto keyOf = [](const double *p) { std::array<ll, 3> k = {(ll)std::llround(p[0]*1e6), (ll)std::llround(p[1]*1e6), (ll)std::llround(p[2]*1e6)}; return k; };
+  for (size_t i = 0; i < points.size()/3; i++) byPos[keyOf(&points[3*i])] = (ll)i;
+  std::vector<ll> toInput(out.numberofpoints, -1);
+  for (int i = 0; i < out.numberofpoints; i++)
+  {
+    std::map<std::array<ll, 3>, ll>::iterator it = byPos.find(keyOf(&out.pointlist[3*i]));
+    if (it == byPos.end() || Dist(&out.pointlist[3*i], &points[3*it->second]) > 1e-9) { error = "an output point is not an input point"; return false; }
+    toInput[i] = it->second;
+  }
+  tets.resize((size_t)4*out.numberoftetrahedra);
+  for (int t = 0; t < out.numberoftetrahedra; t++) for (int m = 0; m < 4; m++) tets[(size_t)4*t+m] = toInput[out.tetrahedronlist[4*t+m]];
+  return true;
+}
+
+// A tube along z, open at both ends, normals outward, wound so that the
+// right-hand normal points outward.
+static void AddTube(Interface &iface, double cx, double cy, double radius, double z0, double z1,
+    int numAround, int numAlong, double thickness)
+{
+  ll base = (ll)(iface.points.size()/3);
+  for (int j = 0; j <= numAlong; j++)
+  {
+    double z = z0 + (z1 - z0)*j/(double)numAlong;
+    for (int i = 0; i < numAround; i++)
+    {
+      double theta = 2.0*M_PI*i/(double)numAround;
+      double n[3] = {std::cos(theta), std::sin(theta), 0.0};
+      iface.points.push_back(cx + radius*n[0]);
+      iface.points.push_back(cy + radius*n[1]);
+      iface.points.push_back(z);
+      for (int k = 0; k < 3; k++) iface.normals.push_back(n[k]);
+      iface.thickness.push_back(thickness);
+    }
+  }
+  auto id = [&](int i, int j) { return base + (ll)j*numAround + (ll)((i + numAround) % numAround); };
+  for (int j = 0; j < numAlong; j++)
+  {
+    for (int i = 0; i < numAround; i++)
+    {
+      iface.triangles.push_back(id(i, j)); iface.triangles.push_back(id(i+1, j)); iface.triangles.push_back(id(i+1, j+1));
+      iface.triangles.push_back(id(i, j)); iface.triangles.push_back(id(i+1, j+1)); iface.triangles.push_back(id(i, j+1));
+    }
+  }
+}
+
+// Trims the surface at the cap planes of the tubes (z = z0 and z = z1), as
+// the glue trims at the caps: every triangle whose centre lies beyond a plane
+// comes off. The tubes here all share the same two planes.
+static void TrimAtPlanes(Surface &surface, double z0, double z1)
+{
+  std::vector<ll> kept;
+  for (size_t i = 0; i + 2 < surface.triangles.size(); i += 3)
+  {
+    double z = 0.0;
+    for (int j = 0; j < 3; j++) z += surface.points[(size_t)3*surface.triangles[i+j] + 2]/3.0;
+    if (z < z0 || z > z1) continue;
+    kept.insert(kept.end(), &surface.triangles[i], &surface.triangles[i] + 3);
+  }
+  surface.triangles = kept;
+}
+
+struct Measure
+{
+  ll numBoundary, numNonManifold, numMiswound, numCrossing;
+  double minRatio, maxRatio;   // the wall over the interface points away from the ends, against the thickness
+  ll numBelow90;
+  ll numAbove100;              // triangles of aspect ratio above 100
+  ll numTriangles;
+};
+
+static double PointTri(const double *p, const double *a, const double *b, const double *c)
+{
+  double ab[3], ac[3], ap[3]; Sub(b,a,ab); Sub(c,a,ac); Sub(p,a,ap);
+  double d1 = Dot(ab,ap), d2 = Dot(ac,ap);
+  if (d1 <= 0 && d2 <= 0) return Dist(p,a);
+  double bp[3]; Sub(p,b,bp); double d3 = Dot(ab,bp), d4 = Dot(ac,bp);
+  if (d3 >= 0 && d4 <= d3) return Dist(p,b);
+  double vc = d1*d4 - d3*d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) { double v = (d1-d3 != 0) ? d1/(d1-d3) : 0; double q[3] = {a[0]+v*ab[0], a[1]+v*ab[1], a[2]+v*ab[2]}; return Dist(p,q); }
+  double cp[3]; Sub(p,c,cp); double d5 = Dot(ab,cp), d6 = Dot(ac,cp);
+  if (d6 >= 0 && d5 <= d6) return Dist(p,c);
+  double vb = d5*d2 - d1*d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) { double w = (d2-d6 != 0) ? d2/(d2-d6) : 0; double q[3] = {a[0]+w*ac[0], a[1]+w*ac[1], a[2]+w*ac[2]}; return Dist(p,q); }
+  double va = d3*d6 - d5*d4;
+  if (va <= 0 && (d4-d3) >= 0 && (d5-d6) >= 0) { double w = (d4-d3)/((d4-d3)+(d5-d6)); double q[3] = {b[0]+w*(c[0]-b[0]), b[1]+w*(c[1]-b[1]), b[2]+w*(c[2]-b[2])}; return Dist(p,q); }
+  double den = va+vb+vc; if (den == 0) return Dist(p,a);
+  double v = vb/den, w = vc/den; double q[3] = {a[0]+ab[0]*v+ac[0]*w, a[1]+ab[1]*v+ac[1]*w, a[2]+ab[2]*v+ac[2]*w}; return Dist(p,q);
+}
+
+// The distance from p to the surface, by brute force (the tests are small).
+static double DistanceToSurface(const Surface &s, const double *p)
+{
+  double best = 1e300;
+  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+  {
+    best = std::min(best, PointTri(p, &s.points[(size_t)3*s.triangles[i]], &s.points[(size_t)3*s.triangles[i+1]], &s.points[(size_t)3*s.triangles[i+2]]));
+  }
+  return best;
+}
+
+static Measure MeasureSurface(const Interface &iface, const Surface &s, double zMin, double zMax, double endMargin)
+{
+  Measure m;
+  svoffset::CountEdges(s.triangles, m.numBoundary, m.numNonManifold, m.numMiswound);
+  std::vector<unsigned char> crossing;
+  double at[3];
+  m.numCrossing = svenvelope::CountCrossingTriangles(s.points, s.triangles, crossing, at);
+  m.minRatio = 1e300; m.maxRatio = 0.0; m.numBelow90 = 0;
+  for (size_t i = 0; i < iface.points.size()/3; i++)
+  {
+    const double *p = &iface.points[3*i];
+    if (p[2] < zMin + endMargin || p[2] > zMax - endMargin) continue;
+    double ratio = DistanceToSurface(s, p)/iface.thickness[i];
+    m.minRatio = std::min(m.minRatio, ratio);
+    m.maxRatio = std::max(m.maxRatio, ratio);
+    if (ratio < 0.9) m.numBelow90++;
+  }
+  m.numAbove100 = 0;
+  m.numTriangles = (ll)(s.triangles.size()/3);
+  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+  {
+    const double *a = &s.points[(size_t)3*s.triangles[i]], *b = &s.points[(size_t)3*s.triangles[i+1]], *c = &s.points[(size_t)3*s.triangles[i+2]];
+    double la = Dist(b,c), lb = Dist(c,a), lc = Dist(a,b), per = la+lb+lc; double e1[3], e2[3], n[3]; Sub(b,a,e1); Sub(c,a,e2); Cross(e1,e2,n);
+    double inr = (per > 0) ? Norm(n)/per : 0; double longest = std::max(la, std::max(lb, lc));
+    if (!(inr > 0) || longest/(2*inr) > 100.0) m.numAbove100++;
+  }
+  return m;
+}
+
+static bool Build(const Interface &iface, const Options &options, Surface &s, Report &r)
+{
+  std::string error;
+  int rc = svoffset::BuildOffsetSurface(iface, options, DelaunayWithTetGen, nullptr, s, r, error);
+  if (rc != 0)
+  {
+    printf("  FAIL build: %s\n", error.c_str());
+    numFailed++;
+    return false;
+  }
+  printf("  built: %lld cloud points, %lld tetrahedra (%lld cut), contour %lld -> %lld triangles after %lld collapses; boundary %lld, non-manifold %lld, miswound %lld; %.1f s\n",
+      r.numCloudPoints, r.numTetrahedra, r.numTetrahedraCut, r.numContourTriangles, r.numTriangles, r.numCollapsed,
+      r.numBoundaryEdges, r.numNonManifoldEdges, r.numMiswoundEdges, r.secondsField + r.secondsDelaunay + r.secondsContour + r.secondsDecimate);
+  return true;
+}
+
+// 1. A tube: the offset is a tube a wall wider.
+static void TestTube()
+{
+  printf("test 1: a tube of radius 1 with a wall of 0.3\n");
+  Interface iface;
+  AddTube(iface, 0.0, 0.0, 1.0, 0.0, 10.0, 32, 40, 0.3);
+  Options options;
+  Surface s; Report r;
+  if (!Build(iface, options, s, r)) return;
+  Check(r.numRims == 2, "two cap rims found");
+  Check(r.numNonManifoldEdges == 0 && r.numMiswoundEdges == 0, "the offset surface is a manifold, consistently wound");
+  TrimAtPlanes(s, 0.0, 10.0);
+  Measure m = MeasureSurface(iface, s, 0.0, 10.0, 0.6);
+  printf("  after the trim: boundary %lld, non-manifold %lld, miswound %lld, crossing %lld; wall over the interface %.3f..%.3f of the thickness, %lld points below 0.9; %lld of %lld triangles above aspect 100\n",
+      m.numBoundary, m.numNonManifold, m.numMiswound, m.numCrossing, m.minRatio, m.maxRatio, m.numBelow90, m.numAbove100, m.numTriangles);
+  Check(m.numBoundary > 0 && m.numNonManifold == 0 && m.numMiswound == 0, "trimmed: manifold, open only at the rims");
+  Check(m.numCrossing == 0, "no two triangles cross");
+  Check(m.numBelow90 == 0, "the wall over the interface is at least 0.9 of the thickness away from the ends");
+  Check(m.maxRatio < 1.15, "and no more than 1.15 of it");
+  // every surface point away from the ends stands between r + 0.9t and r + 1.1t off the axis
+  ll numOff = 0;
+  for (size_t i = 0; i < s.points.size()/3; i++)
+  {
+    const double *p = &s.points[3*i];
+    if (p[2] < 0.6 || p[2] > 9.4) continue;
+    double rho = std::sqrt(p[0]*p[0] + p[1]*p[1]);
+    if (rho < 1.0 + 0.9*0.3 || rho > 1.0 + 1.1*0.3) numOff++;
+  }
+  Check(numOff == 0, "every surface point lies a wall off the tube, none in the lumen");
+  Check(m.numAbove100*100 < m.numTriangles, "fewer than 1% of the triangles have an aspect ratio above 100");
+  Check(r.numTriangles < 6*(ll)(iface.triangles.size()/3), "the decimated surface has fewer than six triangles per interface triangle");
+}
+
+// 2. A thin coarse tube: the wall is thinner than the interface's edge.
+static void TestThinTube()
+{
+  printf("test 2: a tube of radius 0.3 with a wall of 0.1, edges of 0.15\n");
+  Interface iface;
+  AddTube(iface, 0.0, 0.0, 0.3, 0.0, 6.0, 12, 40, 0.1);
+  Options options;
+  Surface s; Report r;
+  if (!Build(iface, options, s, r)) return;
+  TrimAtPlanes(s, 0.0, 6.0);
+  Measure m = MeasureSurface(iface, s, 0.0, 6.0, 0.3);
+  printf("  after the trim: boundary %lld, non-manifold %lld, miswound %lld, crossing %lld; wall %.3f..%.3f, %lld below 0.9; %lld of %lld above aspect 100\n",
+      m.numBoundary, m.numNonManifold, m.numMiswound, m.numCrossing, m.minRatio, m.maxRatio, m.numBelow90, m.numAbove100, m.numTriangles);
+  Check(m.numBoundary > 0 && m.numNonManifold == 0 && m.numMiswound == 0, "trimmed: manifold, open only at the rims");
+  Check(m.numCrossing == 0, "no two triangles cross");
+  Check(m.numBelow90 == 0, "the wall over the interface is at least 0.9 of the thickness");
+  Check(m.maxRatio < 1.2, "and no more than 1.2 of it");
+  ll numOff = 0;
+  for (size_t i = 0; i < s.points.size()/3; i++)
+  {
+    const double *p = &s.points[3*i];
+    if (p[2] < 0.3 || p[2] > 5.7) continue;
+    double rho = std::sqrt(p[0]*p[0] + p[1]*p[1]);
+    if (rho < 0.3 + 0.85*0.1 || rho > 0.3 + 1.15*0.1) numOff++;
+  }
+  Check(numOff == 0, "every surface point lies a wall off the tube, none in the lumen");
+}
+
+// 3. Two tubes side by side, closer than their walls: the septum between them
+// is solid and the surface creases where the two offsets meet.
+static void TestSeptum()
+{
+  printf("test 3: two tubes whose walls overlap between them (radius 1 wall 0.3, radius 0.5 wall 0.1, interfaces 0.3 apart)\n");
+  Interface iface;
+  AddTube(iface, 0.0, 0.0, 1.0, 0.0, 8.0, 32, 32, 0.3);
+  AddTube(iface, 1.8, 0.0, 0.5, 0.0, 8.0, 20, 32, 0.1);
+  Options options;
+  Surface s; Report r;
+  if (!Build(iface, options, s, r)) return;
+  Check(r.numRims == 4, "four cap rims found");
+  TrimAtPlanes(s, 0.0, 8.0);
+  Measure m = MeasureSurface(iface, s, 0.0, 8.0, 0.6);
+  printf("  after the trim: boundary %lld, non-manifold %lld, miswound %lld, crossing %lld; wall %.3f..%.3f, %lld below 0.9; %lld of %lld above aspect 100\n",
+      m.numBoundary, m.numNonManifold, m.numMiswound, m.numCrossing, m.minRatio, m.maxRatio, m.numBelow90, m.numAbove100, m.numTriangles);
+  Check(m.numBoundary > 0 && m.numNonManifold == 0 && m.numMiswound == 0, "trimmed: manifold, open only at the rims");
+  Check(m.numCrossing == 0, "no two triangles cross");
+  Check(m.numBelow90 == 0, "the wall over every interface point is at least 0.9 of its thickness");
+  // the septum: points midway between the two interfaces are deep inside
+  double worst = 1e300;
+  for (int j = 2; j < 30; j++)
+  {
+    double p[3] = {1.15, 0.0, 8.0*j/32.0};
+    worst = std::min(worst, DistanceToSurface(s, p));
+  }
+  printf("  the surface stays at least %.3f from the middle of the septum (the crease is 0.28 off it)\n", worst);
+  Check(worst > 0.2, "nothing of the surface runs through the septum between the tubes");
+  // and the surface reaches around both tubes: points on the far sides
+  ll numOff = 0;
+  for (size_t i = 0; i < s.points.size()/3; i++)
+  {
+    const double *p = &s.points[3*i];
+    if (p[2] < 0.6 || p[2] > 7.4) continue;
+    double rho1 = std::sqrt(p[0]*p[0] + p[1]*p[1]);
+    double rho2 = std::sqrt((p[0]-1.8)*(p[0]-1.8) + p[1]*p[1]);
+    bool onOffset1 = std::abs(rho1 - 1.3) < 0.05, onOffset2 = std::abs(rho2 - 0.6) < 0.03;
+    if (!onOffset1 && !onOffset2) numOff++;
+  }
+  Check(numOff == 0, "every surface point lies on one of the two offsets");
+}
+
+int main()
+{
+  TestTube();
+  TestThinTube();
+  TestSeptum();
+  printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
+  return numFailed == 0 ? 0 : 1;
+}

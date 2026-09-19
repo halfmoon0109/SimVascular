@@ -2806,16 +2806,40 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // was that guess going wrong. The envelope cuts the sheets where they
   // actually cross, so the two sides of a crease share their points and there
   // is no gap, no margin and nothing to close.
+  //
+  // The envelope in its turn was measured against the wall it made
+  // (2026-09-18, the carotid model): at every junction the wall over the
+  // interface was 0.2 to 0.5 of the thickness asked for, whatever was done to
+  // the thickness field or to the classification of the pieces, because the
+  // extrusion folds and dips at a crotch and holds no piece of the surface
+  // that belongs there. The outer surface is now the offset itself - the
+  // zero level of the signed distance less the thickness - contoured over a
+  // point cloud made of the interface points and their offsets, so its
+  // resolution follows the interface's and the thin vessels that defeated
+  // the grid are resolved; the field then closes the septum between two
+  // vessels and creases where their walls meet by construction. It is trimmed
+  // back to the cap planes as the grid offset was.
   auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
   std::vector<TGenUtilsCapRim> caps;
   int numUnresolved = 0;
-  if (TGenUtils_BuildTrimmedExtrudedOuterSurface(surface, thicknessArray,
-        offsetOuter, caps, numUnresolved) != SV_OK)
+  if (TGenUtils_BuildContouredOuterSurface(surface, thicknessArray, offsetOuter, numUnresolved) != SV_OK)
   {
-    fprintf(stderr,"Problem building the outer wall envelope\n");
+    fprintf(stderr,"Problem building the outer wall offset surface\n");
     return SV_ERROR;
   }
-  TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "outer wall envelope");
+  {
+    double maxThickness = 0.0;
+    for (vtkIdType ptId = 0; ptId < thicknessArray->GetNumberOfTuples(); ptId++)
+    {
+      maxThickness = std::max(maxThickness, thicknessArray->GetValue(ptId));
+    }
+    if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, offsetOuter, thicknessArray, maxThickness, caps) != SV_OK)
+    {
+      fprintf(stderr,"Problem trimming the outer wall offset surface at the cap planes\n");
+      return SV_ERROR;
+    }
+  }
+  TGenUtils_ReportSurfaceTriangleQuality(offsetOuter, "outer wall offset");
 
   // Measure the wall the outer surface actually makes, now that it is the
   // surface the fill will use. Both directions are reported because they answer
@@ -2838,14 +2862,14 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   }
   surface->GetPointData()->RemoveArray("OffsetThicknessRatio");
 
-  // The reports above are what the envelope is judged by, so they run
-  // whatever state the surface is in; but a surface with holes, crossings or
-  // edges on the wrong number of triangles is one the volume mesher refuses,
-  // and the envelope log has already said where they are, so this stops here
+  // The reports above are what the offset surface is judged by, so they run
+  // whatever state the surface is in; but a surface with crossings or edges
+  // on the wrong number of triangles is one the volume mesher refuses, and
+  // the offset log has already said where they are, so this stops here
   // rather than let the mesher say it again with less.
   if (numUnresolved > 0)
   {
-    fprintf(stderr,"The outer wall envelope has %d faults the volume mesher will refuse (triangles passing through another, holes, edges on more than two triangles or wound against each other, and pieces that could not be classified); see the envelope log above and wall_outer_trimmed.vtp\n",
+    fprintf(stderr,"The outer wall offset surface has %d faults the volume mesher will refuse (triangles passing through another, edges on more than two triangles or wound against each other); see the offset log above and wall_outer_offset.vtp\n",
         numUnresolved);
     return SV_ERROR;
   }

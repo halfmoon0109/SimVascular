@@ -1,0 +1,1619 @@
+/* Copyright (c) Stanford University, The Regents of the University of
+ *               California, and others.
+ *
+ * All Rights Reserved.
+ *
+ * See Copyright-SimVascular.txt for additional details.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining
+ * a copy of this software and associated documentation files (the
+ * "Software"), to deal in the Software without restriction, including
+ * without limitation the rights to use, copy, modify, merge, publish,
+ * distribute, sublicense, and/or sell copies of the Software, and to
+ * permit persons to whom the Software is furnished to do so, subject
+ * to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS
+ * IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED
+ * TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+ * PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER
+ * OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF
+ * LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+/**
+ * @file sv_tetgenmesh_offset.cxx
+ * @brief The offset outer surface of the wall, contoured from a distance
+ * field sampled on a point cloud that follows the input. See the header.
+ */
+
+#include "sv_tetgenmesh_offset.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <limits>
+#include <map>
+#include <queue>
+#include <unordered_map>
+
+namespace svoffset
+{
+
+namespace
+{
+
+typedef long long ll;
+
+//---------------------
+// Vector helpers
+//---------------------
+
+inline void Sub(const double a[3], const double b[3], double r[3])
+{
+  r[0] = a[0] - b[0];
+  r[1] = a[1] - b[1];
+  r[2] = a[2] - b[2];
+}
+
+inline void Cross(const double a[3], const double b[3], double r[3])
+{
+  r[0] = a[1]*b[2] - a[2]*b[1];
+  r[1] = a[2]*b[0] - a[0]*b[2];
+  r[2] = a[0]*b[1] - a[1]*b[0];
+}
+
+inline double Dot(const double a[3], const double b[3])
+{
+  return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+}
+
+inline double Norm(const double a[3])
+{
+  return std::sqrt(Dot(a, a));
+}
+
+inline double Distance(const double a[3], const double b[3])
+{
+  double d[3];
+  Sub(a, b, d);
+  return Norm(d);
+}
+
+inline bool Normalize(double a[3])
+{
+  double n = Norm(a);
+  if (!(n > 0.0) || !std::isfinite(n))
+  {
+    return false;
+  }
+  a[0] /= n;
+  a[1] /= n;
+  a[2] /= n;
+  return true;
+}
+
+// The closest point of triangle abc to p, with its barycentric weights;
+// returns the distance. Ericson's region walk.
+double ClosestOnTriangle(const double p[3], const double a[3], const double b[3],
+    const double c[3], double q[3], double bary[3])
+{
+  double ab[3], ac[3], ap[3];
+  Sub(b, a, ab);
+  Sub(c, a, ac);
+  Sub(p, a, ap);
+  auto at = [&](double v, double w)
+  {
+    bary[0] = 1.0 - v - w;
+    bary[1] = v;
+    bary[2] = w;
+    for (int k = 0; k < 3; k++)
+    {
+      q[k] = a[k] + v*ab[k] + w*ac[k];
+    }
+    return Distance(p, q);
+  };
+  double d1 = Dot(ab, ap), d2 = Dot(ac, ap);
+  if (d1 <= 0.0 && d2 <= 0.0) return at(0.0, 0.0);
+  double bp[3];
+  Sub(p, b, bp);
+  double d3 = Dot(ab, bp), d4 = Dot(ac, bp);
+  if (d3 >= 0.0 && d4 <= d3) return at(1.0, 0.0);
+  double vc = d1*d4 - d3*d2;
+  if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0)
+  {
+    double v = (d1 - d3 != 0.0) ? d1/(d1 - d3) : 0.0;
+    return at(v, 0.0);
+  }
+  double cp[3];
+  Sub(p, c, cp);
+  double d5 = Dot(ab, cp), d6 = Dot(ac, cp);
+  if (d6 >= 0.0 && d5 <= d6) return at(0.0, 1.0);
+  double vb = d5*d2 - d1*d6;
+  if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0)
+  {
+    double w = (d2 - d6 != 0.0) ? d2/(d2 - d6) : 0.0;
+    return at(0.0, w);
+  }
+  double va = d3*d6 - d5*d4;
+  if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0)
+  {
+    double w = (d4 - d3)/((d4 - d3) + (d5 - d6));
+    return at(1.0 - w, w);
+  }
+  double den = va + vb + vc;
+  if (den == 0.0) return at(0.0, 0.0);
+  return at(vb/den, vc/den);
+}
+
+//---------------------
+// Triangle grid
+//---------------------
+// A uniform grid of bins over the field's surface, each bin listing the
+// triangles whose boxes touch it and the largest thickness among their
+// corners, so that a search for the least (distance - thickness) can skip a
+// bin whose box is farther than the best found so far plus that thickness.
+struct TriangleGrid
+{
+  const std::vector<double> *points = nullptr;
+  const std::vector<ll> *triangles = nullptr;
+  double lo[3] = {0.0, 0.0, 0.0};
+  double cell = 1.0;
+  int n[3] = {1, 1, 1};
+  std::vector<ll> start, cells;
+  std::vector<double> binMaxThickness;
+
+  int Bin(double v, int k) const
+  {
+    double f = std::floor((v - lo[k])/cell);
+    if (f < 0.0) return 0;
+    if (f >= (double)n[k]) return n[k] - 1;
+    return (int)f;
+  }
+
+  size_t Index(int i, int j, int k) const
+  {
+    return ((size_t)k*n[1] + j)*n[0] + i;
+  }
+
+  void Build(const std::vector<double> &pts, const std::vector<ll> &tris,
+      const std::vector<double> &thickness, double cellSize, ll maxBins)
+  {
+    points = &pts;
+    triangles = &tris;
+    double hi[3];
+    for (int k = 0; k < 3; k++)
+    {
+      lo[k] = std::numeric_limits<double>::max();
+      hi[k] = -std::numeric_limits<double>::max();
+    }
+    for (size_t i = 0; i + 2 < pts.size(); i += 3)
+    {
+      for (int k = 0; k < 3; k++)
+      {
+        lo[k] = std::min(lo[k], pts[i + k]);
+        hi[k] = std::max(hi[k], pts[i + k]);
+      }
+    }
+    double volume = 1.0;
+    for (int k = 0; k < 3; k++)
+    {
+      volume *= std::max(hi[k] - lo[k], 1.0e-12) + 2.0*cellSize;
+    }
+    cell = std::max(cellSize, std::cbrt(volume/(double)maxBins));
+    for (int k = 0; k < 3; k++)
+    {
+      lo[k] -= cell;
+      n[k] = std::max(1, (int)std::ceil((hi[k] - lo[k])/cell) + 2);
+    }
+    size_t numBins = (size_t)n[0]*n[1]*n[2];
+    start.assign(numBins + 1, 0);
+    auto range = [&](size_t t, int i0[3], int i1[3])
+    {
+      double blo[3], bhi[3];
+      for (int k = 0; k < 3; k++)
+      {
+        blo[k] = std::numeric_limits<double>::max();
+        bhi[k] = -std::numeric_limits<double>::max();
+      }
+      for (int j = 0; j < 3; j++)
+      {
+        const double *p = &pts[(size_t)3*tris[3*t + j]];
+        for (int k = 0; k < 3; k++)
+        {
+          blo[k] = std::min(blo[k], p[k]);
+          bhi[k] = std::max(bhi[k], p[k]);
+        }
+      }
+      for (int k = 0; k < 3; k++)
+      {
+        i0[k] = Bin(blo[k], k);
+        i1[k] = Bin(bhi[k], k);
+      }
+    };
+    size_t numTris = tris.size()/3;
+    for (size_t t = 0; t < numTris; t++)
+    {
+      int i0[3], i1[3];
+      range(t, i0, i1);
+      for (int k = i0[2]; k <= i1[2]; k++)
+        for (int j = i0[1]; j <= i1[1]; j++)
+          for (int i = i0[0]; i <= i1[0]; i++)
+            start[Index(i, j, k) + 1]++;
+    }
+    for (size_t b = 0; b < numBins; b++)
+    {
+      start[b + 1] += start[b];
+    }
+    cells.assign((size_t)start[numBins], -1);
+    std::vector<ll> cursor(start.begin(), start.end() - 1);
+    for (size_t t = 0; t < numTris; t++)
+    {
+      int i0[3], i1[3];
+      range(t, i0, i1);
+      for (int k = i0[2]; k <= i1[2]; k++)
+        for (int j = i0[1]; j <= i1[1]; j++)
+          for (int i = i0[0]; i <= i1[0]; i++)
+            cells[(size_t)cursor[Index(i, j, k)]++] = (ll)t;
+    }
+    binMaxThickness.assign(numBins, 0.0);
+    for (size_t b = 0; b < numBins; b++)
+    {
+      for (ll m = start[b]; m < start[b + 1]; m++)
+      {
+        const ll *tt = &tris[(size_t)3*cells[(size_t)m]];
+        for (int j = 0; j < 3; j++)
+        {
+          binMaxThickness[b] = std::max(binMaxThickness[b], thickness[(size_t)tt[j]]);
+        }
+      }
+    }
+  }
+
+  // The distance from x to the box of bin (i, j, k).
+  double BoxDistance(const double x[3], int i, int j, int k) const
+  {
+    int idx[3] = {i, j, k};
+    double dd = 0.0;
+    for (int a = 0; a < 3; a++)
+    {
+      double blo = lo[a] + idx[a]*cell, bhi = blo + cell;
+      double e = (x[a] < blo) ? blo - x[a] : ((x[a] > bhi) ? x[a] - bhi : 0.0);
+      dd += e*e;
+    }
+    return std::sqrt(dd);
+  }
+};
+
+struct EdgeKey
+{
+  ll a, b;
+  EdgeKey(ll p, ll q) : a(std::min(p, q)), b(std::max(p, q)) {}
+  bool operator<(const EdgeKey &o) const
+  {
+    return (a != o.a) ? (a < o.a) : (b < o.b);
+  }
+};
+
+void NoteFault(Report &report, const char *what, const double at[3])
+{
+  if (report.firstFault.empty())
+  {
+    report.firstFault = what;
+    for (int k = 0; k < 3; k++)
+    {
+      report.firstFaultAt[k] = at[k];
+    }
+  }
+}
+
+}  // namespace
+
+//---------------------
+// CountEdges
+//---------------------
+
+void CountEdges(const std::vector<long long> &triangles, long long &numBoundary,
+    long long &numNonManifold, long long &numMiswound)
+{
+  numBoundary = numNonManifold = numMiswound = 0;
+  std::map<EdgeKey, std::pair<int, int> > use;   // (count, forward count)
+  for (size_t i = 0; i + 2 < triangles.size(); i += 3)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = triangles[i + j], b = triangles[i + (j+1)%3];
+      std::pair<int, int> &u = use[EdgeKey(a, b)];
+      u.first++;
+      if (a < b)
+      {
+        u.second++;
+      }
+    }
+  }
+  for (std::map<EdgeKey, std::pair<int, int> >::iterator it = use.begin(); it != use.end(); ++it)
+  {
+    if (it->second.first == 1)
+    {
+      numBoundary++;
+    }
+    else if (it->second.first > 2)
+    {
+      numNonManifold++;
+    }
+    else if (it->second.second != 1)
+    {
+      numMiswound++;
+    }
+  }
+}
+
+//---------------------
+// OffsetField
+//---------------------
+
+struct OffsetField::Data
+{
+  std::vector<double> points, normals, thickness;
+  std::vector<ll> triangles;
+  std::vector<double> faceNormals;   // unit, per triangle
+  std::vector<double> localSize;     // per triangle: the target edge length of the offset surface there
+  std::vector<double> localThickness;   // per triangle: the mean thickness of its corners
+  std::vector<unsigned char> boundaryPoint;   // per point: 1 on an open edge of the field's surface (the collar ends)
+  std::vector<std::vector<ll> > rims;
+  std::vector<double> rimOutward;    // three per rim
+  std::vector<double> collarLength;  // per rim
+  ll numInterfaceTriangles = 0;
+  ll numInterfacePoints = 0;
+  double reach = 0.0;
+  double largestThickness = 0.0;
+  double smallestThickness = 0.0;
+  double meanEdge = 0.0;
+  TriangleGrid grid;
+  mutable ll numEvaluations = 0;
+};
+
+OffsetField::OffsetField() : data_(new Data()) {}
+
+OffsetField::~OffsetField()
+{
+  delete data_;
+}
+
+int OffsetField::Build(const Interface &input, Report &report, std::string &error)
+{
+  Data &d = *data_;
+  d = Data();
+  ll numPts = (ll)(input.points.size()/3);
+  ll numTris = (ll)(input.triangles.size()/3);
+  if (input.points.size() != (size_t)3*numPts || input.triangles.size() != (size_t)3*numTris ||
+      input.normals.size() != (size_t)3*numPts || input.thickness.size() != (size_t)numPts)
+  {
+    error = "the interface arrays are not three per point, three per triangle and one thickness per point";
+    return 1;
+  }
+  if (numTris == 0)
+  {
+    error = "the interface has no triangles";
+    return 1;
+  }
+  for (size_t m = 0; m < input.triangles.size(); m++)
+  {
+    if (input.triangles[m] < 0 || input.triangles[m] >= numPts)
+    {
+      error = "a triangle refers to a point outside the point list";
+      return 1;
+    }
+  }
+  d.points = input.points;
+  d.normals = input.normals;
+  d.thickness = input.thickness;
+  d.triangles = input.triangles;
+  d.numInterfacePoints = numPts;
+  d.numInterfaceTriangles = numTris;
+  d.smallestThickness = std::numeric_limits<double>::max();
+  for (ll i = 0; i < numPts; i++)
+  {
+    double *n = &d.normals[(size_t)3*i];
+    if (!Normalize(n))
+    {
+      char what[160];
+      snprintf(what, sizeof(what), "the normal at point %lld has no length", i);
+      error = what;
+      return 1;
+    }
+    double t = d.thickness[(size_t)i];
+    if (!(t > 0.0) || !std::isfinite(t))
+    {
+      char what[160];
+      snprintf(what, sizeof(what), "the thickness at point %lld is %g; every point needs a positive thickness", i, t);
+      error = what;
+      return 1;
+    }
+    d.largestThickness = std::max(d.largestThickness, t);
+    d.smallestThickness = std::min(d.smallestThickness, t);
+  }
+  report.numInterfacePoints = numPts;
+  report.numInterfaceTriangles = numTris;
+  report.smallestThickness = d.smallestThickness;
+  report.largestThickness = d.largestThickness;
+
+  // The mean edge, for the grid and the collars.
+  double edgeSum = 0.0;
+  for (ll t = 0; t < numTris; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      edgeSum += Distance(&d.points[(size_t)3*d.triangles[(size_t)3*t + j]],
+          &d.points[(size_t)3*d.triangles[(size_t)3*t + (j+1)%3]]);
+    }
+  }
+  d.meanEdge = edgeSum/(3.0*(double)numTris);
+
+  // The cap rims: the boundary edges, each traversed as its triangle does,
+  // chained into loops.
+  {
+    std::map<EdgeKey, int> edgeCount;
+    for (ll t = 0; t < numTris; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        edgeCount[EdgeKey(d.triangles[(size_t)3*t + j], d.triangles[(size_t)3*t + (j+1)%3])]++;
+      }
+    }
+    std::map<ll, ll> next;
+    for (ll t = 0; t < numTris; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        ll a = d.triangles[(size_t)3*t + j], b = d.triangles[(size_t)3*t + (j+1)%3];
+        std::map<EdgeKey, int>::iterator it = edgeCount.find(EdgeKey(a, b));
+        if (it->second == 1)
+        {
+          next[a] = b;
+        }
+        else if (it->second > 2)
+        {
+          error = "the interface has an edge on more than two triangles";
+          return 1;
+        }
+      }
+    }
+    std::map<ll, unsigned char> seen;
+    for (std::map<ll, ll>::iterator it = next.begin(); it != next.end(); ++it)
+    {
+      if (seen.count(it->first))
+      {
+        continue;
+      }
+      std::vector<ll> loop;
+      ll cur = it->first;
+      while (!seen.count(cur))
+      {
+        seen[cur] = 1;
+        loop.push_back(cur);
+        std::map<ll, ll>::iterator nx = next.find(cur);
+        if (nx == next.end())
+        {
+          break;
+        }
+        cur = nx->second;
+      }
+      if (loop.size() >= 3)
+      {
+        d.rims.push_back(loop);
+      }
+    }
+  }
+  report.numRims = (ll)d.rims.size();
+
+  // A collar past each rim: the rim pushed along the outward direction of its
+  // plane by the wall thickness there plus an edge, carrying the rim's normals
+  // and thickness, so that the offset is a straight tube through the cap
+  // plane rather than rounding off around the rim. The rim traversed in its
+  // triangles' winding runs clockwise about the outward direction, so the
+  // outward direction is the reverse of the loop's own normal; that is
+  // checked against the interface itself, which lies on the inward side.
+  d.rimOutward.assign(3*d.rims.size(), 0.0);
+  d.collarLength.assign(d.rims.size(), 0.0);
+  for (size_t r = 0; r < d.rims.size(); r++)
+  {
+    const std::vector<ll> &loop = d.rims[r];
+    double centre[3] = {0.0, 0.0, 0.0};
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      for (int k = 0; k < 3; k++)
+      {
+        centre[k] += d.points[(size_t)3*loop[m] + k]/(double)loop.size();
+      }
+    }
+    double normal[3] = {0.0, 0.0, 0.0};
+    double rimEdge = 0.0, capThickness = 0.0, radius = 0.0;
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      const double *p = &d.points[(size_t)3*loop[m]], *q = &d.points[(size_t)3*loop[(m+1)%loop.size()]];
+      normal[0] += (p[1] - q[1])*(p[2] + q[2]);
+      normal[1] += (p[2] - q[2])*(p[0] + q[0]);
+      normal[2] += (p[0] - q[0])*(p[1] + q[1]);
+      rimEdge += Distance(p, q)/(double)loop.size();
+      capThickness = std::max(capThickness, d.thickness[(size_t)loop[m]]);
+      radius = std::max(radius, Distance(p, centre));
+    }
+    if (!Normalize(normal))
+    {
+      char what[160];
+      snprintf(what, sizeof(what), "a cap rim of %zu points at (%.5g, %.5g, %.5g) encloses no area", loop.size(), centre[0], centre[1], centre[2]);
+      error = what;
+      return 1;
+    }
+    double outward[3] = {-normal[0], -normal[1], -normal[2]};
+    // the interface near the rim should lie on the inward side
+    double inward = 0.0, outwardSide = 0.0;
+    for (ll i = 0; i < numPts; i++)
+    {
+      double off[3];
+      Sub(&d.points[(size_t)3*i], centre, off);
+      if (Norm(off) > 3.0*radius)
+      {
+        continue;
+      }
+      double s = Dot(off, outward);
+      if (s > 0.05*radius) outwardSide += 1.0;
+      else if (s < -0.05*radius) inward += 1.0;
+    }
+    if (outwardSide > inward)
+    {
+      for (int k = 0; k < 3; k++)
+      {
+        outward[k] = -outward[k];
+      }
+    }
+    for (int k = 0; k < 3; k++)
+    {
+      d.rimOutward[3*r + k] = outward[k];
+    }
+    double length = capThickness + rimEdge;
+    d.collarLength[r] = length;
+    ll base = (ll)(d.points.size()/3);
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      ll v = loop[m];
+      for (int k = 0; k < 3; k++)
+      {
+        d.points.push_back(d.points[(size_t)3*v + k] + length*outward[k]);
+      }
+      for (int k = 0; k < 3; k++)
+      {
+        d.normals.push_back(d.normals[(size_t)3*v + k]);
+      }
+      d.thickness.push_back(d.thickness[(size_t)v]);
+    }
+    // The rim edge a->b is traversed a->b by its interface triangle, so the
+    // collar triangles on it traverse it b->a.
+    for (size_t m = 0; m < loop.size(); m++)
+    {
+      ll a = loop[m], b = loop[(m+1)%loop.size()];
+      ll a2 = base + (ll)m, b2 = base + (ll)((m+1)%loop.size());
+      d.triangles.push_back(b);
+      d.triangles.push_back(a);
+      d.triangles.push_back(a2);
+      d.triangles.push_back(a2);
+      d.triangles.push_back(b2);
+      d.triangles.push_back(b);
+      report.numCollarTriangles += 2;
+    }
+  }
+
+  // The open edges of the field's surface - the collar ends - and their
+  // points. Beyond them there is no lumen side: a point whose closest point
+  // lies on one is outside the wall by its distance, whichever way the
+  // normal there happens to lean.
+  ll numF = (ll)(d.triangles.size()/3);
+  d.boundaryPoint.assign(d.points.size()/3, 0);
+  {
+    std::map<EdgeKey, int> edgeCount;
+    for (ll t = 0; t < numF; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        edgeCount[EdgeKey(d.triangles[(size_t)3*t + j], d.triangles[(size_t)3*t + (j+1)%3])]++;
+      }
+    }
+    for (std::map<EdgeKey, int>::iterator it = edgeCount.begin(); it != edgeCount.end(); ++it)
+    {
+      if (it->second == 1)
+      {
+        d.boundaryPoint[(size_t)it->first.a] = 1;
+        d.boundaryPoint[(size_t)it->first.b] = 1;
+      }
+    }
+  }
+
+  // Face normals, the local size and the grid.
+  d.faceNormals.assign((size_t)3*numF, 0.0);
+  d.localSize.assign((size_t)numF, d.meanEdge);
+  d.localThickness.assign((size_t)numF, d.largestThickness);
+  for (ll t = 0; t < numF; t++)
+  {
+    const ll *tt = &d.triangles[(size_t)3*t];
+    const double *a = &d.points[(size_t)3*tt[0]], *b = &d.points[(size_t)3*tt[1]], *c = &d.points[(size_t)3*tt[2]];
+    double e1[3], e2[3];
+    Sub(b, a, e1);
+    Sub(c, a, e2);
+    Cross(e1, e2, &d.faceNormals[(size_t)3*t]);
+    Normalize(&d.faceNormals[(size_t)3*t]);
+    // The target edge of the offset surface here: the interface's own edge,
+    // and no longer than keeps the chord of a surface with the curvature of
+    // the interface plus the wall within a twentieth of the wall. The curvature
+    // is read off the turning of the normals along the edges; a collar's
+    // edges along the outward direction carry no turning and drop out.
+    double meanEdge = 0.0, radius = 1.0e3, thickness = 0.0;
+    for (int j = 0; j < 3; j++)
+    {
+      ll u = tt[j], v = tt[(j+1)%3];
+      double L = Distance(&d.points[(size_t)3*u], &d.points[(size_t)3*v]);
+      meanEdge += L/3.0;
+      thickness += d.thickness[(size_t)u]/3.0;
+      double dn[3];
+      Sub(&d.normals[(size_t)3*u], &d.normals[(size_t)3*v], dn);
+      double turn = Norm(dn);
+      if (turn > 1.0e-9)
+      {
+        radius = std::min(radius, L/turn);
+      }
+    }
+    double chord = std::sqrt(8.0*(radius + thickness)*0.05*thickness);
+    d.localSize[(size_t)t] = std::max(std::min(meanEdge, chord), 1.0e-6*d.meanEdge);
+    d.localThickness[(size_t)t] = thickness;
+  }
+  d.reach = d.largestThickness + 2.0*d.meanEdge;
+  d.grid.Build(d.points, d.triangles, d.thickness, std::max(d.meanEdge, 0.25*d.largestThickness), 4000000);
+  return 0;
+}
+
+double OffsetField::Evaluate(const double x[3]) const
+{
+  const Data &d = *data_;
+  d.numEvaluations++;
+  const TriangleGrid &g = d.grid;
+  int c[3];
+  for (int k = 0; k < 3; k++)
+  {
+    c[k] = g.Bin(x[k], k);
+  }
+  double best = std::numeric_limits<double>::max();
+  ll bestT = -1;
+  double bestQ[3] = {0.0, 0.0, 0.0}, bestBary[3] = {0.0, 0.0, 0.0};
+  double bestTerm = d.reach;
+  int rings = (int)(d.reach/g.cell) + 2;
+  for (int r = 0; r <= rings; r++)
+  {
+    // every bin of this ring is at least (r-1) cells away
+    double bound = (r - 1)*g.cell;
+    if (bound - d.largestThickness >= bestTerm && bound >= best)
+    {
+      break;
+    }
+    for (int k = c[2] - r; k <= c[2] + r; k++)
+    {
+      for (int j = c[1] - r; j <= c[1] + r; j++)
+      {
+        for (int i = c[0] - r; i <= c[0] + r; i++)
+        {
+          if (std::max(std::abs(k - c[2]), std::max(std::abs(j - c[1]), std::abs(i - c[0]))) != r) continue;
+          if (i < 0 || j < 0 || k < 0 || i >= g.n[0] || j >= g.n[1] || k >= g.n[2]) continue;
+          size_t b = g.Index(i, j, k);
+          if (g.start[b + 1] == g.start[b]) continue;
+          double dd = g.BoxDistance(x, i, j, k);
+          if (dd - g.binMaxThickness[b] >= bestTerm && dd >= best) continue;
+          for (ll m = g.start[b]; m < g.start[b + 1]; m++)
+          {
+            ll t = g.cells[(size_t)m];
+            const ll *tt = &d.triangles[(size_t)3*t];
+            double q[3], bary[3];
+            double dist = ClosestOnTriangle(x, &d.points[(size_t)3*tt[0]], &d.points[(size_t)3*tt[1]], &d.points[(size_t)3*tt[2]], q, bary);
+            if (dist < best)
+            {
+              best = dist;
+              bestT = t;
+              for (int a = 0; a < 3; a++)
+              {
+                bestQ[a] = q[a];
+                bestBary[a] = bary[a];
+              }
+            }
+            double tq = bary[0]*d.thickness[(size_t)tt[0]] + bary[1]*d.thickness[(size_t)tt[1]] + bary[2]*d.thickness[(size_t)tt[2]];
+            bestTerm = std::min(bestTerm, dist - tq);
+          }
+        }
+      }
+    }
+  }
+  if (bestT < 0)
+  {
+    return d.reach;
+  }
+  // Which side of the surface x is on: by the normal at the closest point of
+  // the nearest triangle - the face normal inside it, the corners' normals
+  // blended on an edge or at a corner.
+  const ll *tt = &d.triangles[(size_t)3*bestT];
+  double n[3];
+  if (bestBary[0] > 1.0e-6 && bestBary[1] > 1.0e-6 && bestBary[2] > 1.0e-6)
+  {
+    for (int k = 0; k < 3; k++)
+    {
+      n[k] = d.faceNormals[(size_t)3*bestT + k];
+    }
+  }
+  else
+  {
+    for (int k = 0; k < 3; k++)
+    {
+      n[k] = bestBary[0]*d.normals[(size_t)3*tt[0] + k] + bestBary[1]*d.normals[(size_t)3*tt[1] + k] + bestBary[2]*d.normals[(size_t)3*tt[2] + k];
+    }
+  }
+  // A closest point on an open edge of the surface - at a boundary corner,
+  // or on an edge between two boundary corners - has no lumen behind it.
+  bool onOpenEdge = false;
+  {
+    const double tol = 1.0e-6;
+    int numZero = 0, zeroAt = -1, oneAt = -1;
+    for (int j = 0; j < 3; j++)
+    {
+      if (bestBary[j] <= tol) { numZero++; zeroAt = j; }
+      if (bestBary[j] >= 1.0 - tol) oneAt = j;
+    }
+    if (oneAt >= 0)
+    {
+      onOpenEdge = d.boundaryPoint[(size_t)tt[oneAt]] != 0;
+    }
+    else if (numZero == 1)
+    {
+      int u = (zeroAt + 1)%3, v = (zeroAt + 2)%3;
+      onOpenEdge = d.boundaryPoint[(size_t)tt[u]] != 0 && d.boundaryPoint[(size_t)tt[v]] != 0;
+    }
+  }
+  double off[3];
+  Sub(x, bestQ, off);
+  if (!onOpenEdge && Dot(off, n) < 0.0)
+  {
+    // In the lumen: inside, by the wall there and the depth.
+    double tq = bestBary[0]*d.thickness[(size_t)tt[0]] + bestBary[1]*d.thickness[(size_t)tt[1]] + bestBary[2]*d.thickness[(size_t)tt[2]];
+    return -best - tq;
+  }
+  return bestTerm;
+}
+
+void OffsetField::Local(const double x[3], double &size, double &thickness) const
+{
+  const Data &d = *data_;
+  const TriangleGrid &g = d.grid;
+  int c[3];
+  for (int k = 0; k < 3; k++)
+  {
+    c[k] = g.Bin(x[k], k);
+  }
+  double best = std::numeric_limits<double>::max();
+  ll bestT = -1;
+  // Rings out until one lies farther than the nearest triangle found; the
+  // whole grid at most, since x may be far from the surface.
+  int rings = std::max(g.n[0], std::max(g.n[1], g.n[2]));
+  for (int r = 0; r <= rings; r++)
+  {
+    if (bestT >= 0 && (r - 1)*g.cell >= best)
+    {
+      break;
+    }
+    for (int k = c[2] - r; k <= c[2] + r; k++)
+    {
+      for (int j = c[1] - r; j <= c[1] + r; j++)
+      {
+        for (int i = c[0] - r; i <= c[0] + r; i++)
+        {
+          if (std::max(std::abs(k - c[2]), std::max(std::abs(j - c[1]), std::abs(i - c[0]))) != r) continue;
+          if (i < 0 || j < 0 || k < 0 || i >= g.n[0] || j >= g.n[1] || k >= g.n[2]) continue;
+          size_t b = g.Index(i, j, k);
+          if (g.BoxDistance(x, i, j, k) >= best) continue;
+          for (ll m = g.start[b]; m < g.start[b + 1]; m++)
+          {
+            ll t = g.cells[(size_t)m];
+            const ll *tt = &d.triangles[(size_t)3*t];
+            double q[3], bary[3];
+            double dist = ClosestOnTriangle(x, &d.points[(size_t)3*tt[0]], &d.points[(size_t)3*tt[1]], &d.points[(size_t)3*tt[2]], q, bary);
+            if (dist < best)
+            {
+              best = dist;
+              bestT = t;
+            }
+          }
+        }
+      }
+    }
+  }
+  size = (bestT >= 0) ? d.localSize[(size_t)bestT] : d.meanEdge;
+  thickness = (bestT >= 0) ? d.localThickness[(size_t)bestT] : d.largestThickness;
+}
+
+double OffsetField::Reach() const
+{
+  return data_->reach;
+}
+
+const std::vector<std::vector<long long> > &OffsetField::Rims() const
+{
+  return data_->rims;
+}
+
+const std::vector<double> &OffsetField::Points() const { return data_->points; }
+const std::vector<double> &OffsetField::Normals() const { return data_->normals; }
+const std::vector<double> &OffsetField::Thickness() const { return data_->thickness; }
+const std::vector<long long> &OffsetField::Triangles() const { return data_->triangles; }
+long long OffsetField::NumEvaluations() const { return data_->numEvaluations; }
+
+//---------------------
+// BuildOffsetSurface
+//---------------------
+
+int BuildOffsetSurface(const Interface &input, const Options &options,
+    DelaunayFunction delaunay, void *context, Surface &surface, Report &report,
+    std::string &error)
+{
+  report = Report();
+  surface = Surface();
+  if (delaunay == nullptr)
+  {
+    error = "no tetrahedralization was supplied";
+    return 1;
+  }
+  if (!(options.innerLayer > 0.0 && options.innerLayer < 1.0) || !(options.outerLayer > 1.0) ||
+      !(options.farLayer > options.outerLayer) || options.farStride < 1)
+  {
+    error = "the cloud layers must be 0 < inner < 1 < outer < far, with a positive far stride";
+    return 1;
+  }
+  auto t0 = std::chrono::steady_clock::now();
+  OffsetField field;
+  if (field.Build(input, report, error) != 0)
+  {
+    return 1;
+  }
+
+  // The cloud: every field-surface point, its offsets at the inner and outer
+  // layers along its normal, and every farStride-th point's far offset; and
+  // past each collar's end, the same layers along the outward direction, so
+  // that the dome the field closes around the collar's end is bounded and
+  // contoured (it comes off with the trim). The value at a surface point is
+  // -t, and at the inner layer at most -(1 - inner)t: both inside, so only
+  // the outer layers are evaluated.
+  const std::vector<double> &fp = field.Points();
+  const std::vector<double> &fnrm = field.Normals();
+  const std::vector<double> &ft = field.Thickness();
+  const std::vector<ll> &ftris = field.Triangles();
+  ll numFP = (ll)(fp.size()/3);
+  // The edge length at each point, for the far layer: the mean of its edges.
+  std::vector<double> edgeAt((size_t)numFP, 0.0);
+  std::vector<int> edgeCount((size_t)numFP, 0);
+  for (size_t m = 0; m + 2 < ftris.size(); m += 3)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = ftris[m + j], b = ftris[m + (j+1)%3];
+      double L = Distance(&fp[(size_t)3*a], &fp[(size_t)3*b]);
+      edgeAt[(size_t)a] += L;
+      edgeAt[(size_t)b] += L;
+      edgeCount[(size_t)a]++;
+      edgeCount[(size_t)b]++;
+    }
+  }
+  for (ll i = 0; i < numFP; i++)
+  {
+    edgeAt[(size_t)i] = (edgeCount[(size_t)i] > 0) ? edgeAt[(size_t)i]/edgeCount[(size_t)i] : 0.0;
+  }
+  // The far distance at a point: the far layer of the thickness, and no less
+  // than farSpacing edges, so that the far points of neighbouring rays are
+  // nearer each other than the surface and roof the band; the Delaunay hull
+  // is then made of far points, all outside, and no tetrahedron joins an
+  // inside point to the far side of the model.
+  auto farDistance = [&](ll i)
+  {
+    return std::max(options.farLayer*ft[(size_t)i], options.farSpacing*edgeAt[(size_t)i]);
+  };
+  std::vector<double> cloud, value;
+  auto addPoint = [&](const double p[3], double v)
+  {
+    cloud.insert(cloud.end(), p, p + 3);
+    value.push_back(v);
+  };
+  for (ll i = 0; i < numFP; i++)
+  {
+    const double *p = &fp[(size_t)3*i], *n = &fnrm[(size_t)3*i];
+    double t = ft[(size_t)i];
+    addPoint(p, -t);
+    double a[3], b[3], c[3];
+    double far = farDistance(i);
+    for (int k = 0; k < 3; k++)
+    {
+      a[k] = p[k] + options.innerLayer*t*n[k];
+      b[k] = p[k] + options.outerLayer*t*n[k];
+      c[k] = p[k] + far*n[k];
+    }
+    addPoint(a, -(1.0 - options.innerLayer)*t);
+    addPoint(b, field.Evaluate(b));
+    if (i % options.farStride == 0)
+    {
+      addPoint(c, field.Evaluate(c));
+    }
+  }
+  {
+    const std::vector<std::vector<ll> > &rims = field.Rims();
+    ll numInterfacePts = report.numInterfacePoints;
+    ll base = numInterfacePts;
+    for (size_t r = 0; r < rims.size(); r++)
+    {
+      const std::vector<ll> &loop = rims[r];
+      double outward[3];
+      // the collar points follow the interface points in rim order
+      for (size_t m = 0; m < loop.size(); m++)
+      {
+        ll v = base + (ll)m;
+        const double *p = &fp[(size_t)3*v];
+        double t = ft[(size_t)v];
+        // the outward direction: from the rim point to its collar point
+        Sub(p, &fp[(size_t)3*loop[m]], outward);
+        if (!Normalize(outward))
+        {
+          continue;
+        }
+        double b[3], c[3];
+        double far = farDistance(v);
+        for (int k = 0; k < 3; k++)
+        {
+          b[k] = p[k] + options.outerLayer*t*outward[k];
+          c[k] = p[k] + far*outward[k];
+        }
+        addPoint(b, field.Evaluate(b));
+        if (m % options.farStride == 0)
+        {
+          addPoint(c, field.Evaluate(c));
+        }
+      }
+      base += (ll)loop.size();
+    }
+  }
+  report.numCloudPoints = (ll)(cloud.size()/3);
+  auto t1 = std::chrono::steady_clock::now();
+  report.secondsField = std::chrono::duration<double>(t1 - t0).count();
+
+  std::vector<ll> tets;
+  if (!delaunay(cloud, tets, context, error))
+  {
+    if (error.empty())
+    {
+      error = "the tetrahedralization of the cloud failed";
+    }
+    return 1;
+  }
+  if (tets.size() % 4 != 0)
+  {
+    error = "the tetrahedralization did not return four points per tetrahedron";
+    return 1;
+  }
+  ll numCloud = report.numCloudPoints;
+  for (size_t m = 0; m < tets.size(); m++)
+  {
+    if (tets[m] < 0 || tets[m] >= numCloud)
+    {
+      error = "a tetrahedron refers to a point outside the cloud";
+      return 1;
+    }
+  }
+  report.numTetrahedra = (ll)(tets.size()/4);
+  auto t2 = std::chrono::steady_clock::now();
+  report.secondsDelaunay = std::chrono::duration<double>(t2 - t1).count();
+
+  // Marching tetrahedra: one contour point per tetrahedron edge whose ends
+  // have values of opposite sign (a value of zero counts as outside), placed
+  // by linear interpolation and then put on the exact zero level by secant
+  // steps along the edge; a tetrahedron with one corner inside gives one
+  // triangle, with two, a quad as two triangles. The winding comes from the
+  // tetrahedron itself, not from the triangle's geometry (which a sliver
+  // cannot be trusted for): with the corners ordered so that the
+  // tetrahedron is positively oriented, the face opposite corner i wound
+  // outward is (1,2,3), (0,3,2), (0,1,3), (0,2,1) for i = 0..3, and the cut
+  // around an inside corner is wound like the face opposite it; the quad
+  // between an inside pair (i,j) and an outside pair (k,l) runs
+  // e(i,k), e(i,l), e(j,l), e(j,k) when (i,j,k,l) is an even permutation
+  // of (0,1,2,3). Both faces of the cut on a face shared by two tetrahedra
+  // then agree, so every edge of the surface is traversed once each way.
+  std::vector<double> &pts = surface.points;
+  std::vector<ll> &tris = surface.triangles;
+  std::unordered_map<unsigned long long, ll> onEdge;
+  onEdge.reserve((size_t)numCloud*2);
+  auto edgePoint = [&](ll a, ll b) -> ll
+  {
+    if (a > b) std::swap(a, b);
+    unsigned long long key = (unsigned long long)a*4294967311ULL + (unsigned long long)b;
+    std::unordered_map<unsigned long long, ll>::iterator it = onEdge.find(key);
+    if (it != onEdge.end())
+    {
+      return it->second;
+    }
+    double va = value[(size_t)a], vb = value[(size_t)b];
+    const double *pa = &cloud[(size_t)3*a], *pb = &cloud[(size_t)3*b];
+    double s = va/(va - vb);
+    double lo = 0.0, hi = 1.0, flo = va, fhi = vb;
+    for (int it2 = 0; it2 < options.snapIterations; it2++)
+    {
+      double pm[3];
+      for (int k = 0; k < 3; k++)
+      {
+        pm[k] = pa[k] + s*(pb[k] - pa[k]);
+      }
+      double fm = field.Evaluate(pm);
+      if (fm == 0.0)
+      {
+        break;
+      }
+      if ((fm < 0.0) == (flo < 0.0))
+      {
+        lo = s;
+        flo = fm;
+      }
+      else
+      {
+        hi = s;
+        fhi = fm;
+      }
+      double next = (flo*hi - fhi*lo)/(flo - fhi);
+      s = (next > lo && next < hi) ? next : 0.5*(lo + hi);
+    }
+    ll id = (ll)(pts.size()/3);
+    for (int k = 0; k < 3; k++)
+    {
+      pts.push_back(pa[k] + s*(pb[k] - pa[k]));
+    }
+    onEdge[key] = id;
+    return id;
+  };
+  const int oppositeFace[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
+  for (size_t q = 0; q + 3 < tets.size(); q += 4)
+  {
+    ll c[4] = {tets[q], tets[q + 1], tets[q + 2], tets[q + 3]};
+    bool in[4];
+    int numIn = 0;
+    for (int m = 0; m < 4; m++)
+    {
+      in[m] = value[(size_t)c[m]] < 0.0;
+      if (in[m]) numIn++;
+    }
+    if (numIn == 0 || numIn == 4)
+    {
+      continue;
+    }
+    report.numTetrahedraCut++;
+    // positively oriented
+    {
+      double e1[3], e2[3], e3[3], cr[3];
+      Sub(&cloud[(size_t)3*c[1]], &cloud[(size_t)3*c[0]], e1);
+      Sub(&cloud[(size_t)3*c[2]], &cloud[(size_t)3*c[0]], e2);
+      Sub(&cloud[(size_t)3*c[3]], &cloud[(size_t)3*c[0]], e3);
+      Cross(e2, e3, cr);
+      if (Dot(e1, cr) < 0.0)
+      {
+        std::swap(c[2], c[3]);
+        std::swap(in[2], in[3]);
+      }
+    }
+    if (numIn == 1 || numIn == 3)
+    {
+      int apex = 0;
+      for (int m = 0; m < 4; m++)
+      {
+        if (in[m] == (numIn == 1)) apex = m;
+      }
+      const int *f = oppositeFace[apex];
+      ll a = edgePoint(c[apex], c[f[0]]), b = edgePoint(c[apex], c[f[1]]), d = edgePoint(c[apex], c[f[2]]);
+      if (numIn == 1)
+      {
+        tris.push_back(a); tris.push_back(b); tris.push_back(d);
+      }
+      else
+      {
+        tris.push_back(a); tris.push_back(d); tris.push_back(b);
+      }
+    }
+    else
+    {
+      int i = -1, j = -1, k = -1, l = -1;
+      for (int m = 0; m < 4; m++)
+      {
+        if (in[m]) { if (i < 0) i = m; else j = m; }
+        else { if (k < 0) k = m; else l = m; }
+      }
+      // the parity of (i, j, k, l) as a permutation of (0, 1, 2, 3)
+      int perm[4] = {i, j, k, l};
+      int inversions = 0;
+      for (int x = 0; x < 4; x++) for (int y = x + 1; y < 4; y++) if (perm[x] > perm[y]) inversions++;
+      if (inversions % 2 == 1)
+      {
+        std::swap(k, l);
+      }
+      ll p00 = edgePoint(c[i], c[k]), p01 = edgePoint(c[i], c[l]), p11 = edgePoint(c[j], c[l]), p10 = edgePoint(c[j], c[k]);
+      tris.push_back(p00); tris.push_back(p01); tris.push_back(p11);
+      tris.push_back(p00); tris.push_back(p11); tris.push_back(p10);
+    }
+  }
+  report.numContourPoints = (ll)(pts.size()/3);
+  report.numContourTriangles = (ll)(tris.size()/3);
+  auto t3 = std::chrono::steady_clock::now();
+  report.secondsContour = std::chrono::duration<double>(t3 - t2).count();
+
+  // Decimation: the contour has a point wherever the zero level crosses a
+  // tetrahedron edge, several per interface point. Edges shorter than a
+  // fraction of the local size are collapsed onto one of their ends, shortest
+  // first, so every point that remains stays where it was, on the zero level,
+  // and the surface stays a chord of the true offset. A collapse must keep
+  // the surface a manifold (the link condition), make no edge longer than
+  // the local size allows, and turn no triangle by more than the option's
+  // cosine.
+  if (options.collapseRatio > 0.0)
+  {
+    ll nv = (ll)(pts.size()/3), nt = (ll)(tris.size()/3);
+    std::vector<double> target((size_t)nv, field.Reach()), thick((size_t)nv, report.largestThickness);
+    for (ll v = 0; v < nv; v++)
+    {
+      field.Local(&pts[(size_t)3*v], target[(size_t)v], thick[(size_t)v]);
+    }
+    std::vector<std::vector<ll> > incident((size_t)nv);
+    std::vector<unsigned char> dead((size_t)nt, 0);
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        incident[(size_t)tris[(size_t)3*t + j]].push_back(t);
+      }
+    }
+    std::vector<ll> version((size_t)nv, 0);
+    struct Entry
+    {
+      double length;
+      ll u, v, vu, vv;
+      bool operator<(const Entry &o) const { return length > o.length; }
+    };
+    std::priority_queue<Entry> queue;
+    const double growFactor = 1.25;
+    auto pushEdges = [&](ll v)
+    {
+      for (size_t m = 0; m < incident[(size_t)v].size(); m++)
+      {
+        ll t = incident[(size_t)v][m];
+        if (dead[(size_t)t]) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
+          if (a != v && b != v) continue;
+          ll u = (a == v) ? b : a;
+          double L = Distance(&pts[(size_t)3*u], &pts[(size_t)3*v]);
+          if (L < options.collapseRatio*std::min(target[(size_t)u], target[(size_t)v]))
+          {
+            queue.push(Entry{L, u, v, version[(size_t)u], version[(size_t)v]});
+          }
+        }
+      }
+    };
+    for (ll v = 0; v < nv; v++)
+    {
+      pushEdges(v);
+    }
+    auto normalOf = [&](ll a, ll b, ll c, double n[3])
+    {
+      double e1[3], e2[3];
+      Sub(&pts[(size_t)3*b], &pts[(size_t)3*a], e1);
+      Sub(&pts[(size_t)3*c], &pts[(size_t)3*a], e2);
+      Cross(e1, e2, n);
+    };
+    const int ringMax = 64;
+    ll ringU[64], ringV[64], shared[2];
+    auto tryCollapse = [&](ll u, ll v) -> bool
+    {
+      // u goes onto v
+      double moved = Distance(&pts[(size_t)3*u], &pts[(size_t)3*v]);
+      int nu = 0, nvv = 0, ns = 0;
+      for (size_t m = 0; m < incident[(size_t)u].size(); m++)
+      {
+        ll t = incident[(size_t)u][m];
+        if (dead[(size_t)t]) continue;
+        bool hasV = false;
+        for (int j = 0; j < 3; j++)
+        {
+          ll w = tris[(size_t)3*t + j];
+          if (w == v) hasV = true;
+          else if (w != u)
+          {
+            bool seen = false;
+            for (int q = 0; q < nu; q++) if (ringU[q] == w) seen = true;
+            if (!seen) { if (nu >= ringMax) return false; ringU[nu++] = w; }
+          }
+        }
+        if (hasV)
+        {
+          if (ns < 2) shared[ns] = t;
+          ns++;
+        }
+      }
+      if (ns != 2) return false;
+      for (size_t m = 0; m < incident[(size_t)v].size(); m++)
+      {
+        ll t = incident[(size_t)v][m];
+        if (dead[(size_t)t]) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          ll w = tris[(size_t)3*t + j];
+          if (w != v && w != u)
+          {
+            bool seen = false;
+            for (int q = 0; q < nvv; q++) if (ringV[q] == w) seen = true;
+            if (!seen) { if (nvv >= ringMax) return false; ringV[nvv++] = w; }
+          }
+        }
+      }
+      int common = 0;
+      for (int q = 0; q < nu; q++) for (int r = 0; r < nvv; r++) if (ringU[q] == ringV[r]) common++;
+      if (common != 2) return false;
+      // The edges that appear, from v to every neighbour w of u, may be no
+      // longer than the local size allows; one that is already longer than
+      // that (u-w, which v-w replaces) may grow by a tenth at most, so that a
+      // flat cap whose long edges are what they are can still lose its short
+      // one without the long edges creeping.
+      for (int q = 0; q < nu; q++)
+      {
+        ll w = ringU[q];
+        double L = Distance(&pts[(size_t)3*w], &pts[(size_t)3*v]);
+        double allowed = growFactor*std::min(target[(size_t)w], target[(size_t)v]);
+        if (L > allowed && L > 1.1*Distance(&pts[(size_t)3*w], &pts[(size_t)3*u])) return false;
+      }
+      for (size_t m = 0; m < incident[(size_t)u].size(); m++)
+      {
+        ll t = incident[(size_t)u][m];
+        if (dead[(size_t)t] || t == shared[0] || t == shared[1]) continue;
+        ll a = tris[(size_t)3*t], b = tris[(size_t)3*t + 1], c = tris[(size_t)3*t + 2];
+        ll a2 = (a == u) ? v : a, b2 = (b == u) ? v : b, c2 = (c == u) ? v : c;
+        double nOld[3], nNew[3];
+        normalOf(a, b, c, nOld);
+        normalOf(a2, b2, c2, nNew);
+        double lo = Norm(nOld), ln = Norm(nNew);
+        if (!(ln > 1.0e-12*lo) || Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) return false;
+        // The surface moves by no more than the collapsed edge, so a short
+        // collapse cannot take a triangle off the zero level by more than
+        // the tolerance and is not put to the field.
+        if (options.collapseFieldTolerance > 0.0 && moved > options.collapseFieldTolerance*thick[(size_t)v])
+        {
+          double centre[3];
+          for (int k = 0; k < 3; k++)
+          {
+            centre[k] = (pts[(size_t)3*a2 + k] + pts[(size_t)3*b2 + k] + pts[(size_t)3*c2 + k])/3.0;
+          }
+          double thinnest = std::min(thick[(size_t)a2], std::min(thick[(size_t)b2], thick[(size_t)c2]));
+          if (std::abs(field.Evaluate(centre)) > options.collapseFieldTolerance*thinnest) return false;
+        }
+      }
+      dead[(size_t)shared[0]] = 1;
+      dead[(size_t)shared[1]] = 1;
+      for (size_t m = 0; m < incident[(size_t)u].size(); m++)
+      {
+        ll t = incident[(size_t)u][m];
+        if (dead[(size_t)t]) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          if (tris[(size_t)3*t + j] == u) tris[(size_t)3*t + j] = v;
+        }
+        incident[(size_t)v].push_back(t);
+      }
+      incident[(size_t)u].clear();
+      version[(size_t)u]++;
+      version[(size_t)v]++;
+      report.numCollapsed++;
+      return true;
+    };
+    auto runCollapses = [&]()
+    {
+      while (!queue.empty())
+      {
+        Entry e = queue.top();
+        queue.pop();
+        if (e.vu != version[(size_t)e.u] || e.vv != version[(size_t)e.v]) continue;
+        if (incident[(size_t)e.u].empty() || incident[(size_t)e.v].empty()) continue;
+        bool done = tryCollapse(e.u, e.v);
+        if (!done) done = tryCollapse(e.v, e.u);
+        if (done) pushEdges(incident[(size_t)e.u].empty() ? e.v : e.u);
+      }
+    };
+    // The smallest angle of a triangle, as its sine.
+    auto smallestAngleSine = [&](ll a, ll b, ll c)
+    {
+      double la = Distance(&pts[(size_t)3*b], &pts[(size_t)3*c]), lb = Distance(&pts[(size_t)3*c], &pts[(size_t)3*a]), lc = Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]);
+      double n[3];
+      normalOf(a, b, c, n);
+      double twiceArea = Norm(n);
+      double longest = std::max(la, std::max(lb, lc));
+      double product = la*lb*lc;
+      if (!(product > 0.0)) return 0.0;
+      // sin(smallest angle) = 2A / (product of the two longer sides) = 2A * shortest / (la lb lc)
+      double shortest = std::min(la, std::min(lb, lc));
+      (void)longest;
+      return twiceArea*shortest/product;
+    };
+    auto removeFromIncident = [&](ll v, ll t)
+    {
+      std::vector<ll> &list = incident[(size_t)v];
+      for (size_t m = 0; m < list.size(); m++)
+      {
+        if (list[m] == t)
+        {
+          list[m] = list.back();
+          list.pop_back();
+          return;
+        }
+      }
+    };
+    // Flips: the edge shared by two nearly coplanar triangles is flipped to
+    // the other diagonal of their quad when that raises the smaller of their
+    // smallest angles and the quad is convex (both new triangles face the way
+    // the old ones did). Nothing moves, so nothing can leave the zero level.
+    auto runFlips = [&]() -> ll
+    {
+      ll numFlipped = 0;
+      for (ll t1 = 0; t1 < nt; t1++)
+      {
+        if (dead[(size_t)t1]) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          if (dead[(size_t)t1]) break;
+          ll a = tris[(size_t)3*t1 + j], b = tris[(size_t)3*t1 + (j+1)%3], c = tris[(size_t)3*t1 + (j+2)%3];
+          // the other triangle on edge a-b
+          ll t2 = -1;
+          for (size_t m = 0; m < incident[(size_t)a].size(); m++)
+          {
+            ll t = incident[(size_t)a][m];
+            if (t == t1 || dead[(size_t)t]) continue;
+            for (int q = 0; q < 3; q++)
+            {
+              if (tris[(size_t)3*t + q] == b && tris[(size_t)3*t + (q+1)%3] == a)
+              {
+                t2 = t;
+              }
+            }
+          }
+          if (t2 < 0) continue;
+          ll d = -1;
+          for (int q = 0; q < 3; q++)
+          {
+            ll w = tris[(size_t)3*t2 + q];
+            if (w != a && w != b) d = w;
+          }
+          if (d < 0 || d == c) continue;
+          // c-d must not be an edge already
+          bool exists = false;
+          for (size_t m = 0; m < incident[(size_t)c].size() && !exists; m++)
+          {
+            ll t = incident[(size_t)c][m];
+            if (dead[(size_t)t]) continue;
+            for (int q = 0; q < 3; q++) if (tris[(size_t)3*t + q] == d) exists = true;
+          }
+          if (exists) continue;
+          double n1[3], n2[3], m1[3], m2[3];
+          normalOf(a, b, c, n1);
+          normalOf(b, a, d, n2);
+          normalOf(c, a, d, m1);
+          normalOf(d, b, c, m2);
+          double l1 = Norm(n1), l2 = Norm(n2), k1 = Norm(m1), k2 = Norm(m2);
+          if (!(l1 > 0.0 && l2 > 0.0 && k1 > 0.0 && k2 > 0.0)) continue;
+          // The new pair must face the way the old pair does, taken together
+          // with their areas (a sliver's own normal means little) and within
+          // 25 degrees, which also keeps the flip off a crease and out of a
+          // quad that is not convex.
+          double avg[3] = {n1[0] + n2[0], n1[1] + n2[1], n1[2] + n2[2]};
+          double la = Norm(avg);
+          if (!(la > 0.0) || Dot(m1, avg) < 0.9*k1*la || Dot(m2, avg) < 0.9*k2*la) continue;
+          // Two well-shaped triangles that meet at a crease stay as they
+          // are; a sliver's normal is noise and does not get that say.
+          auto aspectOf = [&](ll x, ll y, ll z, double twiceArea)
+          {
+            double lx = Distance(&pts[(size_t)3*y], &pts[(size_t)3*z]), ly = Distance(&pts[(size_t)3*z], &pts[(size_t)3*x]), lz = Distance(&pts[(size_t)3*x], &pts[(size_t)3*y]);
+            double perimeter = lx + ly + lz;
+            return (twiceArea > 0.0 && perimeter > 0.0) ? std::max(lx, std::max(ly, lz))*perimeter/(2.0*twiceArea) : 1.0e300;
+          };
+          if (aspectOf(a, b, c, l1) < 20.0 && aspectOf(b, a, d, l2) < 20.0 && Dot(n1, n2) < 0.9*l1*l2) continue;
+          // and the new diagonal no longer than the old edge or the local size allows
+          double newDiagonal = Distance(&pts[(size_t)3*c], &pts[(size_t)3*d]);
+          if (newDiagonal > std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]), growFactor*std::min(target[(size_t)c], target[(size_t)d]))) continue;
+          // Worth it when the smaller of the smallest angles grows - or when
+          // the new diagonal is short enough to be collapsed in the next
+          // round: two flat caps on one long edge form a thin quad that
+          // neither a collapse nor a better-angle flip can take apart, but
+          // its short diagonal, once an edge, can.
+          double before = std::min(smallestAngleSine(a, b, c), smallestAngleSine(b, a, d));
+          double after = std::min(smallestAngleSine(c, a, d), smallestAngleSine(d, b, c));
+          bool shortDiagonal = newDiagonal < options.collapseRatio*std::min(target[(size_t)c], target[(size_t)d]) && before < 0.05;
+          if (!(after > 1.05*before) && !shortDiagonal) continue;
+          // do it: t1 = (c, a, d), t2 = (d, b, c)
+          tris[(size_t)3*t1] = c; tris[(size_t)3*t1 + 1] = a; tris[(size_t)3*t1 + 2] = d;
+          tris[(size_t)3*t2] = d; tris[(size_t)3*t2 + 1] = b; tris[(size_t)3*t2 + 2] = c;
+          removeFromIncident(b, t1);
+          incident[(size_t)d].push_back(t1);
+          removeFromIncident(a, t2);
+          incident[(size_t)c].push_back(t2);
+          version[(size_t)a]++; version[(size_t)b]++; version[(size_t)c]++; version[(size_t)d]++;
+          numFlipped++;
+          break;   // t1 changed; its other edges are seen in the next pass
+        }
+      }
+      return numFlipped;
+    };
+    // A point on three triangles whose edges are all short is taken out and
+    // its three triangles made one, when that one faces the way they did.
+    auto removeValenceThree = [&]() -> ll
+    {
+      ll numRemoved = 0;
+      for (ll u = 0; u < nv; u++)
+      {
+        ll live[3];
+        int n = 0;
+        bool tooMany = false;
+        for (size_t m = 0; m < incident[(size_t)u].size() && !tooMany; m++)
+        {
+          ll t = incident[(size_t)u][m];
+          if (dead[(size_t)t]) continue;
+          if (n < 3) live[n] = t;
+          n++;
+          if (n > 3) tooMany = true;
+        }
+        if (tooMany || n != 3) continue;
+        // the ring a -> b -> c, from the triangles (u, a, b), (u, b, c), (u, c, a)
+        ll ring[3];
+        int nr = 0;
+        ll t0 = live[0];
+        for (int q = 0; q < 3; q++)
+        {
+          if (tris[(size_t)3*t0 + q] == u)
+          {
+            ring[0] = tris[(size_t)3*t0 + (q+1)%3];
+            ring[1] = tris[(size_t)3*t0 + (q+2)%3];
+            nr = 2;
+          }
+        }
+        if (nr != 2) continue;
+        for (int i = 1; i < 3 && nr == 2; i++)
+        {
+          ll t = live[i];
+          for (int q = 0; q < 3; q++)
+          {
+            ll w = tris[(size_t)3*t + q];
+            if (w != u && w != ring[0] && w != ring[1])
+            {
+              ring[2] = w;
+              nr = 3;
+            }
+          }
+        }
+        if (nr != 3) continue;
+        bool shortEdges = true;
+        for (int i = 0; i < 3; i++)
+        {
+          if (Distance(&pts[(size_t)3*u], &pts[(size_t)3*ring[i]]) >= options.collapseRatio*std::min(target[(size_t)u], target[(size_t)ring[i]])) shortEdges = false;
+        }
+        if (!shortEdges) continue;
+        double nNew[3];
+        normalOf(ring[0], ring[1], ring[2], nNew);
+        double ln = Norm(nNew);
+        if (!(ln > 0.0)) continue;
+        bool agree = true;
+        for (int i = 0; i < 3 && agree; i++)
+        {
+          const ll *tt = &tris[(size_t)3*live[i]];
+          double nOld[3];
+          normalOf(tt[0], tt[1], tt[2], nOld);
+          double lo = Norm(nOld);
+          if (!(lo > 0.0) || Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) agree = false;
+        }
+        if (!agree) continue;
+        double centre[3];
+        for (int k = 0; k < 3; k++)
+        {
+          centre[k] = (pts[(size_t)3*ring[0] + k] + pts[(size_t)3*ring[1] + k] + pts[(size_t)3*ring[2] + k])/3.0;
+        }
+        if (options.collapseFieldTolerance > 0.0 && std::abs(field.Evaluate(centre)) > options.collapseFieldTolerance*thick[(size_t)u]) continue;
+        // live[0] becomes the ring triangle; the other two die
+        tris[(size_t)3*t0] = ring[0]; tris[(size_t)3*t0 + 1] = ring[1]; tris[(size_t)3*t0 + 2] = ring[2];
+        dead[(size_t)live[1]] = 1;
+        dead[(size_t)live[2]] = 1;
+        incident[(size_t)ring[2]].push_back(t0);
+        incident[(size_t)u].clear();
+        for (int i = 0; i < 3; i++) version[(size_t)ring[i]]++;
+        version[(size_t)u]++;
+        numRemoved++;
+        report.numCollapsed++;
+      }
+      return numRemoved;
+    };
+    for (int round = 0; round < 3; round++)
+    {
+      runCollapses();
+      for (int pass = 0; pass < 8; pass++)
+      {
+        if (runFlips() == 0) break;
+      }
+      removeValenceThree();
+      for (ll v = 0; v < nv; v++)
+      {
+        if (!incident[(size_t)v].empty()) pushEdges(v);
+      }
+    }
+    runCollapses();
+    std::vector<ll> newTris;
+    std::vector<ll> newId((size_t)nv, -1);
+    std::vector<double> newPts;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (dead[(size_t)t]) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        ll v = tris[(size_t)3*t + j];
+        if (newId[(size_t)v] < 0)
+        {
+          newId[(size_t)v] = (ll)(newPts.size()/3);
+          newPts.insert(newPts.end(), &pts[(size_t)3*v], &pts[(size_t)3*v] + 3);
+        }
+        newTris.push_back(newId[(size_t)v]);
+      }
+    }
+    pts = newPts;
+    tris = newTris;
+  }
+  auto t4 = std::chrono::steady_clock::now();
+  report.secondsDecimate = std::chrono::duration<double>(t4 - t3).count();
+  report.numPoints = (ll)(pts.size()/3);
+  report.numTriangles = (ll)(tris.size()/3);
+  report.numFieldEvaluations = field.NumEvaluations();
+  CountEdges(tris, report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges);
+  if (report.numNonManifoldEdges > 0 || report.numMiswoundEdges > 0)
+  {
+    // find the first such edge for the report
+    std::map<EdgeKey, std::pair<int, int> > use;
+    for (size_t i = 0; i + 2 < tris.size(); i += 3)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        ll a = tris[i + j], b = tris[i + (j+1)%3];
+        std::pair<int, int> &u = use[EdgeKey(a, b)];
+        u.first++;
+        if (a < b) u.second++;
+      }
+    }
+    for (std::map<EdgeKey, std::pair<int, int> >::iterator it = use.begin(); it != use.end(); ++it)
+    {
+      if (it->second.first > 2 || (it->second.first == 2 && it->second.second != 1))
+      {
+        double at[3];
+        for (int k = 0; k < 3; k++)
+        {
+          at[k] = 0.5*(pts[(size_t)3*it->first.a + k] + pts[(size_t)3*it->first.b + k]);
+        }
+        NoteFault(report, it->second.first > 2 ? "an edge of the offset surface on more than two triangles" : "an edge of the offset surface traversed the same way by both its triangles", at);
+        break;
+      }
+    }
+  }
+  return 0;
+}
+
+}  // namespace svoffset
