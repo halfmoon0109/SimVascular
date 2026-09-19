@@ -1521,6 +1521,221 @@ bool ThreePlanes(const double n0[3], const double p0[3], const double n1[3], con
   return true;
 }
 
+//---------------------
+// Prism coverage
+//---------------------
+// The solid the extrusion stands for is the union of the prisms each sheet
+// triangle swept out between its foot triangle on the interface and itself:
+// the points (1-s)*P(u,v) + s*E(u,v), P the foot triangle and E the sheet
+// triangle at the same barycentric place, 0 <= s <= 1. The winding number
+// of the closed extrusion counts those prisms with a sign: where the
+// extrusion folds over - a crotch whose fillet is tighter than the wall is
+// thick - the turned-over part of a prism counts -1, and inside the wall of
+// the neighbouring vessel, whose own prism counts +1, a slit of winding
+// number zero opens between the two layers of the fold. The pieces on the
+// walls of that slit pass as envelope and stand a fraction of the wall
+// above the interface. Put to the prisms themselves, with no sign, the slit
+// is covered and its walls are no boundary.
+//
+// A point is inside a prism when for some level s in [0, 1] it lies in the
+// triangle at that level; the level is a root of a cubic (the point lies in
+// the level triangle's plane), and the triangle test is by barycentric
+// weights, whichever way round the level triangle is, so a turned-over
+// prism counts as well as an upright one. (Three tetrahedra per prism would
+// be quicker, but a prism sheared by the thickness gradient has tetrahedra
+// that poke out above its own top, and its top would count as covered by
+// its own prism.)
+struct PrismSet
+{
+  const std::vector<double> *tops = nullptr;
+  const std::vector<double> *feet = nullptr;
+  const std::vector<ll> *tris = nullptr;
+  ll numSheet = 0;
+  std::vector<double> box;   // six per sheet triangle
+  Grid grid;
+
+  void Build(const std::vector<double> &topPoints, const std::vector<double> &footPoints,
+      const std::vector<ll> &triangles, ll numSheetTriangles, double typicalExtent, ll maxBins)
+  {
+    tops = &topPoints;
+    feet = &footPoints;
+    tris = &triangles;
+    numSheet = numSheetTriangles;
+    box.assign((size_t)6*numSheet, 0.0);
+    for (ll t = 0; t < numSheet; t++)
+    {
+      double *b = &box[(size_t)6*t];
+      for (int k = 0; k < 3; k++)
+      {
+        b[2*k] = std::numeric_limits<double>::max();
+        b[2*k+1] = -std::numeric_limits<double>::max();
+      }
+      for (int j = 0; j < 3; j++)
+      {
+        ll v = triangles[(size_t)3*t + j];
+        for (int k = 0; k < 3; k++)
+        {
+          b[2*k] = std::min(b[2*k], std::min(topPoints[(size_t)3*v + k], footPoints[(size_t)3*v + k]));
+          b[2*k+1] = std::max(b[2*k+1], std::max(topPoints[(size_t)3*v + k], footPoints[(size_t)3*v + k]));
+        }
+      }
+    }
+    grid.Build(box, numSheet, typicalExtent, maxBins);
+  }
+
+  // Whether x lies in the triangle a, b, c (in its plane already), by
+  // barycentric weights, either way round.
+  static bool InLevelTriangle(const double x[3], const double a[3], const double b[3], const double c[3])
+  {
+    double ab[3], ac[3], ax[3], n[3];
+    Sub(b, a, ab);
+    Sub(c, a, ac);
+    Sub(x, a, ax);
+    Cross(ab, ac, n);
+    double nn = Dot(n, n);
+    double longest2 = std::max(Dot(ab, ab), Dot(ac, ac));
+    if (!(nn > 1.0e-28*longest2*longest2))
+    {
+      return false;   // the level triangle has collapsed
+    }
+    double c1[3], c2[3];
+    Cross(ax, ac, c1);
+    Cross(ab, ax, c2);
+    double l1 = Dot(c1, n)/nn;
+    double l2 = Dot(c2, n)/nn;
+    double l0 = 1.0 - l1 - l2;
+    const double tol = 1.0e-9;
+    return l0 >= -tol && l1 >= -tol && l2 >= -tol;
+  }
+
+  // Inside the prism of sheet triangle t.
+  bool Inside(const double x[3], ll t) const
+  {
+    const ll *tt = &(*tris)[(size_t)3*t];
+    const double *p0 = &(*feet)[(size_t)3*tt[0]], *p1 = &(*feet)[(size_t)3*tt[1]], *p2 = &(*feet)[(size_t)3*tt[2]];
+    const double *e0 = &(*tops)[(size_t)3*tt[0]], *e1 = &(*tops)[(size_t)3*tt[1]], *e2 = &(*tops)[(size_t)3*tt[2]];
+    // The level triangle is A(s) = p0 + s*d0, B(s) = p1 + s*d1, C(s) = p2 + s*d2;
+    // its normal N(s) = (U + sV) x (W + sZ); the point is in its plane when
+    // f(s) = (x - A(s)) . N(s) = 0, a cubic.
+    double d0[3], d1[3], d2[3], U[3], V[3], W[3], Z[3], M[3];
+    Sub(e0, p0, d0);
+    Sub(e1, p1, d1);
+    Sub(e2, p2, d2);
+    Sub(p1, p0, U);
+    Sub(d1, d0, V);
+    Sub(p2, p0, W);
+    Sub(d2, d0, Z);
+    Sub(x, p0, M);
+    double N0[3], N1a[3], N1b[3], N1[3], N2[3];
+    Cross(U, W, N0);
+    Cross(U, Z, N1a);
+    Cross(V, W, N1b);
+    for (int k = 0; k < 3; k++)
+    {
+      N1[k] = N1a[k] + N1b[k];
+    }
+    Cross(V, Z, N2);
+    double c0 = Dot(M, N0);
+    double c1 = Dot(M, N1) - Dot(d0, N0);
+    double c2 = Dot(M, N2) - Dot(d0, N1);
+    double c3 = -Dot(d0, N2);
+    auto f = [&](double s) { return c0 + s*(c1 + s*(c2 + s*c3)); };
+    auto level = [&](double s, double a[3], double b[3], double c[3])
+    {
+      for (int k = 0; k < 3; k++)
+      {
+        a[k] = p0[k] + s*d0[k];
+        b[k] = p1[k] + s*d1[k];
+        c[k] = p2[k] + s*d2[k];
+      }
+    };
+    // The roots in [0, 1]: sign changes over a fine sampling, each closed in
+    // by bisection; a sample that is itself (nearly) a root is tried as is.
+    const int samples = 24;
+    double scale = std::abs(c0) + std::abs(c1) + std::abs(c2) + std::abs(c3);
+    if (!(scale > 0.0))
+    {
+      return false;
+    }
+    double prevS = 0.0, prevF = f(0.0);
+    for (int i = 1; i <= samples; i++)
+    {
+      double s = (double)i/(double)samples;
+      double fs = f(s);
+      double root = -1.0;
+      if (std::abs(prevF) <= 1.0e-12*scale)
+      {
+        root = prevS;
+      }
+      else if (prevF*fs < 0.0)
+      {
+        double lo = prevS, hi = s, flo = prevF;
+        for (int it = 0; it < 60; it++)
+        {
+          double mid = 0.5*(lo + hi);
+          double fm = f(mid);
+          if (fm == 0.0)
+          {
+            lo = hi = mid;
+            break;
+          }
+          if ((fm < 0.0) == (flo < 0.0))
+          {
+            lo = mid;
+            flo = fm;
+          }
+          else
+          {
+            hi = mid;
+          }
+        }
+        root = 0.5*(lo + hi);
+      }
+      else if (i == samples && std::abs(fs) <= 1.0e-12*scale)
+      {
+        root = s;
+      }
+      if (root >= 0.0)
+      {
+        double a[3], b[3], cc[3];
+        level(root, a, b, cc);
+        if (InLevelTriangle(x, a, b, cc))
+        {
+          return true;
+        }
+      }
+      prevS = s;
+      prevF = fs;
+    }
+    return false;
+  }
+
+  // Inside any prism but the one left out.
+  bool Covered(const double x[3], ll skip) const
+  {
+    int i = grid.Bin(x[0], 0), j = grid.Bin(x[1], 1), k = grid.Bin(x[2], 2);
+    ll bin = grid.Index(i, j, k);
+    for (ll m = grid.start[(size_t)bin]; m < grid.start[(size_t)bin + 1]; m++)
+    {
+      ll t = grid.cells[(size_t)m];
+      if (t == skip)
+      {
+        continue;
+      }
+      const double *b = &box[(size_t)6*t];
+      if (x[0] < b[0] || x[0] > b[1] || x[1] < b[2] || x[1] > b[3] || x[2] < b[4] || x[2] > b[5])
+      {
+        continue;
+      }
+      if (Inside(x, t))
+      {
+        return true;
+      }
+    }
+    return false;
+  }
+};
+
 void NoteFault(Report &report, const char *what, const double at[3])
 {
   report.numArrangementFaults++;
@@ -1571,6 +1786,12 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
   if (numSheet == 0)
   {
     error = "there is no sheet to take the envelope of";
+    return 1;
+  }
+  const bool havePrisms = !surface.footPoints.empty();
+  if (havePrisms && surface.footPoints.size() != surface.points.size())
+  {
+    error = "the foot points are not one per point";
     return 1;
   }
   // The winding number needs a consistently wound closed surface: every edge
@@ -2271,6 +2492,64 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
     faceDecided[(size_t)f] = 1;
     faceWinding[(size_t)f] = winding;
   }
+  // With the feet known, each face is also put to the prisms: the space
+  // just outside its representative, at the piece's incentre, is covered
+  // when the winding number there is not zero or when a prism sweeps over
+  // it, and the space just inside likewise (the winding number there
+  // differs by the crossing of the piece itself). A face is envelope when
+  // exactly one of its sides is covered, and it faces the bare side.
+  std::vector<unsigned char> faceKeep((size_t)numFaces, 0), faceFlip((size_t)numFaces, 0);
+  if (havePrisms)
+  {
+    PrismSet prisms;
+    prisms.Build(surface.points, surface.footPoints, tris, numSheet, meanExtent, maxBins);
+    for (ll f = 0; f < numFaces; f++)
+    {
+      ll p = faceRepresentative[(size_t)f];
+      if (p < 0 || !faceDecided[(size_t)f])
+      {
+        continue;
+      }
+      report.numPrismFaces++;
+      const ll src = pieceSource[(size_t)p];
+      const ll *pp = &pieceTris[(size_t)3*p];
+      const double *a = &points[(size_t)3*pp[0]], *b = &points[(size_t)3*pp[1]], *cc = &points[(size_t)3*pp[2]];
+      double la = Distance(b, cc), lb = Distance(cc, a), lc = Distance(a, b);
+      double perimeter = la + lb + lc;
+      double centre[3], e1[3], e2[3], twiceArea[3];
+      Sub(b, a, e1);
+      Sub(cc, a, e2);
+      Cross(e1, e2, twiceArea);
+      double inradius = (perimeter > 0.0) ? Norm(twiceArea)/perimeter : 0.0;
+      for (int k = 0; k < 3; k++)
+      {
+        centre[k] = (perimeter > 0.0) ? (la*a[k] + lb*b[k] + lc*cc[k])/perimeter : (a[k] + b[k] + cc[k])/3.0;
+      }
+      // Off the piece by a fraction of its inradius, so that a side face
+      // of a neighbouring prism through one of its edges is not crossed,
+      // and by no more than a small fraction of the sheet triangle.
+      double off = std::min(1.0e-4*geometry.extent[(size_t)src], 0.1*inradius);
+      if (!(off > 0.0))
+      {
+        off = 1.0e-6*geometry.extent[(size_t)src];
+      }
+      const double *n = &geometry.normal[(size_t)3*src];
+      const double sense = (double)report.windingSense;
+      double outside[3], inside[3];
+      for (int k = 0; k < 3; k++)
+      {
+        outside[k] = centre[k] + off*sense*n[k];
+        inside[k] = centre[k] - off*sense*n[k];
+      }
+      int wOut = faceWinding[(size_t)f];
+      int wIn = wOut + report.windingSense;
+      bool coveredOut = (wOut != 0) || prisms.Covered(outside, -1);
+      bool coveredIn = (wIn != 0) || prisms.Covered(inside, -1);
+      faceKeep[(size_t)f] = (coveredIn && !coveredOut) ? 1 : 0;
+      faceFlip[(size_t)f] = (coveredOut && !coveredIn) ? 1 : 0;
+    }
+  }
+  std::vector<unsigned char> flip((size_t)numPieceTris, 0);
   for (ll p = 0; p < numPieceTris; p++)
   {
     ll f = pieceFace[(size_t)p];
@@ -2282,7 +2561,23 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
     decided[(size_t)p] = 1;
     windingOf[(size_t)p] = faceWinding[(size_t)f];
     histogram[windingOf[(size_t)p]]++;
-    keep[(size_t)p] = (windingOf[(size_t)p] == 0) ? 1 : 0;
+    if (havePrisms)
+    {
+      keep[(size_t)p] = (faceKeep[(size_t)f] || faceFlip[(size_t)f]) ? 1 : 0;
+      flip[(size_t)p] = faceFlip[(size_t)f];
+      if (windingOf[(size_t)p] == 0 && !keep[(size_t)p])
+      {
+        report.numCoveredDropped++;
+      }
+      if (flip[(size_t)p])
+      {
+        report.numTurnedKept++;
+      }
+    }
+    else
+    {
+      keep[(size_t)p] = (windingOf[(size_t)p] == 0) ? 1 : 0;
+    }
   }
   if (!histogram.empty())
   {
@@ -2520,11 +2815,17 @@ int BuildOuterEnvelope(const Surface &surface, Envelope &envelope, Report &repor
       continue;
     }
     const ll *pp = &pieceTris[(size_t)3*p];
+    // A piece kept the other way round is wound the other way: corners
+    // 0, 2, 1, whose edges are the old edges 2, 1, 0.
+    const int cornerOrder[2][3] = {{0, 1, 2}, {0, 2, 1}};
+    const int edgeOrder[2][3] = {{0, 1, 2}, {2, 1, 0}};
+    const int *corners = cornerOrder[flip[(size_t)p] ? 1 : 0];
+    const int *edges = edgeOrder[flip[(size_t)p] ? 1 : 0];
     for (int j = 0; j < 3; j++)
     {
-      envelope.triangles.push_back(pp[j]);
-      envelope.creaseEdge.push_back(pieceCreaseEdge[(size_t)3*p + j]);
-      ll a = pp[j], b = pp[(j+1)%3];
+      envelope.triangles.push_back(pp[corners[j]]);
+      envelope.creaseEdge.push_back(pieceCreaseEdge[(size_t)3*p + edges[j]]);
+      ll a = pp[corners[j]], b = pp[corners[(j+1)%3]];
       std::pair<int, int> &use = edgeUse[EdgeKey(a, b)];
       use.first++;
       if (a < b)

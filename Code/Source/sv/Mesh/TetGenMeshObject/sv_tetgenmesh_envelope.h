@@ -84,6 +84,15 @@ struct Surface
   // triangle that has turned over in the extrusion is known exactly; without
   // it, one is guessed from disagreeing with its neighbours.
   std::vector<double> sheetNormal;
+  // Optional, three per point: where each point stood before it was
+  // extruded - its foot on the interface - for every point the sheet
+  // triangles use (the points that close the surface need none). With it,
+  // each piece is also put to the prisms the sheet triangles swept out
+  // between their feet and themselves: the solid the extrusion stands for
+  // is the union of those prisms, and the winding number cannot see that
+  // where the extrusion folds, the turned-over part of a prism counts -1
+  // and cancels the prism of another sheet that does cover the spot.
+  std::vector<double> footPoints;
 };
 
 /**
@@ -129,6 +138,9 @@ struct Report
   long long numPocketPieces = 0;       // pieces dropped with them
   long long numShreds = 0;             // components of the kept surface, off the rims, that are not closed: the kept wall of a slit whose other wall is turned over, dropped
   long long numShredPieces = 0;        // pieces dropped with them
+  long long numPrismFaces = 0;         // faces put to the prisms (only with Surface::footPoints)
+  long long numCoveredDropped = 0;     // pieces with winding number zero on their outer side dropped because a prism sweeps over that side: the walls of a fold's slit
+  long long numTurnedKept = 0;         // pieces kept the other way round: a prism covers their outer side and nothing covers their inner side
   long long numArrangementFaults = 0;  // a triangle whose pieces do not add up to it, a segment with one end, and the like
   long long numNonManifoldEdges = 0;   // edges of the kept surface on more than two pieces
   long long numMiswoundEdges = 0;      // edges of the kept surface traversed the same way twice
