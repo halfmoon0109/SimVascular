@@ -431,10 +431,17 @@ static void TrimOwned(Surface &s, const Interface &iface)
 // trim must take only what belongs to each cap.
 static void TestNeighbouringEnds()
 {
-  printf("test 4: a tube ending at z = 8 beside one running on to z = 12, axes 2.5 apart (radius 1 wall 0.3, radius 0.5 wall 0.1)\n");
+  // The axes are 2.2 apart: the walls stay 0.3 clear of each other, yet
+  // the long tube's interface runs within a collar's length of the short
+  // tube's rim, which is where a cap's reach must be decided along the
+  // interface and not by a cylinder about the cap (the user's model has two
+  // such vessels at (0.4, -54.4, 104.6), and the cylinder handed the
+  // neighbour's wall to the cap and cut a hole in it).
+  const double dx = 2.2;
+  printf("test 4: a tube ending at z = 8 beside one running on to z = 12, axes %.1f apart (radius 1 wall 0.3, radius 0.5 wall 0.1)\n", dx);
   Interface iface;
   AddTube(iface, 0.0, 0.0, 1.0, 0.0, 8.0, 32, 32, 0.3);
-  AddTube(iface, 2.5, 0.0, 0.5, 0.0, 12.0, 20, 48, 0.1);
+  AddTube(iface, dx, 0.0, 0.5, 0.0, 12.0, 20, 48, 0.1);
   Options options;
   Surface s; Report r;
   if (!Build(iface, options, s, r)) return;
@@ -448,6 +455,22 @@ static void TestNeighbouringEnds()
     if (p[2] > 8.0 && rho1 < 1.6 && s.pointRim[i] < 0) numUnownedPast++;
   }
   Check(numUnownedPast == 0, "every point of the short tube's dome past its cap belongs to a cap");
+  // and nothing of the long tube's wall is handed to the short tube's cap
+  ll topRim = -1;
+  for (size_t r = 0; r < s.rims.size(); r++)
+  {
+    if (std::abs(iface.points[3*(size_t)s.rims[r][0] + 2] - 8.0) < 1e-6) topRim = (ll)r;
+  }
+  Check(topRim >= 0, "the short tube's cap rim at z = 8 is among the rims");
+  ll numStolen = 0;
+  for (size_t i = 0; i < s.points.size()/3; i++)
+  {
+    const double *p = &s.points[3*i];
+    double rho2 = std::sqrt((p[0]-dx)*(p[0]-dx) + p[1]*p[1]);
+    if (rho2 < 0.65 && p[2] > 8.0 + 1e-6 && s.pointRim[i] == topRim) numStolen++;
+  }
+  printf("  points of the long tube's wall past z = 8 owned by the short tube's cap: %lld\n", numStolen);
+  Check(numStolen == 0, "the neighbouring tube's wall belongs to no cap of the short tube");
   TrimOwned(s, iface);
   int loops = CountBoundaryLoops(s);
   ll nb, nn, nm;
@@ -463,7 +486,7 @@ static void TestNeighbouringEnds()
   for (size_t i = 0; i < iface.points.size()/3; i++)
   {
     const double *p = &iface.points[3*i];
-    if (std::abs(std::sqrt((p[0]-2.5)*(p[0]-2.5) + p[1]*p[1]) - 0.5) > 1e-6) continue;
+    if (std::abs(std::sqrt((p[0]-dx)*(p[0]-dx) + p[1]*p[1]) - 0.5) > 1e-6) continue;
     if (p[2] < 8.5 || p[2] > 11.5) continue;
     worst = std::min(worst, DistanceToSurface(s, p)/iface.thickness[i]);
   }

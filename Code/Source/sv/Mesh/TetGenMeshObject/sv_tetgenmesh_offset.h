@@ -247,9 +247,11 @@ public:
   /// The interface where x is: the target edge length of the offset surface
   /// there (the interface's own edge, shortened where the curvature of the
   /// offset would otherwise put a chord more than a twentieth of the wall
-  /// off it), the wall thickness there, and the cap rim the nearest field
-  /// triangle belongs to (a collar triangle, or an interface triangle within
-  /// a collar's length of the rim), -1 for none.
+  /// off it), the wall thickness there, and the cap rim the field triangle
+  /// x's offset stands on belongs to (a collar triangle, or an interface
+  /// triangle within two collar lengths of the rim along the interface),
+  /// -1 for none. That triangle is the one the field takes its value from
+  /// at x, the least distance less the wall, not the nearest by distance.
   void Local(const double x[3], double &size, double &thickness, long long &rim) const;
 
   /// How far from the field's surface a point is surely outside the wall.

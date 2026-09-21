@@ -41,6 +41,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <functional>
 #include <limits>
 #include <map>
 #include <queue>
@@ -369,7 +370,7 @@ struct OffsetField::Data
   std::vector<double> localSize;     // per triangle: the target edge length of the offset surface there
   std::vector<double> localThickness;   // per triangle: the mean thickness of its corners
   std::vector<unsigned char> boundaryPoint;   // per point: 1 on an open edge of the field's surface (the collar ends)
-  std::vector<ll> triangleRim;       // per triangle: the cap rim it belongs to (its collar, or the interface within a collar's length of the rim), -1 for none
+  std::vector<ll> triangleRim;       // per triangle: the cap rim it belongs to (its collar, or the interface within two collar lengths of the rim along the interface), -1 for none
   std::vector<std::vector<ll> > rims;
   std::vector<double> rimOutward;    // three per rim
   std::vector<double> collarLength;  // per rim
@@ -524,6 +525,21 @@ int OffsetField::Build(const Interface &input, Report &report, std::string &erro
   // triangles' winding runs clockwise about the outward direction, so the
   // outward direction is the reverse of the loop's own normal; that is
   // checked against the interface itself, which lies on the inward side.
+  // The interface's edges by point, for measuring along the interface how
+  // far from a rim a triangle lies.
+  std::vector<std::vector<std::pair<ll, double> > > adjacent((size_t)numPts);
+  for (ll t = 0; t < numTris; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = d.triangles[(size_t)3*t + j], b = d.triangles[(size_t)3*t + (j+1)%3];
+      double L = Distance(&d.points[(size_t)3*a], &d.points[(size_t)3*b]);
+      adjacent[(size_t)a].push_back(std::make_pair(b, L));
+      adjacent[(size_t)b].push_back(std::make_pair(a, L));
+    }
+  }
+  const double unreached = std::numeric_limits<double>::max();
+  std::vector<double> alongInterface((size_t)numPts, unreached);
   d.rimOutward.assign(3*d.rims.size(), 0.0);
   d.collarLength.assign(d.rims.size(), 0.0);
   for (size_t r = 0; r < d.rims.size(); r++)
@@ -612,29 +628,59 @@ int OffsetField::Build(const Interface &input, Report &report, std::string &erro
       d.triangles.push_back(b);
       report.numCollarTriangles += 2;
     }
-    // The interface within a collar's length of the rim belongs to the rim
+    // The interface within two collar lengths of the rim belongs to the rim
     // too, so that a point of the offset surface just inside the cap plane
     // is owned like one just past it and a trim along the plane cuts the
-    // edges between them on the plane.
+    // edges between them on the plane. The distance is measured along the
+    // interface, not within a cylinder about the cap: another vessel passing
+    // close by the cap end falls in such a cylinder, its wall is handed to
+    // this cap, and the trim then cuts a hole in it past the cap plane (two
+    // vessels 0.5 apart on the user's model did exactly that).
     if (d.triangleRim.size() < (size_t)numTris)
     {
       d.triangleRim.assign((size_t)numTris, -1);
     }
-    for (ll t = 0; t < numTris; t++)
     {
-      if (d.triangleRim[(size_t)t] >= 0) continue;
-      bool near = false;
-      for (int j = 0; j < 3 && !near; j++)
+      const double reachAlong = 2.0*length;
+      std::vector<ll> touched;
+      std::priority_queue<std::pair<double, ll>, std::vector<std::pair<double, ll> >, std::greater<std::pair<double, ll> > > queue;
+      for (size_t m = 0; m < loop.size(); m++)
       {
-        double off[3];
-        Sub(&d.points[(size_t)3*d.triangles[(size_t)3*t + j]], centre, off);
-        double along = -Dot(off, outward);   // depth into the vessel from the cap plane
-        double radial2 = Dot(off, off) - along*along;
-        near = along >= -length && along <= 2.0*length && radial2 <= (radius + 2.0*length)*(radius + 2.0*length);
+        alongInterface[(size_t)loop[m]] = 0.0;
+        touched.push_back(loop[m]);
+        queue.push(std::make_pair(0.0, loop[m]));
       }
-      if (near)
+      while (!queue.empty())
       {
-        d.triangleRim[(size_t)t] = (ll)r;
+        std::pair<double, ll> top = queue.top();
+        queue.pop();
+        if (top.first > alongInterface[(size_t)top.second]) continue;
+        const std::vector<std::pair<ll, double> > &around = adjacent[(size_t)top.second];
+        for (size_t m = 0; m < around.size(); m++)
+        {
+          ll v = around[m].first;
+          double cand = top.first + around[m].second;
+          if (cand > reachAlong || cand >= alongInterface[(size_t)v]) continue;
+          if (alongInterface[(size_t)v] == unreached) touched.push_back(v);
+          alongInterface[(size_t)v] = cand;
+          queue.push(std::make_pair(cand, v));
+        }
+      }
+      for (ll t = 0; t < numTris; t++)
+      {
+        if (d.triangleRim[(size_t)t] >= 0) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          if (alongInterface[(size_t)d.triangles[(size_t)3*t + j]] != unreached)
+          {
+            d.triangleRim[(size_t)t] = (ll)r;
+            break;
+          }
+        }
+      }
+      for (size_t m = 0; m < touched.size(); m++)
+      {
+        alongInterface[(size_t)touched[m]] = unreached;
       }
     }
     for (size_t m = 0; m < 2*loop.size(); m++)
@@ -836,14 +882,20 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
   {
     c[k] = g.Bin(x[k], k);
   }
-  double best = std::numeric_limits<double>::max();
+  // The triangle the field takes its value from at x: the least distance
+  // less the wall there, as Evaluate has it, which is the piece of the
+  // interface whose offset x stands on. The nearest triangle by distance
+  // alone can be a thinner neighbour's, and a point would then be handed to
+  // that neighbour's cap.
+  double bestTerm = std::numeric_limits<double>::max();
   ll bestT = -1;
-  // Rings out until one lies farther than the nearest triangle found; the
-  // whole grid at most, since x may be far from the surface.
+  // Rings out until one lies farther than the best term can be beaten from;
+  // the whole grid at most, since x may be far from the surface.
   int rings = std::max(g.n[0], std::max(g.n[1], g.n[2]));
   for (int r = 0; r <= rings; r++)
   {
-    if (bestT >= 0 && (r - 1)*g.cell >= best)
+    // every bin of this ring is at least (r-1) cells away
+    if (bestT >= 0 && (r - 1)*g.cell - d.largestThickness >= bestTerm)
     {
       break;
     }
@@ -856,16 +908,18 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
           if (std::max(std::abs(k - c[2]), std::max(std::abs(j - c[1]), std::abs(i - c[0]))) != r) continue;
           if (i < 0 || j < 0 || k < 0 || i >= g.n[0] || j >= g.n[1] || k >= g.n[2]) continue;
           size_t b = g.Index(i, j, k);
-          if (g.BoxDistance(x, i, j, k) >= best) continue;
+          if (g.start[b + 1] == g.start[b]) continue;
+          if (g.BoxDistance(x, i, j, k) - g.binMaxThickness[b] >= bestTerm) continue;
           for (ll m = g.start[b]; m < g.start[b + 1]; m++)
           {
             ll t = g.cells[(size_t)m];
             const ll *tt = &d.triangles[(size_t)3*t];
             double q[3], bary[3];
             double dist = ClosestOnTriangle(x, &d.points[(size_t)3*tt[0]], &d.points[(size_t)3*tt[1]], &d.points[(size_t)3*tt[2]], q, bary);
-            if (dist < best)
+            double tq = bary[0]*d.thickness[(size_t)tt[0]] + bary[1]*d.thickness[(size_t)tt[1]] + bary[2]*d.thickness[(size_t)tt[2]];
+            if (dist - tq < bestTerm)
             {
-              best = dist;
+              bestTerm = dist - tq;
               bestT = t;
             }
           }
