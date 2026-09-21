@@ -4,7 +4,7 @@
 -- [Code/CMakeLists]  =============================================
 -- [Code/CMakeLists]  SV_Qt6_DIR: /work/externals/install/qt6
 -- [Code/CMakeLists]  Set SV project 
--- SimVascular Version: simvascular 2026-09-18
+-- SimVascular Version: simvascular 2026-09-21
 SV_BUILD_TYPE_DIR: release
 -- [Code/CMakeLists]  Include SimVascularExternalsVersions 
 -- [Code/CMakeLists]  Include SimVascularOptions
@@ -616,7 +616,7 @@ CMake Deprecation Warning at ThirdParty/tetgen/simvascular_tetgen/CMakeLists.txt
 -- /work/build/SimVascular-build/ThirdParty/SolverIO
 -- /work/SimVascular/Code/ThirdParty/SolverIO
 -- 
--- Install timestamp: 260918032651
+-- Install timestamp: 260921015226
 -- [Distribution]  ========== Distribution/CMakeLists.txt ==========
 -- [Distribution]  CMAKE_CURRENT_SOURCE_DIR: /work/SimVascular/Distribution
 -- [Distribution]  CMAKE_CURRENT_BINARY_DIR: /work/build/SimVascular-build/Distribution
@@ -625,7 +625,7 @@ CMake Deprecation Warning at ThirdParty/tetgen/simvascular_tetgen/CMakeLists.txt
 -- [Distribution]  SV_INSTALL_RUNTIME_DIR: bin
 -- [Distribution]  Qt6_DIR: /work/externals/install/qt6/lib/cmake/Qt6
 -- CPACK_COMPONENTS_ALL: CoreExecutables;CoreLibraries;CoreHeaders;CoreScripts;CoreFiles;ThirdPartyExecutables;ThirdPartyLibraries;ThirdPartyHeaders;ExternalExecutables;ExternalLibraries;ExternalHeaders;CMake;Unspecified
--- Packname name: SimVascular-linux-x64-2026.09.18
+-- Packname name: SimVascular-linux-x64-2026.09.21
 -- 
 -- Libraries:
 -- 	Source/PythonAPI
@@ -833,162 +833,163 @@ Consolidate compiler generated dependencies of target _simvascular_vtksvcommon
 Consolidate compiler generated dependencies of target _simvascular_utils
 Consolidate compiler generated dependencies of target _simvascular_module_ml
 Consolidate compiler generated dependencies of target _simvascular_module_imageprocessing
-[  0%] Copying dicom2 to /work/build/SimVascular-build/bin/dicom2
 [  0%] Built target dcmdump-copy
-[  0%] Built target dcmodify-copy
-[  0%] Built target _simvascular_thirdparty_tetgen
-[  1%] Built target _simvascular_thirdparty_zlib
+[  1%] Copying dicom2 to /work/build/SimVascular-build/bin/dicom2
+[  1%] Built target dcmodify-copy
+[  1%] Built target _simvascular_thirdparty_tetgen
 Consolidate compiler generated dependencies of target _simvascular_module_multiphysics
-[  1%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_misc_utils.cxx.o
-[  2%] Built target _simvascular_vtksvio
-[  2%] Building CXX object Source/vtkSV/Common/CMakeFiles/_simvascular_vtksvcommon.dir/vtkSVGeneralUtils.cxx.o
-[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_vtk_utils.cxx.o
-[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_cgeom.cxx.o
-[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_Math.cxx.o
-[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_FactoryRegistrar.cxx.o
-[  3%] Building CXX object Source/sv4gui/Modules/ImageProcessing/CMakeFiles/_simvascular_module_imageprocessing.dir/sv4gui_ImageProcessingUtils.cxx.o
+[  2%] Built target _simvascular_thirdparty_zlib
+[  3%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_misc_utils.cxx.o
+[  4%] Built target _simvascular_vtksvio
+[  4%] Building CXX object Source/vtkSV/Common/CMakeFiles/_simvascular_vtksvcommon.dir/vtkSVGeneralUtils.cxx.o
+[  4%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_cgeom.cxx.o
+[  4%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_vtk_utils.cxx.o
+[  4%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_Math.cxx.o
+[  4%] Building CXX object Source/sv/Utils/CMakeFiles/_simvascular_utils.dir/sv_FactoryRegistrar.cxx.o
+[  4%] Building CXX object Source/sv4gui/Modules/MachineLearning/CMakeFiles/_simvascular_module_ml.dir/sv4gui_MachineLearningUtils.cxx.o
 Consolidate compiler generated dependencies of target _simvascular_thirdparty_solverio
-[  3%] Built target dicom2-copy
-[  3%] Building CXX object Source/sv4gui/Modules/MachineLearning/CMakeFiles/_simvascular_module_ml.dir/sv4gui_MachineLearningUtils.cxx.o
+[  4%] Building CXX object Source/sv4gui/Modules/ImageProcessing/CMakeFiles/_simvascular_module_imageprocessing.dir/sv4gui_ImageProcessingUtils.cxx.o
+[  4%] Built target dicom2-copy
 Consolidate compiler generated dependencies of target _simvascular_thirdparty_vmtk
-[  3%] Built target _simvascular_thirdparty_solverio
-[  4%] Built target _simvascular_module_multiphysics
-[  8%] Built target _simvascular_thirdparty_vmtk
-[  8%] Linking CXX shared library ../../../lib/lib_simvascular_utils.so
-[  8%] Built target _simvascular_utils
+[  4%] Built target _simvascular_thirdparty_solverio
+[  5%] Built target _simvascular_module_multiphysics
+[  9%] Built target _simvascular_thirdparty_vmtk
+[  9%] Linking CXX shared library ../../../lib/lib_simvascular_utils.so
+[  9%] Built target _simvascular_utils
 Consolidate compiler generated dependencies of target _simvascular_repository
-[  8%] Linking CXX shared library ../../../lib/lib_simvascular_vtksvcommon.so
-[  8%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_RepositoryData.cxx.o
-[  8%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_PolyData.cxx.o
-[  8%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_DataObject.cxx.o
+[  9%] Linking CXX shared library ../../../lib/lib_simvascular_vtksvcommon.so
+[  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_RepositoryData.cxx.o
+[  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_DataObject.cxx.o
 [  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_StrPts.cxx.o
-[  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_UnstructuredGrid.cxx.o
+[  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_PolyData.cxx.o
 [  9%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_DataSet.cxx.o
-[  9%] Built target _simvascular_vtksvcommon
+[ 10%] Building CXX object Source/sv/Repository/CMakeFiles/_simvascular_repository.dir/sv_UnstructuredGrid.cxx.o
+[ 10%] Built target _simvascular_vtksvcommon
 Consolidate compiler generated dependencies of target _simvascular_vtksvboolean
 Consolidate compiler generated dependencies of target _simvascular_vtksvgeometry
 Consolidate compiler generated dependencies of target _simvascular_vtksvmisc
-[  9%] Building CXX object Source/vtkSV/Modules/Boolean/CMakeFiles/_simvascular_vtksvboolean.dir/vtkSVLoopBooleanPolyDataFilter.cxx.o
-[  9%] Building CXX object Source/vtkSV/Modules/Boolean/CMakeFiles/_simvascular_vtksvboolean.dir/vtkSVLoopIntersectionPolyDataFilter.cxx.o
-[  9%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvgeometry.so
-[  9%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvmisc.so
-[ 10%] Built target _simvascular_vtksvgeometry
-[ 12%] Built target _simvascular_vtksvmisc
+[ 10%] Building CXX object Source/vtkSV/Modules/Boolean/CMakeFiles/_simvascular_vtksvboolean.dir/vtkSVLoopBooleanPolyDataFilter.cxx.o
+[ 10%] Building CXX object Source/vtkSV/Modules/Boolean/CMakeFiles/_simvascular_vtksvboolean.dir/vtkSVLoopIntersectionPolyDataFilter.cxx.o
+[ 10%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvgeometry.so
+[ 10%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvmisc.so
+[ 11%] Built target _simvascular_vtksvgeometry
+[ 13%] Built target _simvascular_vtksvmisc
 Consolidate compiler generated dependencies of target _simvascular_vtksvnurbs
-[ 12%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvnurbs.so
-[ 13%] Built target _simvascular_vtksvnurbs
+[ 14%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvnurbs.so
+[ 15%] Built target _simvascular_vtksvnurbs
 Consolidate compiler generated dependencies of target _simvascular_vtksvparameterization
-[ 13%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvparameterization.so
-[ 14%] Built target _simvascular_vtksvparameterization
+[ 16%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvparameterization.so
+[ 16%] Built target _simvascular_vtksvparameterization
 Consolidate compiler generated dependencies of target _simvascular_vtksvsegmentation
-[ 14%] Building CXX object Source/vtkSV/Modules/Segmentation/CMakeFiles/_simvascular_vtksvsegmentation.dir/vtkSVCenterlines.cxx.o
-[ 14%] Building CXX object Source/vtkSV/Modules/Segmentation/CMakeFiles/_simvascular_vtksvsegmentation.dir/vtkSVCenterlineGraph.cxx.o
-[ 14%] Linking CXX shared library ../../../../lib/lib_simvascular_module_ml.so
-[ 15%] Linking CXX shared library ../../../../lib/lib_simvascular_module_imageprocessing.so
-[ 15%] Built target _simvascular_module_ml
+[ 16%] Building CXX object Source/vtkSV/Modules/Segmentation/CMakeFiles/_simvascular_vtksvsegmentation.dir/vtkSVCenterlines.cxx.o
+[ 17%] Building CXX object Source/vtkSV/Modules/Segmentation/CMakeFiles/_simvascular_vtksvsegmentation.dir/vtkSVCenterlineGraph.cxx.o
+[ 17%] Linking CXX shared library ../../../../lib/lib_simvascular_module_ml.so
+[ 17%] Built target _simvascular_module_ml
+[ 18%] Linking CXX shared library ../../../../lib/lib_simvascular_module_imageprocessing.so
 Appending zipped resources to _simvascular_module_imageprocessing
-[ 15%] Built target _simvascular_module_imageprocessing
-[ 15%] Linking CXX shared library ../../../lib/lib_simvascular_repository.so
-[ 15%] Built target _simvascular_repository
+[ 18%] Built target _simvascular_module_imageprocessing
+[ 18%] Linking CXX shared library ../../../lib/lib_simvascular_repository.so
+[ 18%] Built target _simvascular_repository
 Consolidate compiler generated dependencies of target _simvascular_solid
 Consolidate compiler generated dependencies of target _simvascular_vmtk_utils
 Consolidate compiler generated dependencies of target _simvascular_post
 Consolidate compiler generated dependencies of target _simvascular_itk_lset
-[ 15%] Building CXX object Source/sv/Model/SolidModel/CMakeFiles/_simvascular_solid.dir/sv_SolidModel.cxx.o
-[ 15%] Building CXX object Source/sv/Mesh/VMTKUtils/CMakeFiles/_simvascular_vmtk_utils.dir/sv_vmtk_utils.cxx.o
-[ 15%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_CalculateWallShearStress.cxx.o
-[ 15%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_ConvertVisFiles.cxx.o
-[ 15%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_CalculateTKE.cxx.o
-[ 15%] Building CXX object Source/sv3/ITKSegmentation/CMakeFiles/_simvascular_itk_lset.dir/sv3_ITKUtils.cxx.o
-[ 16%] Building CXX object Source/sv3/ITKSegmentation/CMakeFiles/_simvascular_itk_lset.dir/sv3_ITKLevelSet.cxx.o
-[ 16%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvboolean.so
-[ 17%] Built target _simvascular_vtksvboolean
-[ 17%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvsegmentation.so
-[ 19%] Built target _simvascular_vtksvsegmentation
-[ 19%] Linking CXX shared library ../../../../lib/lib_simvascular_solid.so
-[ 19%] Linking CXX shared library ../../../lib/lib_simvascular_post.so
-[ 19%] Built target _simvascular_solid
+[ 18%] Building CXX object Source/sv/Model/SolidModel/CMakeFiles/_simvascular_solid.dir/sv_SolidModel.cxx.o
+[ 18%] Building CXX object Source/sv/Mesh/VMTKUtils/CMakeFiles/_simvascular_vmtk_utils.dir/sv_vmtk_utils.cxx.o
+[ 18%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_CalculateWallShearStress.cxx.o
+[ 18%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_ConvertVisFiles.cxx.o
+[ 18%] Building CXX object Source/sv2/PostProcessing/CMakeFiles/_simvascular_post.dir/sv2_CalculateTKE.cxx.o
+[ 18%] Building CXX object Source/sv3/ITKSegmentation/CMakeFiles/_simvascular_itk_lset.dir/sv3_ITKUtils.cxx.o
+[ 19%] Building CXX object Source/sv3/ITKSegmentation/CMakeFiles/_simvascular_itk_lset.dir/sv3_ITKLevelSet.cxx.o
+[ 19%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvboolean.so
+[ 20%] Built target _simvascular_vtksvboolean
+[ 20%] Linking CXX shared library ../../../../lib/lib_simvascular_vtksvsegmentation.so
+[ 20%] Built target _simvascular_vtksvsegmentation
+[ 20%] Linking CXX shared library ../../../../lib/lib_simvascular_solid.so
+[ 20%] Linking CXX shared library ../../../lib/lib_simvascular_post.so
+[ 20%] Built target _simvascular_solid
+[ 20%] Built target _simvascular_post
 Consolidate compiler generated dependencies of target _simvascular_mesh
 Consolidate compiler generated dependencies of target _simvascular_geom
-[ 19%] Built target _simvascular_post
-[ 19%] Building CXX object Source/sv/Mesh/MeshObject/CMakeFiles/_simvascular_mesh.dir/sv_MeshSystem.cxx.o
-[ 19%] Building CXX object Source/sv/Mesh/MeshObject/CMakeFiles/_simvascular_mesh.dir/sv_MeshObject.cxx.o
-[ 19%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_sys_geom.cxx.o
-[ 19%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_ggems.cxx.o
-[ 19%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_spline.cxx.o
-[ 19%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_integrate_surface.cxx.o
-[ 19%] Linking CXX shared library ../../../../lib/lib_simvascular_vmtk_utils.so
-[ 19%] Built target _simvascular_vmtk_utils
-[ 19%] Linking CXX shared library ../../../lib/lib_simvascular_itk_lset.so
-[ 19%] Built target _simvascular_itk_lset
-[ 19%] Linking CXX shared library ../../../../lib/lib_simvascular_mesh.so
-[ 19%] Built target _simvascular_mesh
+[ 20%] Building CXX object Source/sv/Mesh/MeshObject/CMakeFiles/_simvascular_mesh.dir/sv_MeshObject.cxx.o
+[ 20%] Building CXX object Source/sv/Mesh/MeshObject/CMakeFiles/_simvascular_mesh.dir/sv_MeshSystem.cxx.o
+[ 20%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_sys_geom.cxx.o
+[ 20%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_ggems.cxx.o
+[ 20%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_spline.cxx.o
+[ 20%] Building CXX object Source/sv/Geometry/CMakeFiles/_simvascular_geom.dir/sv_integrate_surface.cxx.o
+[ 20%] Linking CXX shared library ../../../../lib/lib_simvascular_vmtk_utils.so
+[ 20%] Built target _simvascular_vmtk_utils
+[ 20%] Linking CXX shared library ../../../lib/lib_simvascular_itk_lset.so
+[ 20%] Built target _simvascular_itk_lset
+[ 20%] Linking CXX shared library ../../../../lib/lib_simvascular_mesh.so
+[ 20%] Built target _simvascular_mesh
 Consolidate compiler generated dependencies of target _simvascular_adaptor
-[ 19%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_adapt_utils.cxx.o
-[ 19%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_AdaptObject.cxx.o
-[ 19%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_eispack.cxx.o
-[ 20%] Linking CXX shared library ../../../lib/lib_simvascular_geom.so
-[ 20%] Built target _simvascular_geom
+[ 20%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_AdaptObject.cxx.o
+[ 20%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_adapt_utils.cxx.o
+[ 20%] Building CXX object Source/sv/Mesh/AdaptObject/CMakeFiles/_simvascular_adaptor.dir/sv_eispack.cxx.o
+[ 21%] Linking CXX shared library ../../../lib/lib_simvascular_geom.so
+[ 21%] Built target _simvascular_geom
 Consolidate compiler generated dependencies of target _simvascular_common
 Consolidate compiler generated dependencies of target _simvascular_polydata_solid
 Consolidate compiler generated dependencies of target _simvascular_opencascade_solid
 Consolidate compiler generated dependencies of target _simvascular_image
-[ 20%] Building CXX object Source/sv3/Common/CMakeFiles/_simvascular_common.dir/sv3_XmlIOUtil.cxx.o
-[ 20%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_polydatasolid_utils.cxx.o
-[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_image.cxx.o
-[ 20%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_PolyDataSolid.cxx.o
-[ 20%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_vtkGetBoundaryFaces.cxx.o
-[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_read_header.cxx.o
-[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_calc_correction_eqn.cxx.o
-[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_decode.cxx.o
-[ 20%] Building CXX object Source/sv/Model/OCCTSolidModel/CMakeFiles/_simvascular_opencascade_solid.dir/sv_OCCTSolidModel.cxx.o
-[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_img_threshold.cxx.o
-[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_DistanceMap.cxx.o
-[ 20%] Linking CXX shared library ../../../lib/lib_simvascular_common.so
-[ 20%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_mask_image_in_place.cxx.o
-[ 20%] Built target _simvascular_common
-[ 20%] Building CXX object Source/sv/Model/OCCTSolidModel/CMakeFiles/_simvascular_opencascade_solid.dir/sv_occtsolid_utils.cxx.o
-[ 20%] Linking CXX shared library ../../../../lib/lib_simvascular_adaptor.so
-[ 20%] Built target _simvascular_adaptor
+[ 21%] Building CXX object Source/sv3/Common/CMakeFiles/_simvascular_common.dir/sv3_XmlIOUtil.cxx.o
+[ 21%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_PolyDataSolid.cxx.o
+[ 21%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_polydatasolid_utils.cxx.o
+[ 21%] Building CXX object Source/sv/Model/PolyDataSolidModel/CMakeFiles/_simvascular_polydata_solid.dir/sv_vtkGetBoundaryFaces.cxx.o
+[ 21%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_image.cxx.o
+[ 21%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_read_header.cxx.o
+[ 21%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_decode.cxx.o
+[ 21%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_calc_correction_eqn.cxx.o
+[ 21%] Building CXX object Source/sv/Model/OCCTSolidModel/CMakeFiles/_simvascular_opencascade_solid.dir/sv_OCCTSolidModel.cxx.o
+[ 21%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_img_threshold.cxx.o
+[ 21%] Building CXX object Source/sv/Model/OCCTSolidModel/CMakeFiles/_simvascular_opencascade_solid.dir/sv_occtsolid_utils.cxx.o
+[ 21%] Linking CXX shared library ../../../lib/lib_simvascular_common.so
+[ 21%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_DistanceMap.cxx.o
+[ 21%] Built target _simvascular_common
+[ 21%] Building CXX object Source/sv2/ImageProcessing/CMakeFiles/_simvascular_image.dir/sv2_mask_image_in_place.cxx.o
+[ 21%] Linking CXX shared library ../../../../lib/lib_simvascular_adaptor.so
+[ 21%] Built target _simvascular_adaptor
 Consolidate compiler generated dependencies of target _simvascular_path
-[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathUtils.cxx.o
-[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathElement.cxx.o
-[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathGroup.cxx.o
-[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_VtkParametricSpline.cxx.o
-[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_Spline.cxx.o
-[ 21%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathIO.cxx.o
-[ 22%] Linking CXX shared library ../../../../lib/lib_simvascular_polydata_solid.so
-[ 22%] Built target _simvascular_polydata_solid
+[ 22%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathUtils.cxx.o
+[ 22%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathElement.cxx.o
+[ 22%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathGroup.cxx.o
+[ 22%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_VtkParametricSpline.cxx.o
+[ 22%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_Spline.cxx.o
+[ 22%] Building CXX object Source/sv3/Path/CMakeFiles/_simvascular_path.dir/sv3_PathIO.cxx.o
+[ 23%] Linking CXX shared library ../../../../lib/lib_simvascular_polydata_solid.so
+[ 23%] Built target _simvascular_polydata_solid
 Consolidate compiler generated dependencies of target _simvascular_mmg_mesh
-[ 22%] Building CXX object Source/sv/Mesh/MMGMeshUtils/CMakeFiles/_simvascular_mmg_mesh.dir/sv_mmg_mesh_utils.cxx.o
-[ 22%] Linking CXX shared library ../../../lib/lib_simvascular_image.so
-[ 22%] Built target _simvascular_image
-[ 22%] Linking CXX shared library ../../../lib/lib_simvascular_path.so
-[ 22%] Built target _simvascular_path
+[ 23%] Building CXX object Source/sv/Mesh/MMGMeshUtils/CMakeFiles/_simvascular_mmg_mesh.dir/sv_mmg_mesh_utils.cxx.o
+[ 23%] Linking CXX shared library ../../../../lib/lib_simvascular_opencascade_solid.so
+[ 23%] Linking CXX shared library ../../../lib/lib_simvascular_image.so
+[ 23%] Built target _simvascular_opencascade_solid
+[ 23%] Built target _simvascular_image
+[ 23%] Linking CXX shared library ../../../lib/lib_simvascular_path.so
+[ 23%] Built target _simvascular_path
 Consolidate compiler generated dependencies of target _simvascular_module_common
 Consolidate compiler generated dependencies of target _simvascular_segmentation
-[ 22%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_Spline.cxx.o
-[ 22%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_Math3.cxx.o
-[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_VtkParametricSpline.cxx.o
-[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_XmlIOUtil.cxx.o
-[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_VtkUtils.cxx.o
-[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_StringUtils.cxx.o
-[ 23%] Linking CXX shared library ../../../../lib/lib_simvascular_mmg_mesh.so
-[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_Contour.cxx.o
-[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_LevelSetContour.cxx.o
-[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_SegmentationUtils.cxx.o
-[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_CircleContour.cxx.o
-[ 23%] Linking CXX shared library ../../../../lib/lib_simvascular_opencascade_solid.so
-[ 23%] Built target _simvascular_mmg_mesh
-[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_PolygonContour.cxx.o
-[ 23%] Built target _simvascular_opencascade_solid
+[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_Spline.cxx.o
+[ 23%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_Math3.cxx.o
+[ 24%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_VtkParametricSpline.cxx.o
+[ 24%] Linking CXX shared library ../../../../lib/lib_simvascular_mmg_mesh.so
+[ 24%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_VtkUtils.cxx.o
+[ 24%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_XmlIOUtil.cxx.o
+[ 24%] Building CXX object Source/sv4gui/Modules/Common/CMakeFiles/_simvascular_module_common.dir/sv4gui_StringUtils.cxx.o
+[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_Contour.cxx.o
+[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_LevelSetContour.cxx.o
+[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_SegmentationUtils.cxx.o
+[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_CircleContour.cxx.o
+[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_PolygonContour.cxx.o
+[ 24%] Built target _simvascular_mmg_mesh
 Consolidate compiler generated dependencies of target _simvascular_tetgen_mesh
-[ 23%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshObject.cxx.o
-[ 23%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshSystem.cxx.o
-[ 23%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_utils.cxx.o
-[ 23%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_SplinePolygonContour.cxx.o
-[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_ThresholdContour.cxx.o
+[ 24%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshObject.cxx.o
+[ 24%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshSystem.cxx.o
+[ 24%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_utils.cxx.o
 [ 24%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_envelope.cxx.o
+[ 24%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_offset.cxx.o
+[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_SplinePolygonContour.cxx.o
+[ 24%] Building CXX object Source/sv3/Segmentation/CMakeFiles/_simvascular_segmentation.dir/sv3_ThresholdContour.cxx.o
 [ 24%] Linking CXX shared library ../../../../lib/lib_simvascular_module_common.so
 [ 24%] Built target _simvascular_module_common
 Consolidate compiler generated dependencies of target _simvascular_module_path
@@ -1005,168 +1006,310 @@ Consolidate compiler generated dependencies of target _simvascular_module_path
 [ 26%] Built target _simvascular_tetgen_mesh
 Consolidate compiler generated dependencies of target _simvascular_tetgen_adaptor
 [ 26%] Building CXX object Source/sv/Mesh/TetGenAdapt/CMakeFiles/_simvascular_tetgen_adaptor.dir/sv_TetGenAdapt.cxx.o
-[ 26%] Linking CXX shared library ../../../lib/lib_simvascular_segmentation.so
-[ 26%] Built target _simvascular_segmentation
-[ 26%] Linking CXX shared library ../../../../lib/lib_simvascular_module_path.so
-[ 26%] Linking CXX shared library ../../../../lib/lib_simvascular_tetgen_adaptor.so
-[ 26%] Built target _simvascular_tetgen_adaptor
+[ 27%] Linking CXX shared library ../../../lib/lib_simvascular_segmentation.so
+[ 27%] Built target _simvascular_segmentation
+[ 27%] Linking CXX shared library ../../../../lib/lib_simvascular_module_path.so
 Appending zipped resources to _simvascular_module_path
-[ 26%] Built target _simvascular_module_path
+[ 27%] Built target _simvascular_module_path
 Consolidate compiler generated dependencies of target _simvascular_module_segmentation
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationUtils.cxx.o
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourCircle.cxx.o
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Contour.cxx.o
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourEllipse.cxx.o
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourPolygon.cxx.o
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourTensionPolygon.cxx.o
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourSplinePolygon.cxx.o
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourOperation.cxx.o
-[ 27%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourModel.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourModelThresholdInteractor.cxx.o
+[ 27%] Linking CXX shared library ../../../../lib/lib_simvascular_tetgen_adaptor.so
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Contour.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourCircle.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationUtils.cxx.o
+[ 28%] Built target _simvascular_tetgen_adaptor
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourEllipse.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourPolygon.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourTensionPolygon.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourSplinePolygon.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourModel.cxx.o
+[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourOperation.cxx.o
 [ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourModelVtkMapper2D.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroup.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupVtkMapper2D.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupVtkMapper3D.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupDataInteractor.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupIO.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationLegacyIO.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Surface.cxx.o
-[ 28%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SurfaceVtkMapper3D.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3D.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DOperation.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DIO.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DVtkMapper3D.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DDataInteractor.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationObjectFactory.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Seg3DUtils.cxx.o
-[ 29%] Linking CXX shared library ../../../../lib/lib_simvascular_module_segmentation.so
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourModelThresholdInteractor.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroup.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupVtkMapper2D.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupVtkMapper3D.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupDataInteractor.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_ContourGroupIO.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationLegacyIO.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Surface.cxx.o
+[ 29%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SurfaceVtkMapper3D.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3D.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DOperation.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DIO.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DVtkMapper3D.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_MitkSeg3DDataInteractor.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_SegmentationObjectFactory.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Segmentation/CMakeFiles/_simvascular_module_segmentation.dir/sv4gui_Seg3DUtils.cxx.o
+[ 30%] Linking CXX shared library ../../../../lib/lib_simvascular_module_segmentation.so
 Appending zipped resources to _simvascular_module_segmentation
-[ 29%] Built target _simvascular_module_segmentation
+[ 30%] Built target _simvascular_module_segmentation
 Consolidate compiler generated dependencies of target _simvascular_module_qtwidgets
 Consolidate compiler generated dependencies of target _simvascular_module_model
-[ 29%] Building CXX object Source/sv4gui/Modules/QtWidgets/CMakeFiles/_simvascular_module_qtwidgets.dir/sv4gui_ResliceSlider.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/QtWidgets/CMakeFiles/_simvascular_module_qtwidgets.dir/moc_sv4gui_ResliceSlider.cpp.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelUtils.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementPolyData.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElement.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementAnalytic.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementFactory.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_Model.cxx.o
-[ 29%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelOperation.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/QtWidgets/CMakeFiles/_simvascular_module_qtwidgets.dir/sv4gui_ResliceSlider.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/QtWidgets/CMakeFiles/_simvascular_module_qtwidgets.dir/moc_sv4gui_ResliceSlider.cpp.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelUtils.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElement.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementPolyData.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementAnalytic.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelOperation.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelElementFactory.cxx.o
+[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_Model.cxx.o
 [ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelVtkMapper2D.cxx.o
-[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelVtkMapper3D.cxx.o
-[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelDataInteractor.cxx.o
-[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelIO.cxx.o
-[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelLegacyIO.cxx.o
-[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelObjectFactory.cxx.o
-[ 30%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_RegisterPolyDataFunction.cxx.o
-[ 30%] Linking CXX shared library ../../../../lib/lib_simvascular_module_qtwidgets.so
-[ 30%] Built target _simvascular_module_qtwidgets
-[ 30%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model.so
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelVtkMapper3D.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelDataInteractor.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelIO.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelLegacyIO.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_ModelObjectFactory.cxx.o
+[ 31%] Building CXX object Source/sv4gui/Modules/Model/Common/CMakeFiles/_simvascular_module_model.dir/sv4gui_RegisterPolyDataFunction.cxx.o
+[ 31%] Linking CXX shared library ../../../../lib/lib_simvascular_module_qtwidgets.so
+[ 31%] Built target _simvascular_module_qtwidgets
+[ 31%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model.so
 Appending zipped resources to _simvascular_module_model
-[ 31%] Built target _simvascular_module_model
+[ 32%] Built target _simvascular_module_model
 Consolidate compiler generated dependencies of target _simvascular_module_model_occt
 Consolidate compiler generated dependencies of target _simvascular_module_mesh
-[ 31%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_ModelUtilsOCCT.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_ModelElementOCCT.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_RegisterOCCTFunction.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_Mesh.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshTetGen.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshFactory.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_RegisterTetGenFunction.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMesh.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshOperation.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshMapper3D.cxx.o
-[ 31%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshMapper2D.cxx.o
-[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshIO.cxx.o
-[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshLegacyIO.cxx.o
-[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshObjectFactory.cxx.o
-[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshTetGenAdaptor.cxx.o
-[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshAdaptor.cxx.o
-[ 32%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model_occt.so
-[ 33%] Built target _simvascular_module_model_occt
-[ 33%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_mesh.so
-[ 33%] Built target _simvascular_module_mesh
+[ 32%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_ModelUtilsOCCT.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_ModelElementOCCT.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Model/OCCT/CMakeFiles/_simvascular_module_model_occt.dir/sv4gui_RegisterOCCTFunction.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_Mesh.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshTetGen.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMesh.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshFactory.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_RegisterTetGenFunction.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshOperation.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshMapper3D.cxx.o
+[ 32%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshMapper2D.cxx.o
+[ 33%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshIO.cxx.o
+[ 33%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshLegacyIO.cxx.o
+[ 33%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshTetGenAdaptor.cxx.o
+[ 33%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MitkMeshObjectFactory.cxx.o
+[ 33%] Building CXX object Source/sv4gui/Modules/Mesh/Common/CMakeFiles/_simvascular_module_mesh.dir/sv4gui_MeshAdaptor.cxx.o
+[ 33%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model_occt.so
+[ 34%] Built target _simvascular_module_model_occt
+[ 34%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_mesh.so
+[ 34%] Built target _simvascular_module_mesh
 Consolidate compiler generated dependencies of target _simvascular_module_rom_simulation
 Consolidate compiler generated dependencies of target _simvascular_module_simulation
-[ 33%] Building CXX object Source/sv4gui/Modules/ROMSimulation/CMakeFiles/_simvascular_module_rom_simulation.dir/sv4gui_MitkROMSimJobIO.cxx.o
-[ 33%] Building CXX object Source/sv4gui/Modules/Simulation/CMakeFiles/_simvascular_module_simulation.dir/sv4gui_MitkSimJobIO.cxx.o
-[ 33%] Building CXX object Source/sv4gui/Modules/ROMSimulation/CMakeFiles/_simvascular_module_rom_simulation.dir/sv4gui_ROMSimulationUtils.cxx.o
-[ 33%] Building CXX object Source/sv4gui/Modules/Simulation/CMakeFiles/_simvascular_module_simulation.dir/sv4gui_SimulationUtils.cxx.o
-[ 33%] Linking CXX shared library ../../../../lib/lib_simvascular_module_rom_simulation.so
-[ 33%] Linking CXX shared library ../../../../lib/lib_simvascular_module_simulation.so
-[ 34%] Built target _simvascular_module_rom_simulation
+[ 34%] Building CXX object Source/sv4gui/Modules/ROMSimulation/CMakeFiles/_simvascular_module_rom_simulation.dir/sv4gui_MitkROMSimJobIO.cxx.o
+[ 34%] Building CXX object Source/sv4gui/Modules/Simulation/CMakeFiles/_simvascular_module_simulation.dir/sv4gui_MitkSimJobIO.cxx.o
+[ 34%] Building CXX object Source/sv4gui/Modules/ROMSimulation/CMakeFiles/_simvascular_module_rom_simulation.dir/sv4gui_ROMSimulationUtils.cxx.o
+[ 34%] Building CXX object Source/sv4gui/Modules/Simulation/CMakeFiles/_simvascular_module_simulation.dir/sv4gui_SimulationUtils.cxx.o
+[ 34%] Linking CXX shared library ../../../../lib/lib_simvascular_module_simulation.so
+[ 34%] Linking CXX shared library ../../../../lib/lib_simvascular_module_rom_simulation.so
 [ 35%] Built target _simvascular_module_simulation
+[ 36%] Built target _simvascular_module_rom_simulation
 Consolidate compiler generated dependencies of target _simvascular_module_projectmanagement
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataFolder.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ProjectManager.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataNodeOperationInterface.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataNodeOperation.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ImageFolder.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_MeshFolder.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ModelFolder.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_PathFolder.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_RepositoryFolder.cxx.o
-[ 36%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ProjectFolder.cxx.o
-[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_SegmentationFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ProjectManager.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataNodeOperationInterface.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_DataNodeOperation.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ImageFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_MeshFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ModelFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_RepositoryFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_PathFolder.cxx.o
+[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ProjectFolder.cxx.o
 [ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_SimulationFolder.cxx.o
-[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ROMSimulationFolder.cxx.o
-[ 37%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_MultiPhysicsFolder.cxx.o
-[ 37%] Linking CXX shared library ../../../../lib/lib_simvascular_module_projectmanagement.so
-[ 37%] Built target _simvascular_module_projectmanagement
+[ 38%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_SegmentationFolder.cxx.o
+[ 38%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_ROMSimulationFolder.cxx.o
+[ 38%] Building CXX object Source/sv4gui/Modules/ProjectManagement/CMakeFiles/_simvascular_module_projectmanagement.dir/sv4gui_MultiPhysicsFolder.cxx.o
+[ 38%] Linking CXX shared library ../../../../lib/lib_simvascular_module_projectmanagement.so
+[ 38%] Built target _simvascular_module_projectmanagement
 Consolidate compiler generated dependencies of target org_sv_projectdatanodes
-Consolidate compiler generated dependencies of target org_sv_gui_qt_projectmanager
 Consolidate compiler generated dependencies of target org_sv_gui_qt_datamanager
-[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.projectdatanodes/CMakeFiles/org_sv_projectdatanodes.dir/sv4gui_ProjectDataNodesPluginActivator.cxx.o
-[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectAddImageAction.cxx.o
-[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectSaveAction.cxx.o
-[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectDuplicateAction.cxx.o
-[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectShowModelEdgesAction.cxx.o
-[ 37%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectShowModelFullAction.cxx.o
-[ 37%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_datamanager.so
-[ 41%] Built target org_sv_gui_qt_datamanager
+Consolidate compiler generated dependencies of target org_sv_gui_qt_projectmanager
+[ 38%] Building CXX object Source/sv4gui/Plugins/org.sv.projectdatanodes/CMakeFiles/org_sv_projectdatanodes.dir/sv4gui_ProjectDataNodesPluginActivator.cxx.o
+[ 38%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectAddImageAction.cxx.o
+[ 38%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectSaveAction.cxx.o
+[ 38%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectShowModelEdgesAction.cxx.o
+[ 38%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectDuplicateAction.cxx.o
+[ 38%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.projectmanager/CMakeFiles/org_sv_gui_qt_projectmanager.dir/sv4gui_ProjectShowModelFullAction.cxx.o
+[ 38%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_datamanager.so
+[ 42%] Built target org_sv_gui_qt_datamanager
 Consolidate compiler generated dependencies of target org_sv_gui_qt_imageprocessing
 Consolidate compiler generated dependencies of target org_sv_gui_qt_meshing
 Consolidate compiler generated dependencies of target org_sv_gui_qt_pathplanning
 Consolidate compiler generated dependencies of target org_sv_gui_qt_application
 Consolidate compiler generated dependencies of target org_sv_gui_qt_simulation
 Consolidate compiler generated dependencies of target org_sv_gui_qt_segmentation
-[ 41%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathCreate.cxx.o
 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshCreate.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathCreate.cxx.o
 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImageProcessing.cxx.o
 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileOpenProjectAction.cxx.o
 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobCreate.cxx.o
 [ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_LoftingUtils.cxx.o
-[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_ContourGroupCreate.cxx.o
-[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileSaveProjectAction.cxx.o
-[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileSaveProjectAsAction.cxx.o
-[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshCreateAction.cxx.o
-[ 43%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_projectmanager.so
-[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImagePathsContainer.cxx.o
-[ 46%] Built target org_sv_gui_qt_projectmanager
-[ 47%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_CloseProjectAction.cxx.o
-[ 47%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshEdit.cxx.o
-[ 48%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathCreateAction.cxx.o
-[ 48%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_projectdatanodes.so
-[ 49%] Built target org_sv_projectdatanodes
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_ProjectCreate.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_WorkbenchWindowAdvisor.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobCreateAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimulationView.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImagePathsMapper.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobStopAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_VtkMeshSphereWidget.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_ContourGroupCreateAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshLegacySaveAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathLoadAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLegacyLoadAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathLegacySaveAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshLoadSurfaceAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLegacySaveAction.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImageSeedMapper2D.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_AppWorkbenchAdvisor.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_AboutDialog.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobExportAction.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImagePathsContainer.cxx.o
 Consolidate compiler generated dependencies of target org_sv_gui_qt_multiphysics
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/sv4gui_MultiPhysicsJobCreate.cxx.o
-[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLoadAction.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImagePathsMapper.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/sv4gui_MultiPhysicsJobCreate.cxx.o
+[ 42%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/sv4gui_MultiPhysicsJobCreateAction.cxx.o
+[ 42%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_projectmanager.so
+[ 43%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_ContourGroupCreate.cxx.o
+[ 46%] Built target org_sv_gui_qt_projectmanager
+Consolidate compiler generated dependencies of target org_sv_gui_qt_mitksegmentation
+[ 47%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathCreateAction.cxx.o
+[ 47%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileSaveProjectAction.cxx.o
+[ 47%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.mitksegmentation/CMakeFiles/org_sv_gui_qt_mitksegmentation.dir/sv4gui_QmitkCreatePolygonModelAction.cxx.o
+[ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_projectdatanodes.so
+[ 48%] Built target org_sv_projectdatanodes
+[ 48%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_FileSaveProjectAsAction.cxx.o
+[ 48%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshCreateAction.cxx.o
+[ 48%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobCreateAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_CloseProjectAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshEdit.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImageSeedMapper2D.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimulationView.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_ContourGroupCreateAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathLoadAction.cxx.o
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobStopAction.cxx.o
+[ 49%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_mitksegmentation.so
+[ 49%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/sv4gui_MultiPhysicsView.cxx.o
+[ 55%] Built target org_sv_gui_qt_mitksegmentation
+[ 55%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimJobExportAction.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/sv4gui_MultiPhysicsPreferences.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImageSurfaceMapper3D.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/sv4gui_MultiPhysicsPluginActivator.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_ProjectCreate.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathLegacySaveAction.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathSmooth.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLegacyLoadAction.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLegacySaveAction.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_VtkMeshSphereWidget.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/sv4gui_ImageProcessingPluginActivator.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshLegacySaveAction.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshLoadSurfaceAction.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/moc_sv4gui_MultiPhysicsJobCreate.cpp.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimulationPluginActivator.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_WorkbenchWindowAdvisor.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_AppWorkbenchAdvisor.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_ProcessHandler.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathEdit.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SolverProcessHandler.cxx.o
+[ 56%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationLoadAction.cxx.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.imageprocessing/CMakeFiles/org_sv_gui_qt_imageprocessing.dir/moc_sv4gui_ImageProcessing.cpp.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/moc_sv4gui_MultiPhysicsJobCreateAction.cpp.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.multiphysics/CMakeFiles/org_sv_gui_qt_multiphysics.dir/moc_sv4gui_MultiPhysicsView.cpp.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_LevelSet2DWidget.cxx.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshLoadVolumeAction.cxx.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/sv4gui_MeshingPluginActivator.cxx.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathPoint2DSizeAction.cxx.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathPoint3DSizeAction.cxx.o
+[ 57%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_AboutDialog.cxx.o
+[ 58%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/sv4gui_SimulationPreferences.cxx.o
+[ 58%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/moc_sv4gui_SimJobCreate.cpp.o
+[ 58%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/moc_sv4gui_SimJobCreateAction.cpp.o
+[ 58%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_imageprocessing.so
+[ 58%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_WorkbenchWindowAdvisorHack.cxx.o
+[ 61%] Built target org_sv_gui_qt_imageprocessing
+[ 61%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_Main.cxx.o
+[ 61%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_multiphysics.so
+[ 64%] Built target org_sv_gui_qt_multiphysics
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/sv4gui_MitkApp.cxx.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/sv4gui_PathPlanningPluginActivator.cxx.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/moc_sv4gui_SimulationView.cpp.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/moc_sv4gui_ProcessHandler.cpp.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_LoftParamWidget.cxx.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_Seg2DEdit.cxx.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/moc_sv4gui_MeshCreate.cpp.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/moc_sv4gui_MeshCreateAction.cpp.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.meshing/CMakeFiles/org_sv_gui_qt_meshing.dir/moc_sv4gui_MeshEdit.cpp.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_ContourGroupPoint2DSizeAction.cxx.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.application/CMakeFiles/org_sv_gui_qt_application.dir/moc_sv4gui_WorkbenchWindowAdvisor.cpp.o
+[ 64%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.simulation/CMakeFiles/org_sv_gui_qt_simulation.dir/moc_sv4gui_SolverProcessHandler.cpp.o
+[ 65%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/moc_sv4gui_PathCreate.cpp.o
+[ 65%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/moc_sv4gui_PathCreateAction.cpp.o
+[ 65%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.pathplanning/CMakeFiles/org_sv_gui_qt_pathplanning.dir/moc_sv4gui_PathEdit.cpp.o
+[ 65%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_ContourGroupPoint3DSizeAction.cxx.o
+[ 66%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_Seg3DCreateAction.cxx.o
+[ 66%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_Seg3DEdit.cxx.o
+[ 66%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/sv4gui_SegmentationPluginActivator.cxx.o
+[ 66%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_ContourGroupCreate.cpp.o
+[ 66%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_ContourGroupCreateAction.cpp.o
+[ 66%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_application.so
+[ 70%] Built target org_sv_gui_qt_application
+[ 70%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_SegmentationLegacyLoadAction.cpp.o
+[ 71%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_meshing.so
+[ 74%] Built target org_sv_gui_qt_meshing
+[ 75%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_SegmentationLoadAction.cpp.o
+[ 75%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_simulation.so
+[ 81%] Built target org_sv_gui_qt_simulation
+[ 81%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_LevelSet2DWidget.cpp.o
+[ 81%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_LoftParamWidget.cpp.o
+[ 81%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_Seg2DEdit.cpp.o
+[ 81%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_Seg3DCreateAction.cpp.o
+[ 81%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.segmentation/CMakeFiles/org_sv_gui_qt_segmentation.dir/moc_sv4gui_Seg3DEdit.cpp.o
+[ 81%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_pathplanning.so
+[ 82%] Built target org_sv_gui_qt_pathplanning
+[ 82%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_segmentation.so
+[ 84%] Built target org_sv_gui_qt_segmentation
+Consolidate compiler generated dependencies of target org_sv_gui_qt_modeling
+[ 84%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelCreate.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelCreateAction.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelLoadAction.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelLegacySaveAction.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelExtractPathsAction.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_SegSelectionWidget.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelEdit.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelFaceInfoExportAction.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelingPluginActivator.cxx.o
+[ 85%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_LoftingPreferencePage.cxx.o
+[ 86%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_CapSelectionWidget.cxx.o
+[ 86%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/sv4gui_ModelReadAction.cxx.o
+[ 86%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/moc_sv4gui_ModelCreate.cpp.o
+[ 86%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/moc_sv4gui_ModelCreateAction.cpp.o
+[ 86%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/moc_sv4gui_ModelExtractPathsAction.cpp.o
+[ 87%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/moc_sv4gui_SegSelectionWidget.cpp.o
+[ 87%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/moc_sv4gui_ModelEdit.cpp.o
+[ 87%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.modeling/CMakeFiles/org_sv_gui_qt_modeling.dir/moc_sv4gui_CapSelectionWidget.cpp.o
+[ 87%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_modeling.so
+[ 89%] Built target org_sv_gui_qt_modeling
+Consolidate compiler generated dependencies of target org_sv_gui_qt_romsimulation
+[ 89%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ConvertProcessHandlerROM.cxx.o
+[ 90%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ConvertWorkerROM.cxx.o
+[ 90%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimJobCreate.cxx.o
+[ 90%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimulationExtractCenterlines.cxx.o
+[ 90%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimJobCreateAction.cxx.o
+[ 90%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimulationLinesContainer.cxx.o
+[ 90%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimulationLinesMapper.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimulationPreferences.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimulationView.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimulationPython.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimulationPythonConvert.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimJobStopAction.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimJobExportAction.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ROMSimulationPluginActivator.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_ProcessHandlerROM.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/sv4gui_SolverProcessHandlerROM.cxx.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/moc_sv4gui_ConvertProcessHandlerROM.cpp.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/moc_sv4gui_ROMSimJobCreate.cpp.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/moc_sv4gui_ROMSimJobCreateAction.cpp.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/moc_sv4gui_ROMSimulationExtractCenterlines.cpp.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/moc_sv4gui_ROMSimulationView.cpp.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/moc_sv4gui_ProcessHandlerROM.cpp.o
+[ 91%] Building CXX object Source/sv4gui/Plugins/org.sv.gui.qt.romsimulation/CMakeFiles/org_sv_gui_qt_romsimulation.dir/moc_sv4gui_SolverProcessHandlerROM.cpp.o
+[ 91%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_romsimulation.so
+[ 97%] Built target org_sv_gui_qt_romsimulation
+Consolidate compiler generated dependencies of target _simvascular_python_api
+[ 97%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Imaging_PyModule.cxx.o
+[ 97%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Segmentation_PyModule.cxx.o
+[ 97%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Math_PyModule.cxx.o
+[ 97%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Geometry_PyModule.cxx.o
+[ 98%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/MeshUtils_PyModule.cxx.o
+[ 98%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Meshing_PyModule.cxx.o
+[ 98%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/PathPlanning_PyModule.cxx.o
+[ 98%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/PyUtils.cxx.o
+[ 98%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Modeling_PyModule.cxx.o
+[ 98%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Simulation_PyModule.cxx.o
+[ 98%] Building CXX object Source/PythonAPI/CMakeFiles/_simvascular_python_api.dir/Vmtk_PyModule.cxx.o
+[ 98%] Linking CXX shared library ../../lib/lib_simvascular_python_api.so
+[ 98%] Built target _simvascular_python_api
+Consolidate compiler generated dependencies of target org_sv_pythondatanodes
+[ 98%] Building CXX object Source/sv4gui/Plugins/org.sv.pythondatanodes/CMakeFiles/org_sv_pythondatanodes.dir/Dmg_PyModule.cxx.o
+[ 98%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_pythondatanodes.so
+[ 99%] Built target org_sv_pythondatanodes
+Consolidate compiler generated dependencies of target simvascular
+[ 99%] Building CXX object Source/Application/CMakeFiles/simvascular.dir/main.cxx.o
+[ 99%] Building CXX object Source/Application/CMakeFiles/simvascular.dir/PythonShell_Init.cxx.o
+[ 99%] Building CXX object Source/Application/CMakeFiles/simvascular.dir/SimVascular_Init_py.cxx.o
+[100%] Linking CXX executable ../../bin/simvascular
+[100%] Built target simvascular
