@@ -1,4 +1,4 @@
-# scripts/build.ps1 (Windows PowerShell에서 실행)
+﻿# scripts/build.ps1 (Windows PowerShell에서 실행)
 #
 # 실제 빌드는 컨테이너 안에서 별도로(몇 번이든) 수동으로 수행한다.
 # 로그는 항상 컨테이너의 /work/logs/ 에 쌓이며, 이는 bind mount이므로
