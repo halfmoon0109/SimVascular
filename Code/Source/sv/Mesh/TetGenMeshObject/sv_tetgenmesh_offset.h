@@ -60,7 +60,7 @@
  *
  *     d(x) = min over interface triangles T of (dist(x, T) - t at the closest point of T)
  *
- * on the wall side of the input, taken negative in the lumen. Where two
+ * on the wall side of the interface, taken negative in the lumen. Where two
  * vessels' walls meet, the minimum is the thicker one's and the septum is
  * solid; the crease and the rounding of a convex edge come out of the level
  * set rather than being aimed at, and every point of the surface is a wall
@@ -70,9 +70,9 @@
  * grid, and a grid that fits in memory is too coarse for the thin vessels of
  * a model whose walls range over an order of magnitude (measured: spacing 4.7
  * times the thinnest wall, at which the offset of the thin vessels collapsed
- * onto the input). The resolution has to follow the input. So the
+ * onto the interface). The resolution has to follow the interface. So the
  * field is sampled on a point cloud made of the interface points and their
- * offsets at fractions of the local thickness along the normals, that cloud
+ * offsets along the normals (see Options), that cloud
  * is tetrahedralized (Delaunay, by the caller), and the zero level is taken
  * by marching tetrahedra over that mesh: fine where the interface is fine,
  * coarse where it is coarse, with the contour points then put on the exact
@@ -111,11 +111,22 @@ struct Interface
  */
 struct Options
 {
-  double innerLayer = 0.5;      // the cloud layer inside the wall, as a multiple of the local thickness
-  double outerLayer = 1.5;      // the cloud layer outside the wall
-  double farLayer = 3.0;        // the far layer that roofs the band, as a multiple of the local thickness ...
-  double farSpacing = 1.5;      // ... and no nearer than this times the local edge, so that the roof is closed over a coarse interface with a thin wall
-  int farStride = 1;            // one far point per this many interface points
+  // The cloud is the interface points (value -t) and, along each normal, a
+  // layer inside the wall at innerLayer times the local thickness, a layer
+  // outside at outerLayer times it, and a far layer at farLayer times it but
+  // no nearer than farSpacing times the local edge, so that the far points
+  // of neighbouring rays are nearer each other than the surface and roof the
+  // band: the Delaunay hull is then made of far points, all outside, and no
+  // tetrahedron joins an inside point to the far side of the model. The
+  // inner layer keeps the tetrahedra local (without it the interface points
+  // of a thin vessel join the far side across the lumen and the contour gets
+  // points in the lumen), and the outer layer keeps the zero level closely
+  // bracketed (with the far layer alone as the outside, a thin coarse tube
+  // came out with triangles crossing).
+  double innerLayer = 0.5;
+  double outerLayer = 1.5;
+  double farLayer = 3.0;
+  double farSpacing = 1.5;
   int snapIterations = 1;       // secant steps putting a contour point on the exact zero level (0 leaves the linear interpolation)
   double collapseRatio = 0.8;   // edges shorter than this times the local interface size are collapsed; zero or less leaves the contour as marched
   double collapseTurnCosine = 0.7;   // a collapse may not turn a triangle's normal by more than this cosine (slivers, whose normal means little, excepted)
@@ -177,20 +188,27 @@ typedef bool (*DelaunayFunction)(const std::vector<double> &points,
     std::vector<long long> &tetrahedra, void *context, std::string &error);
 
 /**
+ * @brief Told what stage the build is at, so that a caller can log it as it
+ * happens: a build that dies leaves the stage it died in.
+ */
+typedef void (*ProgressFunction)(const char *stage, void *context);
+
+/**
  * @brief Builds the offset surface.
- * @param interface The input; see Interface.
+ * @param input The interface; see Interface.
  * @param options See Options.
  * @param delaunay The tetrahedralization to sample the field on.
- * @param context Passed to delaunay.
+ * @param context Passed to delaunay and progress.
  * @param surface Set to the offset surface.
  * @param report Set to what happened.
  * @param error Set to why, when the build fails outright.
+ * @param progress Called at the start of each stage, if given.
  * @return 0 if the surface was built (it may still carry faults, counted in
  * the report), 1 if it could not be.
  */
 int BuildOffsetSurface(const Interface &input, const Options &options,
     DelaunayFunction delaunay, void *context, Surface &surface, Report &report,
-    std::string &error);
+    std::string &error, ProgressFunction progress = nullptr);
 
 /**
  * @brief The field the surface is the zero level of, for measuring: the
