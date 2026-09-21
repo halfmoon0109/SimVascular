@@ -251,6 +251,27 @@ static void TestTube()
   if (!Build(iface, options, s, r)) return;
   Check(r.numRims == 2, "two cap rims found");
   Check(r.numNonManifoldEdges == 0 && r.numMiswoundEdges == 0, "the offset surface is a manifold, consistently wound");
+  // every point past a cap plane belongs to that cap, and none well inside the tube belongs to any
+  {
+    ll numUnowned = 0, numWrong = 0, numOwnedInside = 0;
+    for (size_t i = 0; i < s.points.size()/3; i++)
+    {
+      double z = s.points[3*i + 2];
+      ll rim = s.pointRim[i];
+      if (z > 10.0 || z < 0.0)
+      {
+        if (rim < 0) numUnowned++;
+        else
+        {
+          double rimZ = iface.points[3*(size_t)s.rims[(size_t)rim][0] + 2];
+          if ((z > 10.0 && rimZ < 5.0) || (z < 0.0 && rimZ > 5.0)) numWrong++;
+        }
+      }
+      else if (z > 2.0 && z < 8.0 && rim >= 0) numOwnedInside++;
+    }
+    Check(numUnowned == 0 && numWrong == 0, "every point past a cap plane belongs to that cap");
+    Check(numOwnedInside == 0, "no point well inside the tube belongs to a cap");
+  }
   TrimAtPlanes(s, 0.0, 10.0);
   Measure m = MeasureSurface(iface, s, 0.0, 10.0, 0.6);
   printf("  after the trim: boundary %lld, non-manifold %lld, miswound %lld, crossing %lld; wall over the interface %.3f..%.3f of the thickness, %lld points below 0.9; %lld of %lld triangles above aspect 100\n",
@@ -343,11 +364,119 @@ static void TestSeptum()
   Check(numOff == 0, "every surface point lies on one of the two offsets");
 }
 
+// The number of boundary loops of a surface.
+static int CountBoundaryLoops(const Surface &s)
+{
+  std::map<std::pair<ll,ll>, int> count;
+  std::map<std::pair<ll,ll>, std::pair<ll,ll> > direction;
+  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = s.triangles[i+j], b = s.triangles[i+(j+1)%3];
+      std::pair<ll,ll> key(std::min(a,b), std::max(a,b));
+      count[key]++;
+      direction[key] = std::make_pair(a, b);
+    }
+  }
+  std::map<ll,ll> next;
+  for (std::map<std::pair<ll,ll>, int>::iterator it = count.begin(); it != count.end(); ++it)
+  {
+    if (it->second == 1) next[direction[it->first].first] = direction[it->first].second;
+  }
+  std::map<ll, bool> seen;
+  int loops = 0;
+  for (std::map<ll,ll>::iterator it = next.begin(); it != next.end(); ++it)
+  {
+    if (seen[it->first]) continue;
+    ll cur = it->first;
+    while (!seen[cur]) { seen[cur] = true; std::map<ll,ll>::iterator nx = next.find(cur); if (nx == next.end()) break; cur = nx->second; }
+    loops++;
+  }
+  return loops;
+}
+
+// Trims as the glue does with the ownership: every triangle past a cap's
+// plane whose corners belong to that cap comes off; triangles of a
+// neighbouring vessel that run past the plane stay. The cap planes here are
+// z = z0 and z = z1 of each tube, told apart by the rim's own z.
+static void TrimOwned(Surface &s, const Interface &iface)
+{
+  std::vector<ll> kept;
+  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+  {
+    bool off = false;
+    for (int j = 0; j < 3 && !off; j++)
+    {
+      ll v = s.triangles[i+j];
+      ll rim = s.pointRim[(size_t)v];
+      if (rim < 0) continue;
+      double rimZ = iface.points[3*(size_t)s.rims[(size_t)rim][0] + 2];
+      // the rim at the low end of its tube has its interface above it, the high end below
+      bool lowEnd = iface.points[3*(size_t)s.rims[(size_t)rim][0] + 2] < 0.5*(0.0 + 12.0) && rimZ < 1.0;
+      double cz = 0.0;
+      for (int k = 0; k < 3; k++) cz += s.points[3*(size_t)s.triangles[i+k] + 2]/3.0;
+      int owned = 0;
+      for (int k = 0; k < 3; k++) if (s.pointRim[(size_t)s.triangles[i+k]] == rim) owned++;
+      if (owned >= 2 && ((lowEnd && cz < rimZ) || (!lowEnd && cz > rimZ))) off = true;
+    }
+    if (off) continue;
+    kept.insert(kept.end(), &s.triangles[i], &s.triangles[i] + 3);
+  }
+  s.triangles = kept;
+}
+
+// 4. Two tubes side by side ending at different heights, close enough that a
+// window around the shorter one's cap would reach the longer one's wall: the
+// trim must take only what belongs to each cap.
+static void TestNeighbouringEnds()
+{
+  printf("test 4: a tube ending at z = 8 beside one running on to z = 12, axes 2.5 apart (radius 1 wall 0.3, radius 0.5 wall 0.1)\n");
+  Interface iface;
+  AddTube(iface, 0.0, 0.0, 1.0, 0.0, 8.0, 32, 32, 0.3);
+  AddTube(iface, 2.5, 0.0, 0.5, 0.0, 12.0, 20, 48, 0.1);
+  Options options;
+  Surface s; Report r;
+  if (!Build(iface, options, s, r)) return;
+  Check(r.numRims == 4 && s.rims.size() == 4, "four cap rims found and reported");
+  // ownership past the short tube's end
+  ll numUnownedPast = 0;
+  for (size_t i = 0; i < s.points.size()/3; i++)
+  {
+    const double *p = &s.points[3*i];
+    double rho1 = std::sqrt(p[0]*p[0] + p[1]*p[1]);
+    if (p[2] > 8.0 && rho1 < 1.6 && s.pointRim[i] < 0) numUnownedPast++;
+  }
+  Check(numUnownedPast == 0, "every point of the short tube's dome past its cap belongs to a cap");
+  TrimOwned(s, iface);
+  int loops = CountBoundaryLoops(s);
+  ll nb, nn, nm;
+  svoffset::CountEdges(s.triangles, nb, nn, nm);
+  std::vector<unsigned char> crossing;
+  double at[3];
+  ll numCrossing = svenvelope::CountCrossingTriangles(s.points, s.triangles, crossing, at);
+  printf("  after the trim: %d boundary loops, non-manifold %lld, miswound %lld, crossing %lld\n", loops, nn, nm, numCrossing);
+  Check(loops == 4, "the trim leaves exactly the four cap rims");
+  Check(nn == 0 && nm == 0 && numCrossing == 0, "and a manifold without crossings");
+  // the long tube's wall between z = 8.5 and 11.5 is untouched
+  double worst = 1e300;
+  for (size_t i = 0; i < iface.points.size()/3; i++)
+  {
+    const double *p = &iface.points[3*i];
+    if (std::abs(std::sqrt((p[0]-2.5)*(p[0]-2.5) + p[1]*p[1]) - 0.5) > 1e-6) continue;
+    if (p[2] < 8.5 || p[2] > 11.5) continue;
+    worst = std::min(worst, DistanceToSurface(s, p)/iface.thickness[i]);
+  }
+  printf("  the long tube's wall past the short tube's end: at least %.3f of the thickness\n", worst);
+  Check(worst > 0.9, "the neighbouring tube's wall past the short tube's cap is intact");
+}
+
 int main()
 {
   TestTube();
   TestThinTube();
   TestSeptum();
+  TestNeighbouringEnds();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }

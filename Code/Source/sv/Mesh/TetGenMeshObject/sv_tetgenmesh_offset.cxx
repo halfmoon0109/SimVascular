@@ -369,6 +369,7 @@ struct OffsetField::Data
   std::vector<double> localSize;     // per triangle: the target edge length of the offset surface there
   std::vector<double> localThickness;   // per triangle: the mean thickness of its corners
   std::vector<unsigned char> boundaryPoint;   // per point: 1 on an open edge of the field's surface (the collar ends)
+  std::vector<ll> triangleRim;       // per triangle: the cap rim it belongs to (its collar, or the interface within a collar's length of the rim), -1 for none
   std::vector<std::vector<ll> > rims;
   std::vector<double> rimOutward;    // three per rim
   std::vector<double> collarLength;  // per rim
@@ -611,6 +612,39 @@ int OffsetField::Build(const Interface &input, Report &report, std::string &erro
       d.triangles.push_back(b);
       report.numCollarTriangles += 2;
     }
+    // The interface within a collar's length of the rim belongs to the rim
+    // too, so that a point of the offset surface just inside the cap plane
+    // is owned like one just past it and a trim along the plane cuts the
+    // edges between them on the plane.
+    if (d.triangleRim.size() < (size_t)numTris)
+    {
+      d.triangleRim.assign((size_t)numTris, -1);
+    }
+    for (ll t = 0; t < numTris; t++)
+    {
+      if (d.triangleRim[(size_t)t] >= 0) continue;
+      bool near = false;
+      for (int j = 0; j < 3 && !near; j++)
+      {
+        double off[3];
+        Sub(&d.points[(size_t)3*d.triangles[(size_t)3*t + j]], centre, off);
+        double along = -Dot(off, outward);   // depth into the vessel from the cap plane
+        double radial2 = Dot(off, off) - along*along;
+        near = along >= -length && along <= 2.0*length && radial2 <= (radius + 2.0*length)*(radius + 2.0*length);
+      }
+      if (near)
+      {
+        d.triangleRim[(size_t)t] = (ll)r;
+      }
+    }
+    for (size_t m = 0; m < 2*loop.size(); m++)
+    {
+      d.triangleRim.push_back((ll)r);
+    }
+  }
+  if (d.triangleRim.size() < d.triangles.size()/3)
+  {
+    d.triangleRim.resize(d.triangles.size()/3, -1);
   }
 
   // The open edges of the field's surface - the collar ends - and their
@@ -793,7 +827,7 @@ double OffsetField::Evaluate(const double x[3]) const
   return bestTerm;
 }
 
-void OffsetField::Local(const double x[3], double &size, double &thickness) const
+void OffsetField::Local(const double x[3], double &size, double &thickness, long long &rim) const
 {
   const Data &d = *data_;
   const TriangleGrid &g = d.grid;
@@ -841,6 +875,7 @@ void OffsetField::Local(const double x[3], double &size, double &thickness) cons
   }
   size = (bestT >= 0) ? d.localSize[(size_t)bestT] : d.meanEdge;
   thickness = (bestT >= 0) ? d.localThickness[(size_t)bestT] : d.largestThickness;
+  rim = (bestT >= 0) ? d.triangleRim[(size_t)bestT] : -1;
 }
 
 double OffsetField::Reach() const
@@ -1179,7 +1214,8 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     std::vector<double> target((size_t)nv, field.Reach()), thick((size_t)nv, report.largestThickness);
     for (ll v = 0; v < nv; v++)
     {
-      field.Local(&pts[(size_t)3*v], target[(size_t)v], thick[(size_t)v]);
+      ll rim;
+      field.Local(&pts[(size_t)3*v], target[(size_t)v], thick[(size_t)v], rim);
     }
     std::vector<std::vector<ll> > incident((size_t)nv);
     std::vector<unsigned char> dead((size_t)nt, 0);
@@ -1593,6 +1629,14 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     }
     pts = newPts;
     tris = newTris;
+  }
+  // Which vessel end each point belongs to (see Surface::pointRim).
+  surface.rims = field.Rims();
+  surface.pointRim.assign(pts.size()/3, -1);
+  for (size_t v = 0; v < pts.size()/3; v++)
+  {
+    double size, thickness;
+    field.Local(&pts[3*v], size, thickness, surface.pointRim[v]);
   }
   auto t4 = std::chrono::steady_clock::now();
   report.secondsDecimate = std::chrono::duration<double>(t4 - t3).count();

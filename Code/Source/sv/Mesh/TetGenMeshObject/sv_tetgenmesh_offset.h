@@ -141,6 +141,17 @@ struct Surface
 {
   std::vector<double> points;        // three per point
   std::vector<long long> triangles;  // three point ids per triangle, facing out of the wall
+  // Which vessel end each point belongs to, for trimming: the index into
+  // rims of the cap whose collar, or whose interface within a collar's
+  // length of its rim, is the nearest part of the field's surface to the
+  // point; -1 for every other point. The part of the surface past a cap
+  // plane that belongs to that cap is exactly the part its points own, so
+  // the trim can leave a neighbouring vessel's surface alone even where it
+  // runs past the plane within a rim radius - a spherical window around the
+  // rim cannot (measured: two vessel ends 4.7 apart, radius 1.2 each, and
+  // the window of one cut a loop out of the other's offset).
+  std::vector<long long> pointRim;
+  std::vector<std::vector<long long> > rims;   // the cap rims as loops of interface point ids, in the interface triangles' winding
 };
 
 /**
@@ -235,9 +246,11 @@ public:
 
   /// The interface where x is: the target edge length of the offset surface
   /// there (the interface's own edge, shortened where the curvature of the
-  /// offset would otherwise put a chord more than a tenth of the wall off it)
-  /// and the wall thickness there.
-  void Local(const double x[3], double &size, double &thickness) const;
+  /// offset would otherwise put a chord more than a twentieth of the wall
+  /// off it), the wall thickness there, and the cap rim the nearest field
+  /// triangle belongs to (a collar triangle, or an interface triangle within
+  /// a collar's length of the rim), -1 for none.
+  void Local(const double x[3], double &size, double &thickness, long long &rim) const;
 
   /// How far from the field's surface a point is surely outside the wall.
   double Reach() const;
