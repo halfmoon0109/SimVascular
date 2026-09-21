@@ -89,10 +89,11 @@ git checkout <브랜치>        # 또는 git pull
 ```
 ```bash
 # 컨테이너: SimVascular만 증분 재빌드 (externals는 그대로)
-cd /work/build/SimVascular-build
-export LD_LIBRARY_PATH="/work/externals/install/python/lib:$LD_LIBRARY_PATH"
-make -j"$(nproc)"
+# -> make 출력이 /work/logs/80-simvascular.log 에 남는다 (LD_LIBRARY_PATH도 알아서 잡음)
+bash /work/SimVascular/Docker/scripts/rebuild.sh
 ```
+손으로 `cd /work/build/SimVascular-build && make -j"$(nproc)"` 해도 결과는 같지만
+로그가 파일로 남지 않으므로, Mac 세션이 볼 수 있게 하려면 위 스크립트를 쓴다.
 > **Qt .ui 파일을 바꿨는데 UI가 안 바뀌면** (마운트 볼륨 타임스탬프 문제로 uic가
 > 재생성을 건너뛴 경우), 해당 생성 헤더를 지우고 다시 make:
 > ```bash
@@ -103,8 +104,8 @@ make -j"$(nproc)"
 >   /work/build/SimVascular-build/Source/sv4gui/Plugins/org.sv.gui.qt.meshing/ui_sv4gui_MeshEdit.h
 > ```
 
-`bash /work/SimVascular/Docker/scripts/80-simvascular.sh` 로도 되지만, 위처럼
-`SimVascular-build`에서 직접 `make` 하는 게 빠르고 확실하다.
+`bash /work/SimVascular/Docker/scripts/80-simvascular.sh` 로도 되지만(configure부터
+다시 돎), 코드만 바꿨을 때는 `rebuild.sh`(= 기존 빌드 트리에서 `make`)가 빠르고 확실하다.
 
 ### 4.2 externals 설정(`versions.env`, `70-mitk.sh` 등)이 바뀐 경우
 해당 external의 **build + install 디렉토리를 지워야** 새 설정이 반영된다
@@ -135,6 +136,13 @@ bash /work/SimVascular/Docker/scripts/run-gui.sh
 - `QT_PLUGIN_PATH` — Qt 플러그인(특히 CTK 플러그인 DB가 쓰는 sqlite 드라이버)
 - `SV_PLUGIN_PATH` — SimVascular + MITK/BlueBerry 플러그인
 - `LIBGL_ALWAYS_SOFTWARE=1` — WSLg 소프트웨어 OpenGL
+
+또한 GUI 세션의 stdout/stderr 전체를 **`/work/logs/run-gui_YYYYMMDD_HHMM.log`**
+(실행 1회당 파일 1개)에 `tee`로 남긴다. 벽 메싱 진단(`Wall mesh options in
+effect: ...`, envelope/슬리버 정리 통계, 진단 vtp 절대 경로 등)은 전부 이 표준출력에
+찍히므로, **메싱을 돌린 뒤 GUI를 닫고 호스트에서 `scripts\build.ps1`을 실행하면**
+빌드 로그와 메싱 로그가 함께 저장소 `logs/`에 커밋된다. 따로 `| tee` 하거나 터미널
+출력을 복사할 필요 없다.
 
 ### 빌드 반영 검증(실행 전 확인용)
 ```bash
@@ -177,13 +185,16 @@ find /work/externals/install/mitk -iname "*qt_python*"
 # 최초 전체 빌드
 bash /work/SimVascular/Docker/scripts/build-all.sh
 
-# 코드만 수정 후 (빠른 증분)
-cd /work/build/SimVascular-build && make -j"$(nproc)"
+# 코드만 수정 후 (빠른 증분, 로그 -> /work/logs/80-simvascular.log)
+bash /work/SimVascular/Docker/scripts/rebuild.sh
 
 # externals 설정 수정 후 (예: MITK)
 rm -rf /work/externals/build/mitk /work/externals/install/mitk
 bash /work/SimVascular/Docker/scripts/build-all.sh
 
-# 실행
+# 실행 (세션 로그 -> /work/logs/run-gui_YYYYMMDD_HHMM.log)
 bash /work/SimVascular/Docker/scripts/run-gui.sh
+
+# 호스트(PowerShell): 빌드+메싱 로그를 저장소 logs/ 로 복사해 커밋·푸시
+D:\sv\SimVascular\scripts\build.ps1
 ```

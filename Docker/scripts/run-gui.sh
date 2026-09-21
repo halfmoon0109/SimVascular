@@ -33,5 +33,17 @@ export LC_ALL="${LC_ALL:-C.UTF-8}"
 export LANG="${LANG:-C.UTF-8}"
 
 BIN="$WORK/build/SimVascular-build/bin/simvascular"
+
+# Capture the whole GUI session (stdout+stderr) under $WORK/logs/, one file
+# per launch. The wall-mesh diagnostics are plain fprintf(stdout/stderr) from
+# sv_TetGenMeshObject / sv_tetgenmesh_envelope, so this is the only place they
+# can be collected without hand-running `| tee`. $WORK/logs is the bind-mounted
+# host folder that scripts/build.ps1 copies into the repo's logs/ and commits.
+# stdbuf forces line buffering so output lands in the file as it happens
+# (a pipe would otherwise make stdout fully buffered until exit or crash).
+mkdir -p "$WORK/logs"
+LOG="$WORK/logs/run-gui_$(date +%Y%m%d_%H%M).log"
 echo "Launching $BIN"
-exec "$BIN" "$@"
+echo "Session log: $LOG"
+stdbuf -oL -eL "$BIN" "$@" 2>&1 | tee "$LOG"
+exit "${PIPESTATUS[0]}"
