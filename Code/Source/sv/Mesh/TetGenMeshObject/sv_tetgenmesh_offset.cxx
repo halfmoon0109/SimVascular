@@ -882,20 +882,24 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
   {
     c[k] = g.Bin(x[k], k);
   }
-  // The triangle the field takes its value from at x: the least distance
-  // less the wall there, as Evaluate has it, which is the piece of the
-  // interface whose offset x stands on. The nearest triangle by distance
-  // alone can be a thinner neighbour's, and a point would then be handed to
-  // that neighbour's cap.
-  double bestTerm = std::numeric_limits<double>::max();
-  ll bestT = -1;
-  // Rings out until one lies farther than the best term can be beaten from;
-  // the whole grid at most, since x may be far from the surface.
+  // Two triangles are found: the nearest by distance, which gives the size
+  // and the wall the decimation works to (as it always has: taking them
+  // from the other triangle let four collapses cross at a junction of the
+  // user's model), and the one the field takes its value from at x, the
+  // least distance less the wall there as Evaluate has it, which is the
+  // piece of the interface x's offset stands on and so decides the cap. The
+  // nearest by distance can be a thinner neighbour's, and a point would then
+  // be handed to that neighbour's cap.
+  double best = std::numeric_limits<double>::max(), bestTerm = std::numeric_limits<double>::max();
+  ll bestT = -1, ownerT = -1;
+  // Rings out until one lies farther than either could be beaten from; the
+  // whole grid at most, since x may be far from the surface.
   int rings = std::max(g.n[0], std::max(g.n[1], g.n[2]));
   for (int r = 0; r <= rings; r++)
   {
     // every bin of this ring is at least (r-1) cells away
-    if (bestT >= 0 && (r - 1)*g.cell - d.largestThickness >= bestTerm)
+    double bound = (r - 1)*g.cell;
+    if (bestT >= 0 && bound >= best && bound - d.largestThickness >= bestTerm)
     {
       break;
     }
@@ -909,18 +913,24 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
           if (i < 0 || j < 0 || k < 0 || i >= g.n[0] || j >= g.n[1] || k >= g.n[2]) continue;
           size_t b = g.Index(i, j, k);
           if (g.start[b + 1] == g.start[b]) continue;
-          if (g.BoxDistance(x, i, j, k) - g.binMaxThickness[b] >= bestTerm) continue;
+          double dd = g.BoxDistance(x, i, j, k);
+          if (dd >= best && dd - g.binMaxThickness[b] >= bestTerm) continue;
           for (ll m = g.start[b]; m < g.start[b + 1]; m++)
           {
             ll t = g.cells[(size_t)m];
             const ll *tt = &d.triangles[(size_t)3*t];
             double q[3], bary[3];
             double dist = ClosestOnTriangle(x, &d.points[(size_t)3*tt[0]], &d.points[(size_t)3*tt[1]], &d.points[(size_t)3*tt[2]], q, bary);
+            if (dist < best)
+            {
+              best = dist;
+              bestT = t;
+            }
             double tq = bary[0]*d.thickness[(size_t)tt[0]] + bary[1]*d.thickness[(size_t)tt[1]] + bary[2]*d.thickness[(size_t)tt[2]];
             if (dist - tq < bestTerm)
             {
               bestTerm = dist - tq;
-              bestT = t;
+              ownerT = t;
             }
           }
         }
@@ -929,7 +939,7 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
   }
   size = (bestT >= 0) ? d.localSize[(size_t)bestT] : d.meanEdge;
   thickness = (bestT >= 0) ? d.localThickness[(size_t)bestT] : d.largestThickness;
-  rim = (bestT >= 0) ? d.triangleRim[(size_t)bestT] : -1;
+  rim = (ownerT >= 0) ? d.triangleRim[(size_t)ownerT] : -1;
 }
 
 double OffsetField::Reach() const

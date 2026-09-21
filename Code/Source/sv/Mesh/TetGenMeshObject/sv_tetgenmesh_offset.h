@@ -250,8 +250,10 @@ public:
   /// off it), the wall thickness there, and the cap rim the field triangle
   /// x's offset stands on belongs to (a collar triangle, or an interface
   /// triangle within two collar lengths of the rim along the interface),
-  /// -1 for none. That triangle is the one the field takes its value from
-  /// at x, the least distance less the wall, not the nearest by distance.
+  /// -1 for none. The size and the thickness come from the nearest triangle
+  /// by distance; the rim from the triangle the field takes its value from
+  /// at x, the least distance less the wall, since that is the piece of the
+  /// interface x's offset stands on.
   void Local(const double x[3], double &size, double &thickness, long long &rim) const;
 
   /// How far from the field's surface a point is surely outside the wall.
