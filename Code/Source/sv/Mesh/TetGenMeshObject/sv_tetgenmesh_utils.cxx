@@ -4377,11 +4377,31 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
   // or to another, and every one of them is kept outright. The points of
   // this cap's own tube on either side of the plane all belong to it, so
   // the cut between them lands on the plane.
-  auto anchors = vtkIdTypeArray::SafeDownCast(outer->GetPointData()->GetArray("OffsetRimAnchor"));
-  if (anchors != nullptr && anchors->GetNumberOfTuples() != outer->GetNumberOfPoints())
+  //
+  // The ownership is read off the untrimmed surface once, by position: the
+  // clips that follow replace the surface, and an array carried through the
+  // clip, triangle and clean filters came out useless (measured on the
+  // 2026-09-21 run, where only the first cap was cut), so nothing is
+  // carried. A point of a later surface that is a point of the original one
+  // (every point but the cut points, which lie on the planes already cut
+  // and belong to no cap still to come) finds its anchor at its position.
+  std::map<std::array<long long, 3>, vtkIdType> anchorAt;
+  bool haveAnchors = false;
   {
-    anchors = nullptr;
+    auto anchors = vtkIdTypeArray::SafeDownCast(outer->GetPointData()->GetArray("OffsetRimAnchor"));
+    if (anchors != nullptr && anchors->GetNumberOfTuples() == outer->GetNumberOfPoints())
+    {
+      haveAnchors = true;
+      for (vtkIdType ptId = 0; ptId < outer->GetNumberOfPoints(); ptId++)
+      {
+        double x[3];
+        outer->GetPoint(ptId, x);
+        std::array<long long, 3> key = {(long long)std::llround(x[0]*1.0e6), (long long)std::llround(x[1]*1.0e6), (long long)std::llround(x[2]*1.0e6)};
+        anchorAt[key] = anchors->GetValue(ptId);
+      }
+    }
   }
+  fprintf(stdout,"  trimming at the caps by %s\n", haveAnchors ? "the ownership the offset surface carries" : "a window around each rim (the surface carries no ownership)");
   for (size_t c = 0; c < caps.size(); c++)
   {
     const TGenUtilsCapRim &cap = caps[c];
@@ -4392,6 +4412,7 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
     level->SetName("CapTrimLevel");
     level->SetNumberOfComponents(1);
     level->SetNumberOfTuples(outer->GetNumberOfPoints());
+    vtkIdType numOwned = 0, numCut = 0;
     for (vtkIdType ptId = 0; ptId < outer->GetNumberOfPoints(); ptId++)
     {
       double x[3];
@@ -4399,15 +4420,33 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
       double offset[3];
       vtkMath::Subtract(cap.origin, x, offset);
       double below = vtkMath::Dot(offset, cap.outward);
-      if (anchors != nullptr)
+      if (haveAnchors)
       {
-        vtkIdType anchor = anchors->GetValue(ptId);
+        std::array<long long, 3> key = {(long long)std::llround(x[0]*1.0e6), (long long)std::llround(x[1]*1.0e6), (long long)std::llround(x[2]*1.0e6)};
+        std::map<std::array<long long, 3>, vtkIdType>::const_iterator found = anchorAt.find(key);
+        vtkIdType anchor = (found != anchorAt.end()) ? found->second : -1;
         bool owned = anchor >= 0 && loopPoints.count(anchor) > 0;
+        if (owned)
+        {
+          numOwned++;
+          if (below < 0.0) numCut++;
+        }
         level->SetValue(ptId, owned ? below : std::max(below, 1.0));
         continue;
       }
       double away = std::sqrt(vtkMath::Distance2BetweenPoints(x, cap.origin)) - window;
       level->SetValue(ptId, std::max(below, away));
+    }
+    if (haveAnchors)
+    {
+      fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): %lld points belong to it, %lld of them past its plane\n",
+          cap.origin[0], cap.origin[1], cap.origin[2], (long long)numOwned, (long long)numCut);
+      if (numCut == 0)
+      {
+        fprintf(stderr,"No point of the offset surface past the cap plane at (%.5g, %.5g, %.5g) belongs to that cap, so nothing would be trimmed there\n",
+            cap.origin[0], cap.origin[1], cap.origin[2]);
+        return SV_ERROR;
+      }
     }
     outer->GetPointData()->SetScalars(level);
 
@@ -4417,6 +4456,9 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
     clipper->GenerateClippedOutputOff();
     clipper->InsideOutOff();
     clipper->SetValue(0.0);
+    // The points are looked up by position for the caps still to come, so
+    // they must come out of the cut and the clean as the doubles they went in.
+    clipper->SetOutputPointsPrecision(vtkAlgorithm::DOUBLE_PRECISION);
 
     auto triangles = vtkSmartPointer<vtkTriangleFilter>::New();
     triangles->SetInputConnection(clipper->GetOutputPort());
@@ -4427,6 +4469,7 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
     // rim cannot be walked until they are one point.
     auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
     cleaner->SetInputConnection(triangles->GetOutputPort());
+    cleaner->SetOutputPointsPrecision(vtkAlgorithm::DOUBLE_PRECISION);
     cleaner->Update();
 
     // Only the triangles are carried on. Cleaning can turn a collapsed one into
@@ -4435,28 +4478,7 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
     auto trimmed = vtkSmartPointer<vtkPolyData>::New();
     trimmed->SetPoints(cleaner->GetOutput()->GetPoints());
     trimmed->SetPolys(cleaner->GetOutput()->GetPolys());
-    // The ownership is carried through the cut for the caps still to come.
-    // The clip interpolates point data onto its cut points; an id
-    // interpolated between two points of the same end is that end's, and
-    // between different ends (only where two vessels' walls merge) it is
-    // nobody's, so the cut points are re-labelled from the two ends' anchors
-    // rather than trusted: a cut point owned by this cap lies on its plane
-    // and is not cut again by any other.
-    if (anchors != nullptr)
-    {
-      auto carried = vtkIdTypeArray::SafeDownCast(cleaner->GetOutput()->GetPointData()->GetArray("OffsetRimAnchor"));
-      auto next = vtkSmartPointer<vtkIdTypeArray>::New();
-      next->SetName("OffsetRimAnchor");
-      next->SetNumberOfTuples(trimmed->GetNumberOfPoints());
-      for (vtkIdType ptId = 0; ptId < trimmed->GetNumberOfPoints(); ptId++)
-      {
-        vtkIdType anchor = (carried != nullptr && ptId < carried->GetNumberOfTuples()) ? carried->GetValue(ptId) : -1;
-        next->SetValue(ptId, (anchor >= 0 && anchor < surface->GetNumberOfPoints()) ? anchor : -1);
-      }
-      trimmed->GetPointData()->AddArray(next);
-    }
     outer->DeepCopy(trimmed);
-    anchors = vtkIdTypeArray::SafeDownCast(outer->GetPointData()->GetArray("OffsetRimAnchor"));
 
     if (outer->GetNumberOfCells() == 0)
     {
