@@ -4342,150 +4342,130 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
     }
   }
 
-  // Clip once per cap. The scalar is positive on everything that is kept: below
-  // the plane, or far enough from this rim that the plane has no business
-  // reaching it. The dome is the only place both are negative.
+  // The offset surface says which vessel end each of its points belongs to
+  // ('OffsetRimAnchor': the interface point id anchoring that end's rim, as
+  // the offset core assigned it from the field triangle the point's offset
+  // stands on). Each cap's cut takes only the points that belong to it and
+  // lie past its plane: a neighbouring vessel's surface that runs past the
+  // plane is left alone, since its points belong to no cap or to another
+  // (a spherical window around the rim could not tell the two apart:
+  // measured, two vessel ends 4.7 apart, radius 1.2 each, and the window of
+  // one cut a loop out of the other's offset). The points of this cap's own
+  // tube on either side of the plane all belong to it, so the cut between
+  // them lands on the plane.
   //
-  // One clip against the smallest of the per-cap scalars would produce the same
-  // set of kept points and save thirteen passes over the surface, but not the
-  // same cut. The clip places a cut point by interpolating the scalar along an
-  // edge linearly, and that is exact for one cap - 'below' is a linear function
-  // of position, so a cut governed by it lands on the cap plane itself. The
-  // smallest of several is concave rather than linear, and interpolating it
-  // linearly underestimates it, so on any edge where the cap that gives the
-  // smallest value changes between its two ends the cut lands short by up to an
-  // edge length. That is a rim pulled off its cap plane, and the pass below
-  // pairs rims to caps by how well they lie on one.
-  //
-  // Past the plane the offset runs on as a tube of radius R + t for the
-  // collar's length, a thickness and a rim edge e, and closes with a dome a
-  // thickness beyond that: the farthest point of it is 2t + e along the
-  // outward direction and R + t off the axis, within R + 2.5t + 2e of the
-  // rim centre. The window has to hold that and no more than it needs to.
-  // Sizing it off the thickness rather than off R keeps it tight where the
-  // vessel is wide, and keeps it valid where the wall is thick relative to the
-  // vessel - a window of a fixed multiple of R would fall inside the rim it is
-  // meant to cut once t approached R. The t is this cap's own: a window built
-  // from the model's thickest wall reaches the same distance past every rim,
-  // and past a thin vessel's cap that is most of the way to its neighbour.
-  //
-  // Where the offset surface says which vessel end each of its points
-  // belongs to ('OffsetRimAnchor': the interface point id anchoring that
-  // end's rim), the cut takes only the points that belong to this cap, and
-  // the window is not needed: a neighbouring vessel's surface that runs past
-  // the plane within the window is left alone. Its points belong to no cap
-  // or to another, and every one of them is kept outright. The points of
-  // this cap's own tube on either side of the plane all belong to it, so
-  // the cut between them lands on the plane.
-  //
-  // The ownership is read off the untrimmed surface once, by position: the
-  // clips that follow replace the surface, and an array carried through the
-  // clip, triangle and clean filters came out useless (measured on the
-  // 2026-09-21 run, where only the first cap was cut), so nothing is
-  // carried. A point of a later surface that is a point of the original one
-  // (every point but the cut points, which lie on the planes already cut
-  // and belong to no cap still to come) finds its anchor at its position.
-  std::map<std::array<long long, 3>, vtkIdType> anchorAt;
-  bool haveAnchors = false;
+  // The cut itself is the offset core's (TrimSurfaceAtCaps): a point of the
+  // cap's own within a tenth of its mean edge of the plane is moved onto the
+  // plane and becomes a rim point, the triangles the plane passes through
+  // are split along it, and a triangle left flat in the plane is dropped. A
+  // VTK clip did the same cut a hair from the points that lie in the plane
+  // (measured 2026-09-21: rim edges of 1e-8 and triangles flat in the plane,
+  // which TetGen merged into degenerate facets and then refused as two
+  // facets folded onto the annulus at 3e-5 degrees).
+  auto anchors = vtkIdTypeArray::SafeDownCast(outer->GetPointData()->GetArray("OffsetRimAnchor"));
+  if (anchors == nullptr || anchors->GetNumberOfTuples() != outer->GetNumberOfPoints())
   {
-    auto anchors = vtkIdTypeArray::SafeDownCast(outer->GetPointData()->GetArray("OffsetRimAnchor"));
-    if (anchors != nullptr && anchors->GetNumberOfTuples() == outer->GetNumberOfPoints())
+    fprintf(stderr,"The offset surface carries no ownership of its points (OffsetRimAnchor), so it cannot be trimmed by cap\n");
+    return SV_ERROR;
+  }
+  std::map<vtkIdType, size_t> capOfAnchor;
+  for (size_t c = 0; c < caps.size(); c++)
+  {
+    for (size_t m = 0; m < caps[c].innerLoop.size(); m++)
     {
-      haveAnchors = true;
-      for (vtkIdType ptId = 0; ptId < outer->GetNumberOfPoints(); ptId++)
+      capOfAnchor[caps[c].innerLoop[m]] = c;
+    }
+  }
+  svoffset::Surface trimmed;
+  std::vector<svoffset::CapPlane> planes(caps.size());
+  for (size_t c = 0; c < caps.size(); c++)
+  {
+    for (int k = 0; k < 3; k++)
+    {
+      planes[c].origin[k] = caps[c].origin[k];
+      planes[c].outward[k] = caps[c].outward[k];
+    }
+    planes[c].rim = (long long)c;
+  }
+  {
+    vtkIdType numPts = outer->GetNumberOfPoints();
+    trimmed.points.resize((size_t)3*numPts);
+    trimmed.pointRim.assign((size_t)numPts, -1);
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      outer->GetPoint(ptId, &trimmed.points[(size_t)3*ptId]);
+      vtkIdType anchor = anchors->GetValue(ptId);
+      std::map<vtkIdType, size_t>::const_iterator found = capOfAnchor.find(anchor);
+      if (anchor >= 0 && found != capOfAnchor.end())
       {
-        double x[3];
-        outer->GetPoint(ptId, x);
-        std::array<long long, 3> key = {(long long)std::llround(x[0]*1.0e6), (long long)std::llround(x[1]*1.0e6), (long long)std::llround(x[2]*1.0e6)};
-        anchorAt[key] = anchors->GetValue(ptId);
+        trimmed.pointRim[(size_t)ptId] = (long long)found->second;
+      }
+    }
+    outer->BuildCells();
+    vtkIdType npts;
+    const vtkIdType *pts;
+    for (vtkIdType cellId = 0; cellId < outer->GetNumberOfCells(); cellId++)
+    {
+      outer->GetCellPoints(cellId, npts, pts);
+      if (npts != 3) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        trimmed.triangles.push_back((long long)pts[j]);
       }
     }
   }
-  fprintf(stdout,"  trimming at the caps by %s\n", haveAnchors ? "the ownership the offset surface carries" : "a window around each rim (the surface carries no ownership)");
+  svoffset::TrimReport trimReport;
+  std::string trimError;
+  fprintf(stdout,"  trimming at the caps by the ownership the offset surface carries\n");
+  if (svoffset::TrimSurfaceAtCaps(trimmed, planes, 0.1, trimReport, trimError) != 0)
+  {
+    fprintf(stderr,"Problem trimming the offset surface at the cap planes: %s\n", trimError.c_str());
+    return SV_ERROR;
+  }
   for (size_t c = 0; c < caps.size(); c++)
   {
-    const TGenUtilsCapRim &cap = caps[c];
-    double window = capRadius[c] + 2.5*capThickness[c] + 2.0*capEdge[c];
-    std::set<vtkIdType> loopPoints(cap.innerLoop.begin(), cap.innerLoop.end());
-
-    auto level = vtkSmartPointer<vtkDoubleArray>::New();
-    level->SetName("CapTrimLevel");
-    level->SetNumberOfComponents(1);
-    level->SetNumberOfTuples(outer->GetNumberOfPoints());
-    vtkIdType numOwned = 0, numCut = 0;
-    for (vtkIdType ptId = 0; ptId < outer->GetNumberOfPoints(); ptId++)
+    fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): %lld points past its plane came off, %lld moved onto it\n",
+        caps[c].origin[0], caps[c].origin[1], caps[c].origin[2], trimReport.numCut[c], trimReport.numSnapped[c]);
+    if (trimReport.numCut[c] == 0)
     {
-      double x[3];
-      outer->GetPoint(ptId, x);
-      double offset[3];
-      vtkMath::Subtract(cap.origin, x, offset);
-      double below = vtkMath::Dot(offset, cap.outward);
-      if (haveAnchors)
-      {
-        std::array<long long, 3> key = {(long long)std::llround(x[0]*1.0e6), (long long)std::llround(x[1]*1.0e6), (long long)std::llround(x[2]*1.0e6)};
-        std::map<std::array<long long, 3>, vtkIdType>::const_iterator found = anchorAt.find(key);
-        vtkIdType anchor = (found != anchorAt.end()) ? found->second : -1;
-        bool owned = anchor >= 0 && loopPoints.count(anchor) > 0;
-        if (owned)
-        {
-          numOwned++;
-          if (below < 0.0) numCut++;
-        }
-        level->SetValue(ptId, owned ? below : std::max(below, 1.0));
-        continue;
-      }
-      double away = std::sqrt(vtkMath::Distance2BetweenPoints(x, cap.origin)) - window;
-      level->SetValue(ptId, std::max(below, away));
-    }
-    if (haveAnchors)
-    {
-      fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): %lld points belong to it, %lld of them past its plane\n",
-          cap.origin[0], cap.origin[1], cap.origin[2], (long long)numOwned, (long long)numCut);
-      if (numCut == 0)
-      {
-        fprintf(stderr,"No point of the offset surface past the cap plane at (%.5g, %.5g, %.5g) belongs to that cap, so nothing would be trimmed there\n",
-            cap.origin[0], cap.origin[1], cap.origin[2]);
-        return SV_ERROR;
-      }
-    }
-    outer->GetPointData()->SetScalars(level);
-
-    auto clipper = vtkSmartPointer<vtkClipPolyData>::New();
-    clipper->SetInputData(outer);
-    clipper->GenerateClipScalarsOff();
-    clipper->GenerateClippedOutputOff();
-    clipper->InsideOutOff();
-    clipper->SetValue(0.0);
-    // The points are looked up by position for the caps still to come, so
-    // they must come out of the cut and the clean as the doubles they went in.
-    clipper->SetOutputPointsPrecision(vtkAlgorithm::DOUBLE_PRECISION);
-
-    auto triangles = vtkSmartPointer<vtkTriangleFilter>::New();
-    triangles->SetInputConnection(clipper->GetOutputPort());
-    triangles->PassLinesOff();
-    triangles->PassVertsOff();
-
-    // Clipping leaves a pair of coincident points on every cut edge, and the
-    // rim cannot be walked until they are one point.
-    auto cleaner = vtkSmartPointer<vtkCleanPolyData>::New();
-    cleaner->SetInputConnection(triangles->GetOutputPort());
-    cleaner->SetOutputPointsPrecision(vtkAlgorithm::DOUBLE_PRECISION);
-    cleaner->Update();
-
-    // Only the triangles are carried on. Cleaning can turn a collapsed one into
-    // a line, and a line sharing an edge with a triangle would make that edge
-    // look interior when the rim is walked.
-    auto trimmed = vtkSmartPointer<vtkPolyData>::New();
-    trimmed->SetPoints(cleaner->GetOutput()->GetPoints());
-    trimmed->SetPolys(cleaner->GetOutput()->GetPolys());
-    outer->DeepCopy(trimmed);
-
-    if (outer->GetNumberOfCells() == 0)
-    {
-      fprintf(stderr,"Trimming the offset surface at the cap at (%.5g, %.5g, %.5g) removed all of it\n",
-          cap.origin[0], cap.origin[1], cap.origin[2]);
+      fprintf(stderr,"No point of the offset surface past the cap plane at (%.5g, %.5g, %.5g) belongs to that cap, so nothing was trimmed there\n",
+          caps[c].origin[0], caps[c].origin[1], caps[c].origin[2]);
       return SV_ERROR;
     }
+  }
+  fprintf(stdout,"    %lld triangles past a plane removed, %lld split along one, %lld dropped for touching the kept side only along an edge or at a point or for lying flat in the plane; %lld -> %lld points, %lld -> %lld triangles; %lld rim edges, the shortest %.3f of the local edge, the smallest angle between a rim triangle and its plane %.2f degrees\n",
+      trimReport.numRemoved, trimReport.numSplit, trimReport.numDropped, trimReport.numPointsBefore, trimReport.numPointsAfter,
+      trimReport.numTrianglesBefore, trimReport.numTrianglesAfter, trimReport.numRimEdges,
+      trimReport.shortestRimEdgeRatio, trimReport.smallestRimAngleDegrees);
+  if (trimReport.smallestRimAngleDegrees < 0.5)
+  {
+    fprintf(stderr,"A triangle of the trimmed offset surface leans over the annulus at %.4f degrees, which TetGen would refuse as two facets folded onto each other\n",
+        trimReport.smallestRimAngleDegrees);
+    return SV_ERROR;
+  }
+  {
+    auto trimmedPoints = vtkSmartPointer<vtkPoints>::New();
+    trimmedPoints->SetDataTypeToDouble();
+    trimmedPoints->SetNumberOfPoints((vtkIdType)(trimmed.points.size()/3));
+    for (vtkIdType ptId = 0; ptId < trimmedPoints->GetNumberOfPoints(); ptId++)
+    {
+      trimmedPoints->SetPoint(ptId, &trimmed.points[(size_t)3*ptId]);
+    }
+    auto trimmedCells = vtkSmartPointer<vtkCellArray>::New();
+    for (size_t i = 0; i + 2 < trimmed.triangles.size(); i += 3)
+    {
+      vtkIdType ids[3] = {(vtkIdType)trimmed.triangles[i], (vtkIdType)trimmed.triangles[i+1], (vtkIdType)trimmed.triangles[i+2]};
+      trimmedCells->InsertNextCell(3, ids);
+    }
+    auto result = vtkSmartPointer<vtkPolyData>::New();
+    result->SetPoints(trimmedPoints);
+    result->SetPolys(trimmedCells);
+    outer->DeepCopy(result);
+  }
+  if (outer->GetNumberOfCells() == 0)
+  {
+    fprintf(stderr,"Trimming the offset surface at the cap planes removed all of it\n");
+    return SV_ERROR;
   }
 
   // The rims are about to be walked, and a triangle joined to the surface by
@@ -4640,10 +4620,10 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
       caps.size(), (long long)outer->GetNumberOfPoints(), (long long)outer->GetNumberOfCells());
   for (size_t c = 0; c < caps.size(); c++)
   {
-    fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): inner rim %zu points, trimmed rim %zu points, cut within %.5g of the rim centre (radius %.5g, wall %.5g)\n",
+    fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): inner rim %zu points, trimmed rim %zu points (radius %.5g, wall %.5g, rim edge %.5g)\n",
         caps[c].origin[0], caps[c].origin[1], caps[c].origin[2],
         caps[c].innerLoop.size(), caps[c].outerLoop.size(),
-        capRadius[c] + 2.5*capThickness[c] + 2.0*capEdge[c], capRadius[c], capThickness[c]);
+        capRadius[c], capThickness[c], capEdge[c]);
   }
 
   return SV_OK;

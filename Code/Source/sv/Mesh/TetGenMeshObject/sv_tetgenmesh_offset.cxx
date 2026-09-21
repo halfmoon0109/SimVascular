@@ -323,6 +323,309 @@ void NoteFault(Report &report, const char *what, const double at[3])
 // CountEdges
 //---------------------
 
+// -------------------------------------
+// TrimSurfaceAtCaps
+// -------------------------------------
+int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, double snapFraction,
+    TrimReport &report, std::string &error)
+{
+  std::vector<double> &pts = surface.points;
+  std::vector<ll> &tris = surface.triangles;
+  std::vector<ll> &owner = surface.pointRim;
+  ll np = (ll)(pts.size()/3), nt = (ll)(tris.size()/3);
+  if (owner.size() != (size_t)np)
+  {
+    error = "the surface carries no ownership of its points, so it cannot be trimmed by cap";
+    return 1;
+  }
+  for (size_t i = 0; i < tris.size(); i++)
+  {
+    if (tris[i] < 0 || tris[i] >= np)
+    {
+      error = "a triangle of the surface refers to a point it does not have";
+      return 1;
+    }
+  }
+  report = TrimReport();
+  report.numPointsBefore = np;
+  report.numTrianglesBefore = nt;
+  report.numCut.assign(planes.size(), 0);
+  report.numSnapped.assign(planes.size(), 0);
+
+  // The mean edge at each point, which sizes the band a point is snapped
+  // onto the plane from.
+  std::vector<double> meanEdge((size_t)np, 0.0);
+  std::vector<int> degree((size_t)np, 0);
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
+      double L = Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]);
+      meanEdge[(size_t)a] += L;
+      degree[(size_t)a]++;
+      meanEdge[(size_t)b] += L;
+      degree[(size_t)b]++;
+    }
+  }
+  for (ll v = 0; v < np; v++)
+  {
+    meanEdge[(size_t)v] = (degree[(size_t)v] > 0) ? meanEdge[(size_t)v]/(double)degree[(size_t)v] : 0.0;
+  }
+
+  for (size_t p = 0; p < planes.size(); p++)
+  {
+    const CapPlane &plane = planes[p];
+    np = (ll)(pts.size()/3);
+    nt = (ll)(tris.size()/3);
+    // The signed height of each point over the plane, positive on the side
+    // that is kept. A point of this plane's rim within the snap band is
+    // moved onto the plane. A point that belongs to no plane or to another
+    // is kept whatever side it lies on: its height is its own where that is
+    // comfortably positive, and a mean edge otherwise, so that an edge from
+    // it to a point coming off is cut somewhere along itself rather than at
+    // infinity.
+    std::vector<double> s((size_t)np, 0.0);
+    for (ll v = 0; v < np; v++)
+    {
+      double off[3];
+      Sub(plane.origin, &pts[(size_t)3*v], off);
+      double sv = Dot(off, plane.outward);
+      if (owner[(size_t)v] == plane.rim)
+      {
+        if (std::abs(sv) <= snapFraction*meanEdge[(size_t)v])
+        {
+          for (int k = 0; k < 3; k++)
+          {
+            pts[(size_t)3*v + k] += sv*plane.outward[k];
+          }
+          sv = 0.0;
+          report.numSnapped[p]++;
+        }
+        if (sv < 0.0)
+        {
+          report.numCut[p]++;
+        }
+      }
+      else
+      {
+        sv = std::max(sv, meanEdge[(size_t)v]);
+      }
+      s[(size_t)v] = sv;
+    }
+
+    std::vector<ll> kept;
+    kept.reserve(tris.size());
+    std::map<EdgeKey, ll> cutPoint;
+    // The point where the plane crosses the edge v-w (heights of opposite
+    // sign), made once per edge and put exactly on the plane.
+    auto cutOn = [&](ll v, ll w) -> ll
+    {
+      EdgeKey key(v, w);
+      std::map<EdgeKey, ll>::iterator it = cutPoint.find(key);
+      if (it != cutPoint.end())
+      {
+        return it->second;
+      }
+      double f = s[(size_t)v]/(s[(size_t)v] - s[(size_t)w]);
+      double q[3];
+      for (int k = 0; k < 3; k++)
+      {
+        q[k] = pts[(size_t)3*v + k] + f*(pts[(size_t)3*w + k] - pts[(size_t)3*v + k]);
+      }
+      double off[3];
+      Sub(plane.origin, q, off);
+      double sq = Dot(off, plane.outward);
+      for (int k = 0; k < 3; k++)
+      {
+        q[k] += sq*plane.outward[k];
+      }
+      ll id = (ll)(pts.size()/3);
+      pts.insert(pts.end(), q, q + 3);
+      owner.push_back(-1);
+      meanEdge.push_back(0.5*(meanEdge[(size_t)v] + meanEdge[(size_t)w]));
+      s.push_back(0.0);
+      cutPoint[key] = id;
+      return id;
+    };
+
+    for (ll t = 0; t < nt; t++)
+    {
+      ll v[3] = {tris[(size_t)3*t], tris[(size_t)3*t + 1], tris[(size_t)3*t + 2]};
+      int numBelow = 0, numOn = 0;
+      for (int j = 0; j < 3; j++)
+      {
+        if (s[(size_t)v[j]] < 0.0) numBelow++;
+        else if (s[(size_t)v[j]] == 0.0) numOn++;
+      }
+      if (numBelow == 0)
+      {
+        if (numOn == 3)
+        {
+          // flat in the plane, where the annulus will be
+          report.numDropped++;
+          continue;
+        }
+        kept.insert(kept.end(), v, v + 3);
+        continue;
+      }
+      if (numBelow == 3)
+      {
+        report.numRemoved++;
+        continue;
+      }
+      // The part of the triangle on the kept side, walked in its own order:
+      // a corner on or above the plane stays, an edge from above to below
+      // (or back) gets its crossing point, and an edge from a corner on the
+      // plane to one below gets nothing, since that corner is the crossing.
+      ll poly[4];
+      int n = 0;
+      for (int j = 0; j < 3; j++)
+      {
+        ll a = v[j], b = v[(j+1)%3];
+        double sa = s[(size_t)a], sb = s[(size_t)b];
+        if (sa >= 0.0)
+        {
+          poly[n++] = a;
+        }
+        if ((sa > 0.0 && sb < 0.0) || (sa < 0.0 && sb > 0.0))
+        {
+          poly[n++] = cutOn(a, b);
+        }
+      }
+      if (n < 3)
+      {
+        // only a point or an edge in the plane was on the kept side
+        report.numDropped++;
+        continue;
+      }
+      report.numSplit++;
+      kept.push_back(poly[0]);
+      kept.push_back(poly[1]);
+      kept.push_back(poly[2]);
+      if (n == 4)
+      {
+        kept.push_back(poly[0]);
+        kept.push_back(poly[2]);
+        kept.push_back(poly[3]);
+      }
+    }
+    tris.swap(kept);
+  }
+
+  // Compact the points to those the triangles use, in their order.
+  np = (ll)(pts.size()/3);
+  {
+    std::vector<ll> newId((size_t)np, -1);
+    ll m = 0;
+    for (size_t i = 0; i < tris.size(); i++)
+    {
+      if (newId[(size_t)tris[i]] < 0) newId[(size_t)tris[i]] = 0;
+    }
+    for (ll v = 0; v < np; v++)
+    {
+      if (newId[(size_t)v] == 0) newId[(size_t)v] = m++;
+    }
+    std::vector<double> cpts((size_t)3*m);
+    std::vector<ll> cowner((size_t)m);
+    std::vector<double> cedge((size_t)m);
+    for (ll v = 0; v < np; v++)
+    {
+      ll u = newId[(size_t)v];
+      if (u < 0) continue;
+      for (int k = 0; k < 3; k++)
+      {
+        cpts[(size_t)3*u + k] = pts[(size_t)3*v + k];
+      }
+      cowner[(size_t)u] = owner[(size_t)v];
+      cedge[(size_t)u] = meanEdge[(size_t)v];
+    }
+    for (size_t i = 0; i < tris.size(); i++)
+    {
+      tris[i] = newId[(size_t)tris[i]];
+    }
+    pts.swap(cpts);
+    owner.swap(cowner);
+    meanEdge.swap(cedge);
+    np = m;
+  }
+  nt = (ll)(tris.size()/3);
+  report.numPointsAfter = np;
+  report.numTrianglesAfter = nt;
+
+  // The rims: their shortest edge against the mean edge at its ends, and the
+  // angle each rim triangle makes with its cap plane on the side the annulus
+  // will lie, toward the plane's origin. A triangle leaning over the annulus
+  // at a hair's angle is what TetGen refuses as two facets folded onto each
+  // other.
+  {
+    std::map<EdgeKey, int> edgeCount;
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        edgeCount[EdgeKey(tris[(size_t)3*t + j], tris[(size_t)3*t + (j+1)%3])]++;
+      }
+    }
+    report.shortestRimEdgeRatio = std::numeric_limits<double>::max();
+    report.smallestRimAngleDegrees = 180.0;
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3], c = tris[(size_t)3*t + (j+2)%3];
+        if (edgeCount[EdgeKey(a, b)] != 1) continue;
+        report.numRimEdges++;
+        const double *xa = &pts[(size_t)3*a], *xb = &pts[(size_t)3*b], *xc = &pts[(size_t)3*c];
+        double L = Distance(xa, xb);
+        double mean = 0.5*(meanEdge[(size_t)a] + meanEdge[(size_t)b]);
+        if (mean > 0.0)
+        {
+          report.shortestRimEdgeRatio = std::min(report.shortestRimEdgeRatio, L/mean);
+        }
+        // the plane this edge lies on: both ends on it
+        for (size_t p = 0; p < planes.size(); p++)
+        {
+          const CapPlane &plane = planes[p];
+          double offA[3], offB[3], offC[3];
+          Sub(plane.origin, xa, offA);
+          Sub(plane.origin, xb, offB);
+          Sub(plane.origin, xc, offC);
+          double tol = 1.0e-6*std::max(mean, 1.0e-12);
+          if (std::abs(Dot(offA, plane.outward)) > tol || std::abs(Dot(offB, plane.outward)) > tol) continue;
+          double height = Dot(offC, plane.outward);   // positive on the kept side
+          // inward in the plane: from the edge's midpoint toward the origin, perpendicular to the edge
+          double mid[3], toOrigin[3], along[3];
+          for (int k = 0; k < 3; k++)
+          {
+            mid[k] = 0.5*(xa[k] + xb[k]);
+            along[k] = xb[k] - xa[k];
+          }
+          Sub(plane.origin, mid, toOrigin);
+          double tn = Dot(toOrigin, plane.outward);
+          for (int k = 0; k < 3; k++) toOrigin[k] -= tn*plane.outward[k];
+          if (!Normalize(along)) break;
+          double ta = Dot(toOrigin, along);
+          for (int k = 0; k < 3; k++) toOrigin[k] -= ta*along[k];
+          if (!Normalize(toOrigin)) break;
+          double lean[3];
+          Sub(xc, mid, lean);
+          double inward = Dot(lean, toOrigin);
+          double angle = std::atan2(std::abs(height), inward)*(180.0/3.14159265358979323846);
+          report.smallestRimAngleDegrees = std::min(report.smallestRimAngleDegrees, angle);
+          break;
+        }
+      }
+    }
+    if (report.numRimEdges == 0)
+    {
+      report.shortestRimEdgeRatio = 0.0;
+      report.smallestRimAngleDegrees = 0.0;
+    }
+  }
+  return 0;
+}
+
 void CountEdges(const std::vector<long long> &triangles, long long &numBoundary,
     long long &numNonManifold, long long &numMiswound)
 {

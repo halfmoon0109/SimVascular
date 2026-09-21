@@ -58,6 +58,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -365,65 +366,83 @@ static void TestSeptum()
 }
 
 // The number of boundary loops of a surface.
-static int CountBoundaryLoops(const Surface &s)
-{
-  std::map<std::pair<ll,ll>, int> count;
-  std::map<std::pair<ll,ll>, std::pair<ll,ll> > direction;
-  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
-  {
-    for (int j = 0; j < 3; j++)
-    {
-      ll a = s.triangles[i+j], b = s.triangles[i+(j+1)%3];
-      std::pair<ll,ll> key(std::min(a,b), std::max(a,b));
-      count[key]++;
-      direction[key] = std::make_pair(a, b);
-    }
-  }
-  std::map<ll,ll> next;
-  for (std::map<std::pair<ll,ll>, int>::iterator it = count.begin(); it != count.end(); ++it)
-  {
-    if (it->second == 1) next[direction[it->first].first] = direction[it->first].second;
-  }
-  std::map<ll, bool> seen;
-  int loops = 0;
-  for (std::map<ll,ll>::iterator it = next.begin(); it != next.end(); ++it)
-  {
-    if (seen[it->first]) continue;
-    ll cur = it->first;
-    while (!seen[cur]) { seen[cur] = true; std::map<ll,ll>::iterator nx = next.find(cur); if (nx == next.end()) break; cur = nx->second; }
-    loops++;
-  }
-  return loops;
-}
 
 // Trims as the glue does with the ownership: every triangle past a cap's
 // plane whose corners belong to that cap comes off; triangles of a
 // neighbouring vessel that run past the plane stay. The cap planes here are
 // z = z0 and z = z1 of each tube, told apart by the rim's own z.
-static void TrimOwned(Surface &s, const Interface &iface)
+// The cap planes of an interface as the glue computes them: each rim's
+// centroid and Newell normal, the outward direction being the side the
+// interface is not on.
+static std::vector<svoffset::CapPlane> PlanesFromRims(const Interface &iface, const Surface &s)
 {
-  std::vector<ll> kept;
-  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+  std::vector<svoffset::CapPlane> planes;
+  for (size_t r = 0; r < s.rims.size(); r++)
   {
-    bool off = false;
-    for (int j = 0; j < 3 && !off; j++)
+    const std::vector<ll> &loop = s.rims[r];
+    svoffset::CapPlane plane;
+    plane.rim = (ll)r;
+    for (int k = 0; k < 3; k++) plane.origin[k] = 0.0;
+    for (size_t m = 0; m < loop.size(); m++)
+      for (int k = 0; k < 3; k++) plane.origin[k] += iface.points[3*(size_t)loop[m] + k]/(double)loop.size();
+    double normal[3] = {0.0, 0.0, 0.0}, radius = 0.0;
+    for (size_t m = 0; m < loop.size(); m++)
     {
-      ll v = s.triangles[i+j];
-      ll rim = s.pointRim[(size_t)v];
-      if (rim < 0) continue;
-      double rimZ = iface.points[3*(size_t)s.rims[(size_t)rim][0] + 2];
-      // the rim at the low end of its tube has its interface above it, the high end below
-      bool lowEnd = iface.points[3*(size_t)s.rims[(size_t)rim][0] + 2] < 0.5*(0.0 + 12.0) && rimZ < 1.0;
-      double cz = 0.0;
-      for (int k = 0; k < 3; k++) cz += s.points[3*(size_t)s.triangles[i+k] + 2]/3.0;
-      int owned = 0;
-      for (int k = 0; k < 3; k++) if (s.pointRim[(size_t)s.triangles[i+k]] == rim) owned++;
-      if (owned >= 2 && ((lowEnd && cz < rimZ) || (!lowEnd && cz > rimZ))) off = true;
+      const double *a = &iface.points[3*(size_t)loop[m]], *b = &iface.points[3*(size_t)loop[(m+1)%loop.size()]];
+      normal[0] += (a[1]-b[1])*(a[2]+b[2]);
+      normal[1] += (a[2]-b[2])*(a[0]+b[0]);
+      normal[2] += (a[0]-b[0])*(a[1]+b[1]);
+      radius = std::max(radius, Dist(a, plane.origin));
     }
-    if (off) continue;
-    kept.insert(kept.end(), &s.triangles[i], &s.triangles[i] + 3);
+    double L = Norm(normal);
+    for (int k = 0; k < 3; k++) plane.outward[k] = -normal[k]/L;
+    double plus = 0.0, minus = 0.0;
+    for (size_t i = 0; i < iface.points.size()/3; i++)
+    {
+      double off[3]; Sub(&iface.points[3*i], plane.origin, off);
+      if (Norm(off) > 3.0*radius) continue;
+      double h = Dot(off, plane.outward);
+      if (h > 0.05*radius) plus += 1.0; else if (h < -0.05*radius) minus += 1.0;
+    }
+    if (plus > minus) for (int k = 0; k < 3; k++) plane.outward[k] = -plane.outward[k];
+    planes.push_back(plane);
   }
-  s.triangles = kept;
+  return planes;
+}
+
+// The boundary loops of a surface, and for each the plane (index) all of its
+// points lie on within tol, -1 for none.
+static std::vector<int> LoopPlanes(const Surface &s, const std::vector<svoffset::CapPlane> &planes, double tol, int &numLoops)
+{
+  std::map<std::pair<ll,ll>, int> count;
+  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+    for (int j = 0; j < 3; j++) { ll a = s.triangles[i+j], b = s.triangles[i+(j+1)%3]; count[std::make_pair(std::min(a,b), std::max(a,b))]++; }
+  std::map<ll,ll> next;
+  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+    for (int j = 0; j < 3; j++) { ll a = s.triangles[i+j], b = s.triangles[i+(j+1)%3]; if (count[std::make_pair(std::min(a,b), std::max(a,b))] == 1) next[a] = b; }
+  std::set<ll> seen; std::vector<int> onPlane; numLoops = 0;
+  for (std::map<ll,ll>::iterator it = next.begin(); it != next.end(); ++it)
+  {
+    if (seen.count(it->first)) continue;
+    std::vector<ll> loop; ll cur = it->first;
+    while (!seen.count(cur)) { seen.insert(cur); loop.push_back(cur); std::map<ll,ll>::iterator nx = next.find(cur); if (nx == next.end()) break; cur = nx->second; }
+    numLoops++;
+    // the plane it lies on; two caps can share a plane (both tubes' low ends
+    // here), so of those the one whose origin is nearest the loop's centre
+    double centre[3] = {0.0, 0.0, 0.0};
+    for (size_t m = 0; m < loop.size(); m++) for (int k = 0; k < 3; k++) centre[k] += s.points[3*(size_t)loop[m] + k]/(double)loop.size();
+    int which = -1; double nearest = 1e300;
+    for (size_t p = 0; p < planes.size(); p++)
+    {
+      double worst = 0.0;
+      for (size_t m = 0; m < loop.size(); m++) { double off[3]; Sub(&s.points[3*(size_t)loop[m]], planes[p].origin, off); worst = std::max(worst, std::abs(Dot(off, planes[p].outward))); }
+      if (worst > tol) continue;
+      double d = Dist(centre, planes[p].origin);
+      if (d < nearest) { nearest = d; which = (int)p; }
+    }
+    onPlane.push_back(which);
+  }
+  return onPlane;
 }
 
 // 4. Two tubes side by side ending at different heights, close enough that a
@@ -471,16 +490,50 @@ static void TestNeighbouringEnds()
   }
   printf("  points of the long tube's wall past z = 8 owned by the short tube's cap: %lld\n", numStolen);
   Check(numStolen == 0, "the neighbouring tube's wall belongs to no cap of the short tube");
-  TrimOwned(s, iface);
-  int loops = CountBoundaryLoops(s);
+  // The trim itself, as the glue calls it. Without the snap band the cut
+  // lands a hair from the contour points that lie exactly in the cap planes
+  // (the points offset along the rim's own normals do), leaving rim edges of
+  // nothing and triangles flat in the plane; with it, nothing shorter than a
+  // fraction of an edge and nothing leaning over the annulus.
+  std::vector<svoffset::CapPlane> planes = PlanesFromRims(iface, s);
+  {
+    Surface bare = s;
+    svoffset::TrimReport bareReport; std::string bareError;
+    if (svoffset::TrimSurfaceAtCaps(bare, planes, 0.0, bareReport, bareError) == 0)
+      printf("  trimmed without the snap band: shortest rim edge %.2e of the local edge, smallest rim angle %.4f degrees, %lld triangles split, %lld dropped\n",
+          bareReport.shortestRimEdgeRatio, bareReport.smallestRimAngleDegrees, bareReport.numSplit, bareReport.numDropped);
+  }
+  svoffset::TrimReport trim; std::string trimError;
+  int trimRc = svoffset::TrimSurfaceAtCaps(s, planes, 0.1, trim, trimError);
+  Check(trimRc == 0, trimRc == 0 ? "the surface was trimmed at its four cap planes" : trimError.c_str());
+  if (trimRc != 0) return;
+  ll snapped = 0, cut = 0;
+  for (size_t p = 0; p < planes.size(); p++) { snapped += trim.numSnapped[p]; cut += trim.numCut[p]; }
+  printf("  trimmed: %lld points cut, %lld snapped onto a plane, %lld triangles removed, %lld split, %lld dropped (an edge or a point on the kept side, or flat in the plane); %lld -> %lld points, %lld -> %lld triangles; %lld rim edges, shortest %.3f of the local edge, smallest rim angle %.2f degrees\n",
+      cut, snapped, trim.numRemoved, trim.numSplit, trim.numDropped, trim.numPointsBefore, trim.numPointsAfter, trim.numTrianglesBefore, trim.numTrianglesAfter,
+      trim.numRimEdges, trim.shortestRimEdgeRatio, trim.smallestRimAngleDegrees);
+  int loops = 0;
+  std::vector<int> loopPlane = LoopPlanes(s, planes, 1e-6, loops);
+  std::set<int> planesHit; int stray = 0;
+  for (size_t l = 0; l < loopPlane.size(); l++) { if (loopPlane[l] < 0) stray++; else planesHit.insert(loopPlane[l]); }
   ll nb, nn, nm;
   svoffset::CountEdges(s.triangles, nb, nn, nm);
   std::vector<unsigned char> crossing;
   double at[3];
   ll numCrossing = svenvelope::CountCrossingTriangles(s.points, s.triangles, crossing, at);
-  printf("  after the trim: %d boundary loops, non-manifold %lld, miswound %lld, crossing %lld\n", loops, nn, nm, numCrossing);
-  Check(loops == 4, "the trim leaves exactly the four cap rims");
+  printf("  after the trim: %d boundary loops (%zu planes each with one, %d on no plane), non-manifold %lld, miswound %lld, crossing %lld\n", loops, planesHit.size(), stray, nn, nm, numCrossing);
+  Check(loops == 4 && planesHit.size() == 4 && stray == 0, "the trim leaves exactly the four cap rims, one on each plane");
   Check(nn == 0 && nm == 0 && numCrossing == 0, "and a manifold without crossings");
+  Check(trim.shortestRimEdgeRatio >= 0.05, "no rim edge is shorter than a twentieth of the local edge");
+  Check(trim.smallestRimAngleDegrees >= 1.0, "no rim triangle leans over the annulus within a degree");
+  // nothing TetGen would merge: no two points of the surface within 1e-4 of an edge
+  {
+    double shortest = 1e300;
+    for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+      for (int j = 0; j < 3; j++) shortest = std::min(shortest, Dist(&s.points[3*(size_t)s.triangles[i+j]], &s.points[3*(size_t)s.triangles[i+(j+1)%3]]));
+    printf("  shortest edge anywhere after the trim: %.4g\n", shortest);
+    Check(shortest > 1e-3, "no edge of the trimmed surface is shorter than 1e-3");
+  }
   // the long tube's wall between z = 8.5 and 11.5 is untouched
   double worst = 1e300;
   for (size_t i = 0; i < iface.points.size()/3; i++)

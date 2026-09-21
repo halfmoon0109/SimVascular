@@ -276,6 +276,54 @@ private:
 };
 
 /**
+ * @brief A cap plane the offset surface is trimmed along: the plane through
+ * origin with the outward direction of the vessel end, and the rim (an
+ * entry of Surface::pointRim) whose points past the plane the cut takes.
+ */
+struct CapPlane
+{
+  double origin[3];
+  double outward[3];
+  long long rim;
+};
+
+/**
+ * @brief What TrimSurfaceAtCaps did, for the log.
+ */
+struct TrimReport
+{
+  long long numPointsBefore = 0, numTrianglesBefore = 0;
+  long long numPointsAfter = 0, numTrianglesAfter = 0;
+  std::vector<long long> numCut;      // per plane: points past it that came off
+  std::vector<long long> numSnapped;  // per plane: points moved onto it
+  long long numRemoved = 0;           // triangles wholly past a plane
+  long long numDropped = 0;           // triangles left with nothing on the kept side but a point or an edge in the plane, or lying flat in it
+  long long numSplit = 0;             // triangles the plane passed through
+  long long numRimEdges = 0;
+  double shortestRimEdgeRatio = 0.0;  // shortest rim edge over the mean edge at its ends
+  double smallestRimAngleDegrees = 0.0;  // smallest angle between a triangle on a rim and the cap plane, on the annulus side
+};
+
+/**
+ * @brief Trims the offset surface at the cap planes: for each plane, the
+ * points the surface hands to that plane's rim (Surface::pointRim) and lying
+ * past the plane come off, the triangles the plane passes through are cut
+ * along it, and the cut lands on the plane. A point of the rim's own within
+ * snapFraction of its mean edge of the plane is moved onto the plane instead
+ * of being cut a hair from, so that no edge shorter than a fraction of the
+ * local edge and no triangle lying flat in the plane is left on the rim
+ * (measured 2026-09-21: a VTK clip left edges of 1e-8 and flat triangles in
+ * the plane there, which TetGen merged into degenerate facets and then
+ * refused as facets folded onto the annulus). Points that belong to no
+ * plane, or to another, are kept whatever side of the plane they lie on.
+ * Points are compacted afterwards; pointRim is carried (-1 for a cut point).
+ * The rims of the result are the boundary loops of its triangles.
+ * @return 0 on success, 1 with error set otherwise.
+ */
+int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, double snapFraction,
+    TrimReport &report, std::string &error);
+
+/**
  * @brief Counts the edges of a triangle surface by how many triangles use
  * them, for the report and the tests.
  */
