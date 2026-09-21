@@ -30,3 +30,129 @@ Expand
 !66.010! WARNING: QPainter::end: Painter ended with 2 saved states
 !66.011! WARNING: QPainter::end: Painter ended with 2 saved states
 !66.013! WARNING: QPainter::end: Painter ended with 2 saved states
+!72.290! WARNING: QPainter::end: Painter ended with 2 saved states
+!72.308! WARNING: QPainter::end: Painter ended with 2 saved states
+!72.308! WARNING: QPainter::end: Painter ended with 2 saved states
+Getting sizing function Surface
+Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 4218044
+  Min / Avg / Max: 1.000 / 1.157 / 46.986
+  Aspect ratio > 10: 1, > 30: 1, > 100: 0
+  aspect ratio 46.986 at (4.27209, -25.5107, 74.2352), edges 0.122389 0.160426 0.282619
+Remeshing surface with MMG...
+  -- MMGS, Release 5.3.8 (Apr. 10, 2017) 
+     Copyright (c) IMB-LJLL, 2004-
+     Jul  6 2026 02:09:01
+
+  -- MMGS: INPUT DATA
+  --  INPUT DATA COMPLETED.     0.000s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   MODULE MMGS: IMB-LJLL : 5.3.8 (Apr. 10, 2017)
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- PHASE 1 : ANALYSIS
+
+  -- MESH QUALITY   4218044
+     BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
+  -- PHASE 1 COMPLETED.     3.053s
+
+  -- PHASE 2 : ISOTROPIC MESHING
+         3479 splitted,  1857468 collapsed,    93845 swapped, 5 iter.
+
+  -- GRADATION : 1.300000
+          108 splitted,        4 collapsed,       52 swapped, 3 iter.
+        32866 splitted,   106774 collapsed,    25987 swapped,  4129506 moved, 2 iter. 
+  -- PHASE 2 COMPLETED.     12.795s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   END OF MODULE MMGS: IMB-LJLL 
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- MESH QUALITY   359700
+     BEST   1.000000  AVRG.   0.972476  WRST.   0.337035 (296378)
+
+  -- MESH PACKED UP
+     NUMBER OF VERTICES     179844   CORNERS       10
+     NUMBER OF TRIANGLES    359700
+     NUMBER OF EDGES          1658   RIDGES      1658
+
+   MMGSLIB: ELAPSED TIME  15.910s
+Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 356293
+  Min / Avg / Max: 1.000 / 1.209 / 5.750
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+Checking surface mesh
+Regions: 1
+Number of Free Edges on Surface: 481
+Number of Non-Manifold Edges on Surface: 0
+[GenerateBoundaryLayerMesh] 
+[GenerateBoundaryLayerMesh] ========== cvTetGenMeshObject::GenerateBoundaryLayerMesh ==========
+[GenerateBoundaryLayerMesh] markerListName: CellEntityIds
+Surface triangle quality (fluid/wall interface surface), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 356293
+  Min / Avg / Max: 1.000 / 1.209 / 5.750
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+[GenerateBoundaryLayerMesh] negateWarpVectors: 1
+[GenerateBoundaryLayerMesh] useConstantThickness: 0
+[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals.
+Fluid boundary layer options in effect: MaxEdgeSize 0.1953, BLThicknessFactor 0.8, constant thickness 0 (total layer thickness 0.15624), NumSubLayers 3, SubLayerRatio 0.5
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [fluid boundary layer, inward]:
+  concave points: 178318 of 178367; points with t/R >= 1 / 2 / 4: 0/0/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  no point requests a thickness above its concave radius of curvature
+0 tangle triangles found
+Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: 0/0/0 of 178367
+Wall mesh options in effect: WallThickness 0.5, CurvatureFactor 0, SmoothingIterations 0, NumberOfWallLayers 2
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [solid wall, outward]:
+  concave points: 62400 of 178367; points with t/R >= 1 / 2 / 4: 98/2/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  concave regions with t/R >= 1: 15 in total (separated by 8.012), worst 8 shown:
+    [1] t/R 2.15 (t 0.385, R_typical 0.17934, R_smallest 0.073397) at (-9.1889, -34.576, 65.894), 6 points
+    [2] t/R 2.09 (t 0.185, R_typical 0.08868, R_smallest 0.068799) at (-4.0021, -30.201, 71.469), 9 points
+    [3] t/R 1.87 (t 0.615, R_typical 0.32901, R_smallest 0.16183) at (-38.138, -27.592, -95.672), 19 points
+    [4] t/R 1.58 (t 0.14, R_typical 0.088713, R_smallest 0.057492) at (3.5949, -34.01, 74.193), 3 points
+    [5] t/R 1.5 (t 0.615, R_typical 0.41068, R_smallest 0.2588) at (22.347, -43.004, -90.698), 13 points
+    [6] t/R 1.48 (t 1.025, R_typical 0.69381, R_smallest 0.58796) at (12.01, -22.689, -172.04), 14 points
+    [7] t/R 1.43 (t 0.34, R_typical 0.23826, R_smallest 0.14433) at (7.9922, -37.265, 66.262), 3 points
+    [8] t/R 1.39 (t 0.825, R_typical 0.59485, R_smallest 0.37394) at (-31.535, -36.262, -149.84), 9 points
+    ... 22 further points with t/R >= 1 in the remaining 7 regions
+Thickness gradation limit (max change 0.5 per unit distance) [requested wall thickness]: lowered 756 of 178367 points; largest reduction 0.1952 at (8.4892, -36.323, 66.055) (0.5 -> 0.3048)
+Wall thickness reduction (final vs requested): points below 90%/50%/25%: 432/0/0 of 178367
+  thinned regions: 7 in total (separated by 8.012), worst 7 shown:
+    [1] ratio 0.598 (final 0.21513 / requested 0.36) at (-17.344, -34.98, 77.22), 135 points
+    [2] ratio 0.610 (final 0.3048 / requested 0.5) at (8.4892, -36.323, 66.055), 35 points
+    [3] ratio 0.645 (final 0.17428 / requested 0.27) at (-4.5143, -30.355, 71.017), 56 points
+    [4] ratio 0.646 (final 0.14851 / requested 0.23) at (15.983, -33.12, 77.042), 143 points
+    [5] ratio 0.786 (final 0.66785 / requested 0.85) at (-38.59, -26.192, -95.756), 27 points
+    [6] ratio 0.809 (final 0.4045 / requested 0.5) at (-9.065, -34.602, 65.923), 16 points
+    [7] ratio 0.826 (final 0.70187 / requested 0.85) at (18.978, -46.621, -93.931), 20 points
+  wrote wall_diagnostics.vtp in /work
+  wrote wall_outer_offset.vtp in /work
+Wall outer surface as the offset of the inner, contoured from the distance field:
+  178367 interface points and 356293 triangles, thickness 0.1 to 1.2; 14 cap rims continued by collars of 962 triangles
+  the field was sampled on 716354 points (the inner, its offsets at 0.5 and 1.5 of the thickness and every 1th point's at 3) in 5887413 tetrahedra, 1521231 of them cut by the zero level; 2.6 s for the field, 2.9 s for the tetrahedra
+  the contour had 1159126 points and 2318292 triangles (4.0 s); 873890 edges collapsed onto the zero level to the interface's own size, leaving 285236 points and 570512 triangles (33.3 s); 3348593 field evaluations in all
+  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another; 44.8 s
+The trimmed offset surface has 15 rims but the wall has 14 cap openings. A cut has taken more than the dome off its end, which happens when a vessel curves back within a rim radius of another vessel's cap.
+  rim 0: 179 points, centre (26.564, -42.01, 71.192), radius 1.726; flattest against the cap at (26.521, -42.075, 71.189), off its plane by 8.1266e-10 against that cap's rim radius 1.3523 -- on that plane
+  rim 1: 179 points, centre (-5.0041, -15.673, -232.27), radius 21.028; flattest against the cap at (-4.7392, -15.769, -232.29), off its plane by 2.8159e-08 against that cap's rim radius 19.858 -- on that plane
+  rim 2: 95 points, centre (-60.236, 0.6396, -157.3), radius 4.9529; flattest against the cap at (-60.326, 0.90499, -157.24), off its plane by 1.1639e-08 against that cap's rim radius 4.2906 -- on that plane
+  rim 3: 140 points, centre (-13.384, 0.17071, 73.533), radius 1.3793; flattest against the cap at (-13.411, 0.1561, 73.48), off its plane by 8.943e-10 against that cap's rim radius 1.0499 -- on that plane
+  rim 4: 71 points, centre (-35.496, -36.739, -54.829), radius 1.9697; flattest against the cap at (-35.523, -36.568, -54.893), off its plane by 2.5979e-13 against that cap's rim radius 1.4056 -- on that plane
+  rim 5: 167 points, centre (-33.411, -49.442, 72.07), radius 1.9714; flattest against the cap at (-33.548, -49.496, 72.021), off its plane by 8.0935e-13 against that cap's rim radius 1.5069 -- on that plane
+  rim 6: 102 points, centre (0.3884, -54.438, 104.62), radius 1.3406; flattest against the cap at (0.40292, -54.43, 104.63), off its plane by 1.4342e-09 against that cap's rim radius 1.2287 -- on that plane
+  rim 7: 70 points, centre (-7.3406, -29.894, 73.201), radius 0.40771; flattest against the cap at (-7.3439, -29.897, 73.208), off its plane by 5.5688e-10 against that cap's rim radius 0.30538 -- on that plane
+  rim 8: 90 points, centre (12.377, -0.60114, 64.279), radius 1.349; flattest against the cap at (12.398, -0.64914, 64.315), off its plane by 4.7367e-09 against that cap's rim radius 1.0453 -- on that plane
+  rim 9: 79 points, centre (22.986, -41.384, -58.323), radius 1.9013; flattest against the cap at (22.996, -41.361, -58.33), off its plane by 1.4982e-13 against that cap's rim radius 1.5338 -- on that plane
+  rim 10: 114 points, centre (39.384, 24.406, -258.78), radius 12.743; flattest against the cap at (39.306, 24.142, -258.77), off its plane by 7.0997e-09 against that cap's rim radius 11.527 -- on that plane
+  rim 11: 102 points, centre (-2.7015, -58.696, 106.68), radius 1.3104; flattest against the cap at (-2.6582, -58.683, 106.73), off its plane by 1.5195e-09 against that cap's rim radius 1.2431 -- on that plane
+  rim 12: 35 points, centre (-1.404, -54.817, 104.99), radius 0.63098; flattest against the cap at (0.40292, -54.43, 104.63), off its plane by 0.75736 against that cap's rim radius 1.2287
+  rim 13: 70 points, centre (6.8055, -35.198, 74.926), radius 0.41551; flattest against the cap at (6.8066, -35.178, 74.937), off its plane by 1.2833e-13 against that cap's rim radius 0.30669 -- on that plane
+  rim 14: 100 points, centre (58.952, -36.632, -160.59), radius 4.863; flattest against the cap at (58.941, -36.73, -160.25), off its plane by 5.4205e-09 against that cap's rim radius 4.3265 -- on that plane
+  wrote wall_offset_trimmed.vtp in /work
+  the trimmed surface has been written to wall_offset_trimmed.vtp
+Problem trimming the outer wall offset surface at the cap planes
+Problem with vessel wall meshing
