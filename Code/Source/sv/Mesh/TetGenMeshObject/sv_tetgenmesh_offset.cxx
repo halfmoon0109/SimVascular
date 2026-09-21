@@ -865,7 +865,7 @@ long long OffsetField::NumEvaluations() const { return data_->numEvaluations; }
 
 int BuildOffsetSurface(const Interface &input, const Options &options,
     DelaunayFunction delaunay, void *context, Surface &surface, Report &report,
-    std::string &error)
+    std::string &error, ProgressFunction progress)
 {
   report = Report();
   surface = Surface();
@@ -875,25 +875,33 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     return 1;
   }
   if (!(options.innerLayer > 0.0 && options.innerLayer < 1.0) || !(options.outerLayer > 1.0) ||
-      !(options.farLayer > options.outerLayer) || options.farStride < 1)
+      !(options.farLayer > options.outerLayer) || !(options.farSpacing > 0.0))
   {
-    error = "the cloud layers must be 0 < inner < 1 < outer < far, with a positive far stride";
+    error = "the cloud layers must be 0 < inner < 1 < outer < far, with a positive far spacing";
     return 1;
   }
+  auto say = [&](const char *stage)
+  {
+    if (progress != nullptr)
+    {
+      progress(stage, context);
+    }
+  };
   auto t0 = std::chrono::steady_clock::now();
+  say("the distance field: the interface, its collars and their search grid");
   OffsetField field;
   if (field.Build(input, report, error) != 0)
   {
     return 1;
   }
 
-  // The cloud: every field-surface point, its offsets at the inner and outer
-  // layers along its normal, and every farStride-th point's far offset; and
-  // past each collar's end, the same layers along the outward direction, so
-  // that the dome the field closes around the collar's end is bounded and
-  // contoured (it comes off with the trim). The value at a surface point is
-  // -t, and at the inner layer at most -(1 - inner)t: both inside, so only
-  // the outer layers are evaluated.
+  // The cloud: every field-surface point, its inner, outer and far offsets
+  // along its normal, and past each collar's end the outer and far offsets
+  // along the outward direction, so that the dome the field closes around
+  // the collar's end is bounded and contoured (it comes off with the trim).
+  // The value at a surface point is -t, and at the inner layer at most
+  // -(1 - inner)t: both inside, so only the outer layers are evaluated.
+  say("the point cloud and the field on its outer layer");
   const std::vector<double> &fp = field.Points();
   const std::vector<double> &fnrm = field.Normals();
   const std::vector<double> &ft = field.Thickness();
@@ -919,10 +927,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     edgeAt[(size_t)i] = (edgeCount[(size_t)i] > 0) ? edgeAt[(size_t)i]/edgeCount[(size_t)i] : 0.0;
   }
   // The far distance at a point: the far layer of the thickness, and no less
-  // than farSpacing edges, so that the far points of neighbouring rays are
-  // nearer each other than the surface and roof the band; the Delaunay hull
-  // is then made of far points, all outside, and no tetrahedron joins an
-  // inside point to the far side of the model.
+  // than farSpacing edges (see Options).
   auto farDistance = [&](ll i)
   {
     return std::max(options.farLayer*ft[(size_t)i], options.farSpacing*edgeAt[(size_t)i]);
@@ -948,10 +953,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     }
     addPoint(a, -(1.0 - options.innerLayer)*t);
     addPoint(b, field.Evaluate(b));
-    if (i % options.farStride == 0)
-    {
-      addPoint(c, field.Evaluate(c));
-    }
+    addPoint(c, field.Evaluate(c));
   }
   {
     const std::vector<std::vector<ll> > &rims = field.Rims();
@@ -966,7 +968,6 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       {
         ll v = base + (ll)m;
         const double *p = &fp[(size_t)3*v];
-        double t = ft[(size_t)v];
         // the outward direction: from the rim point to its collar point
         Sub(p, &fp[(size_t)3*loop[m]], outward);
         if (!Normalize(outward))
@@ -974,6 +975,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
           continue;
         }
         double b[3], c[3];
+        double t = ft[(size_t)v];
         double far = farDistance(v);
         for (int k = 0; k < 3; k++)
         {
@@ -981,10 +983,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
           c[k] = p[k] + far*outward[k];
         }
         addPoint(b, field.Evaluate(b));
-        if (m % options.farStride == 0)
-        {
-          addPoint(c, field.Evaluate(c));
-        }
+        addPoint(c, field.Evaluate(c));
       }
       base += (ll)loop.size();
     }
@@ -993,6 +992,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   auto t1 = std::chrono::steady_clock::now();
   report.secondsField = std::chrono::duration<double>(t1 - t0).count();
 
+  say("the Delaunay tetrahedralization of the cloud");
   std::vector<ll> tets;
   if (!delaunay(cloud, tets, context, error))
   {
@@ -1020,6 +1020,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   auto t2 = std::chrono::steady_clock::now();
   report.secondsDelaunay = std::chrono::duration<double>(t2 - t1).count();
 
+  say("marching tetrahedra over the cloud");
   // Marching tetrahedra: one contour point per tetrahedron edge whose ends
   // have values of opposite sign (a value of zero counts as outside), placed
   // by linear interpolation and then put on the exact zero level by secant
@@ -1154,8 +1155,15 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   }
   report.numContourPoints = (ll)(pts.size()/3);
   report.numContourTriangles = (ll)(tris.size()/3);
+  // The cloud and its tetrahedra are not needed past here, and the surface
+  // that follows is large too.
+  std::vector<ll>().swap(tets);
+  std::vector<double>().swap(cloud);
+  std::vector<double>().swap(value);
+  std::unordered_map<unsigned long long, ll>().swap(onEdge);
   auto t3 = std::chrono::steady_clock::now();
   report.secondsContour = std::chrono::duration<double>(t3 - t2).count();
+  say("the decimation of the contour to the interface's size");
 
   // Decimation: the contour has a point wherever the zero level crosses a
   // tetrahedron edge, several per interface point. Edges shorter than a
@@ -1369,11 +1377,13 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     // the other diagonal of their quad when that raises the smaller of their
     // smallest angles and the quad is convex (both new triangles face the way
     // the old ones did). Nothing moves, so nothing can leave the zero level.
+    std::vector<ll> live;
     auto runFlips = [&]() -> ll
     {
       ll numFlipped = 0;
-      for (ll t1 = 0; t1 < nt; t1++)
+      for (size_t li = 0; li < live.size(); li++)
       {
+        ll t1 = live[li];
         if (dead[(size_t)t1]) continue;
         for (int j = 0; j < 3; j++)
         {
@@ -1548,6 +1558,11 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     for (int round = 0; round < 3; round++)
     {
       runCollapses();
+      live.clear();
+      for (ll t = 0; t < nt; t++)
+      {
+        if (!dead[(size_t)t]) live.push_back(t);
+      }
       for (int pass = 0; pass < 8; pass++)
       {
         if (runFlips() == 0) break;

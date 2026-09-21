@@ -89,9 +89,11 @@
 #include <chrono>
 #include <cmath>
 #include <deque>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <map>
+#include <new>
 #include <set>
 #include <string>
 #include <utility>
@@ -4676,6 +4678,14 @@ static bool OffsetDelaunayWithTetGen(const std::vector<double> &points,
   return ok;
 }
 
+// The offset build says which stage it is at; logged as it happens, so that
+// a build that dies leaves the stage it died in.
+static void OffsetProgress(const char *stage, void *)
+{
+  fprintf(stdout,"  offset surface: %s\n", stage);
+  fflush(stdout);
+}
+
 // -------------------------------------
 // TGenUtils_BuildContouredOuterSurface
 // -------------------------------------
@@ -4781,12 +4791,28 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
     return SV_ERROR;
   }
 
+  fprintf(stdout,"Wall outer surface as the offset of the interface, contoured from the distance field:\n");
+  fprintf(stdout,"  %lld interface points and %lld triangles\n", (long long)numPts, (long long)(inner.triangles.size()/3));
+  fflush(stdout);
   svoffset::Options options;
   svoffset::Surface offset;
   svoffset::Report report;
   std::string error;
-  if (svoffset::BuildOffsetSurface(inner, options, OffsetDelaunayWithTetGen, nullptr,
-        offset, report, error) != 0)
+  int built = 1;
+  try
+  {
+    built = svoffset::BuildOffsetSurface(inner, options, OffsetDelaunayWithTetGen, nullptr,
+        offset, report, error, OffsetProgress);
+  }
+  catch (const std::bad_alloc &)
+  {
+    error = "out of memory";
+  }
+  catch (const std::exception &e)
+  {
+    error = e.what();
+  }
+  if (built != 0)
   {
     fprintf(stderr,"Problem building the offset outer surface: %s\n", error.c_str());
     return SV_ERROR;
@@ -4847,12 +4873,10 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
   }
 
   double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-  fprintf(stdout,"Wall outer surface as the offset of the inner, contoured from the distance field:\n");
-  fprintf(stdout,"  %lld interface points and %lld triangles, thickness %.4g to %.4g; %lld cap rims continued by collars of %lld triangles\n",
-      report.numInterfacePoints, report.numInterfaceTriangles, report.smallestThickness, report.largestThickness,
-      report.numRims, report.numCollarTriangles);
-  fprintf(stdout,"  the field was sampled on %lld points (the inner, its offsets at %.2g and %.2g of the thickness and every %dth point's at %.2g) in %lld tetrahedra, %lld of them cut by the zero level; %.1f s for the field, %.1f s for the tetrahedra\n",
-      report.numCloudPoints, options.innerLayer, options.outerLayer, options.farStride, options.farLayer,
+  fprintf(stdout,"  thickness %.4g to %.4g; %lld cap rims continued by collars of %lld triangles\n",
+      report.smallestThickness, report.largestThickness, report.numRims, report.numCollarTriangles);
+  fprintf(stdout,"  the field was sampled on %lld points (the interface and its offsets at %.2g, %.2g and %.2g of the thickness, the last no nearer than %.2g edges) in %lld tetrahedra, %lld of them cut by the zero level; %.1f s for the field, %.1f s for the tetrahedra\n",
+      report.numCloudPoints, options.innerLayer, options.outerLayer, options.farLayer, options.farSpacing,
       report.numTetrahedra, report.numTetrahedraCut, report.secondsField, report.secondsDelaunay);
   fprintf(stdout,"  the contour had %lld points and %lld triangles (%.1f s); %lld edges collapsed onto the zero level to the interface's own size, leaving %lld points and %lld triangles (%.1f s); %lld field evaluations in all\n",
       report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numCollapsed,
