@@ -2869,7 +2869,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // rather than let the mesher say it again with less.
   if (numUnresolved > 0)
   {
-    fprintf(stderr,"The outer wall offset surface has %d faults the volume mesher will refuse (triangles passing through another, edges on more than two triangles or wound against each other); see the offset log above and wall_outer_offset.vtp\n",
+    fprintf(stderr,"The outer wall offset surface has %d faults the volume mesher will refuse (triangles passing through another, holes, edges on more than two triangles or wound against each other); see the offset log above and wall_outer_offset.vtp\n",
         numUnresolved);
     return SV_ERROR;
   }

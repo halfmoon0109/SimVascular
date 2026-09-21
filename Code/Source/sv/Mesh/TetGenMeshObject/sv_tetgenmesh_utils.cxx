@@ -4764,8 +4764,9 @@ static void OffsetProgress(const char *stage, void *)
  * its points and 'TrimCrossing' on its cells, for the thickness diagnostics
  * that read them; it is also written to wall_outer_offset.vtp.
  * @param numUnresolved Set to the number of faults that would make the
- * volume mesher refuse the surface: triangles crossing and edges on more
- * than two triangles or wound against each other.
+ * volume mesher refuse the surface: triangles crossing, edges on one
+ * triangle (a hole; the surface is closed before the trim at the caps) or
+ * on more than two, or wound against each other.
  * @return SV_OK if the surface was built; its faults are counted, not failed.
  */
 
@@ -4864,12 +4865,14 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
   }
 
   // What the volume mesher would refuse: the surface's own accounting, then
-  // its triangles against each other.
+  // its triangles against each other. A boundary edge counts too: the
+  // surface is closed until the trim at the caps opens it, so an open edge
+  // here is a hole, and the trim would only turn it into a spare rim.
   std::vector<unsigned char> crossing;
   double firstCrossingAt[3];
   long long numCrossing = svenvelope::CountCrossingTriangles(offset.points, offset.triangles,
       crossing, firstCrossingAt);
-  numUnresolved = (int)(report.numNonManifoldEdges + report.numMiswoundEdges + numCrossing);
+  numUnresolved = (int)(report.numBoundaryEdges + report.numNonManifoldEdges + report.numMiswoundEdges + numCrossing);
 
   // The surface as polydata, with the tags the thickness diagnostics read.
   vtkIdType numOuterPts = (vtkIdType)(offset.points.size()/3);

@@ -49,7 +49,9 @@
 #include "sv_tetgenmesh_offset.h"
 #include "sv_tetgenmesh_envelope.h"
 
-#define TETLIBRARY
+#ifndef TETLIBRARY
+#define TETLIBRARY   // the build line defines it too, for tetgen.cxx
+#endif
 #include "tetgen.h"
 
 #include <algorithm>
