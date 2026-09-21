@@ -164,3 +164,6 @@ The trimmed offset surface has 15 rims but the wall has 14 cap openings. A cut h
   the trimmed surface has been written to wall_offset_trimmed.vtp
 Problem trimming the outer wall offset surface at the cap planes
 Problem with vessel wall meshing
+[148.856] Closing workbench...
+!148.921! WARNING: Empty filename passed to function
+[148.930] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
