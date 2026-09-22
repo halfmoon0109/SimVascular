@@ -632,3 +632,6 @@ Min / Avg / Max: 1.000 / 1.898 / 187.393
 Aspect Ratio > 3 (distorted): 1324736 (11.83%)
 Aspect Ratio > 10 (poor): 363 (0.00%)
 Assessment: ACCEPTABLE (some distorted elements)
+[943.469] Closing workbench...
+!943.729! WARNING: Empty filename passed to function
+[943.758] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
