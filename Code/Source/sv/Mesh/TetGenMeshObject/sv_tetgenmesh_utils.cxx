@@ -5891,6 +5891,352 @@ int TGenUtils_CountSurfaceFaults(vtkPolyData *surface, long long &numNonManifold
   return SV_OK;
 }
 
+// -------------------------------------
+// ExtractTrianglePatch
+// -------------------------------------
+// The given triangles of a surface as a surface of their own, with the point
+// and cell data they carry; the patch's cells come in the order given, and
+// sourcePoints says which point of the source each patch point was.
+static void ExtractTrianglePatch(vtkPolyData *source, const std::vector<vtkIdType> &cellIds,
+    vtkPolyData *patch, std::vector<vtkIdType> &sourcePoints)
+{
+  auto points = vtkSmartPointer<vtkPoints>::New();
+  auto polys = vtkSmartPointer<vtkCellArray>::New();
+  patch->GetPointData()->CopyAllocate(source->GetPointData());
+  patch->GetCellData()->CopyAllocate(source->GetCellData());
+  sourcePoints.clear();
+  std::map<vtkIdType, vtkIdType> newId;
+  for (size_t m = 0; m < cellIds.size(); m++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    source->GetCellPoints(cellIds[m], npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+    vtkIdType ids[3];
+    for (int j = 0; j < 3; j++)
+    {
+      std::map<vtkIdType, vtkIdType>::iterator it = newId.find(pts[j]);
+      if (it == newId.end())
+      {
+        double p[3];
+        source->GetPoint(pts[j], p);
+        vtkIdType id = points->InsertNextPoint(p);
+        patch->GetPointData()->CopyData(source->GetPointData(), pts[j], id);
+        sourcePoints.push_back(pts[j]);
+        it = newId.insert(std::make_pair(pts[j], id)).first;
+      }
+      ids[j] = it->second;
+    }
+    vtkIdType newCell = polys->InsertNextCell(3, ids);
+    patch->GetCellData()->CopyData(source->GetCellData(), cellIds[m], newCell);
+  }
+  patch->SetPoints(points);
+  patch->SetPolys(polys);
+}
+
+// -------------------------------------
+// TGenUtils_DescribeSurfaceCrossings
+// -------------------------------------
+int TGenUtils_DescribeSurfaceCrossings(vtkPolyData *surface, vtkPolyData *interface,
+    vtkDoubleArray *thickness, const char *label, int maxPairs)
+{
+  if (surface == nullptr || label == nullptr)
+  {
+    fprintf(stderr,"Cannot describe the crossings of a missing surface\n");
+    return SV_ERROR;
+  }
+  std::vector<double> points((size_t)3*surface->GetNumberOfPoints());
+  for (vtkIdType ptId = 0; ptId < surface->GetNumberOfPoints(); ptId++)
+  {
+    surface->GetPoint(ptId, &points[(size_t)3*ptId]);
+  }
+  std::vector<long long> triangles;
+  std::vector<vtkIdType> cellOfTriangle;
+  surface->BuildCells();
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3) continue;
+    for (int j = 0; j < 3; j++) triangles.push_back((long long)pts[j]);
+    cellOfTriangle.push_back(cellId);
+  }
+  std::vector<svenvelope::CrossingPair> pairs;
+  long long numPairs = svenvelope::ListCrossingPairs(points, triangles, (size_t)std::max(maxPairs, 0), pairs);
+  if (numPairs == 0)
+  {
+    fprintf(stdout,"  no two triangles of the %s surface cross\n", label);
+    return SV_OK;
+  }
+  long long numPts = (long long)(points.size()/3), numTris = (long long)(triangles.size()/3);
+  std::vector<std::vector<long long> > incident((size_t)numPts);
+  for (long long t = 0; t < numTris; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      incident[(size_t)triangles[(size_t)3*t + j]].push_back(t);
+    }
+  }
+
+  // The interface nearest a crossing, by its triangles' centroids: a few
+  // crossings against the whole interface is a plain search.
+  std::vector<double> interfaceCentroids;
+  std::vector<vtkIdType> interfaceCells;
+  vtkIntArray *faceIds = nullptr;
+  if (interface != nullptr)
+  {
+    interface->BuildCells();
+    faceIds = vtkIntArray::SafeDownCast(interface->GetCellData()->GetArray("ModelFaceID"));
+    for (vtkIdType cellId = 0; cellId < interface->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      interface->GetCellPoints(cellId, npts, pts);
+      if (npts != 3) continue;
+      double c[3] = {0.0, 0.0, 0.0};
+      for (int j = 0; j < 3; j++)
+      {
+        double p[3];
+        interface->GetPoint(pts[j], p);
+        for (int k = 0; k < 3; k++) c[k] += p[k]/3.0;
+      }
+      interfaceCentroids.insert(interfaceCentroids.end(), c, c + 3);
+      interfaceCells.push_back(cellId);
+    }
+  }
+  auto nearestInterfaceCell = [&](const double p[3], double &distance) -> long long
+  {
+    long long best = -1;
+    distance = std::numeric_limits<double>::max();
+    for (size_t m = 0; m + 2 < interfaceCentroids.size(); m += 3)
+    {
+      double d = vtkMath::Distance2BetweenPoints(&interfaceCentroids[m], p);
+      if (d < distance)
+      {
+        distance = d;
+        best = (long long)(m/3);
+      }
+    }
+    if (best >= 0) distance = std::sqrt(distance);
+    return best;
+  };
+  // the mean thickness and mean edge of an interface triangle
+  auto interfaceCellThickness = [&](long long m, double &meanEdge) -> double
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    interface->GetCellPoints(interfaceCells[(size_t)m], npts, pts);
+    double t = 0.0;
+    meanEdge = 0.0;
+    for (int j = 0; j < 3; j++)
+    {
+      if (thickness != nullptr && pts[j] < thickness->GetNumberOfTuples())
+      {
+        t += thickness->GetValue(pts[j])/3.0;
+      }
+      double a[3], b[3];
+      interface->GetPoint(pts[j], a);
+      interface->GetPoint(pts[(j+1)%3], b);
+      meanEdge += std::sqrt(vtkMath::Distance2BetweenPoints(a, b))/3.0;
+    }
+    return t;
+  };
+
+  fprintf(stdout,"  %lld pairs of triangles of the %s surface cross; the first %zu:\n", numPairs, label, pairs.size());
+  std::vector<int> ring((size_t)numTris, -1), pairOf((size_t)numTris, -1);
+  std::vector<double> midpoints, reach;
+  for (size_t q = 0; q < pairs.size(); q++)
+  {
+    long long A = pairs[q].a, B = pairs[q].b;
+    const long long *ta = &triangles[(size_t)3*A], *tb = &triangles[(size_t)3*B];
+    double cA[3] = {0.0, 0.0, 0.0}, cB[3] = {0.0, 0.0, 0.0}, nA[3], nB[3], eA[3], eB[3];
+    auto describe = [&](const long long *t, double c[3], double n[3], double e[3])
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        for (int k = 0; k < 3; k++) c[k] += points[(size_t)3*t[j] + k]/3.0;
+        e[j] = std::sqrt(vtkMath::Distance2BetweenPoints(&points[(size_t)3*t[j]], &points[(size_t)3*t[(j+1)%3]]));
+      }
+      double u[3], v[3];
+      for (int k = 0; k < 3; k++)
+      {
+        u[k] = points[(size_t)3*t[1] + k] - points[(size_t)3*t[0] + k];
+        v[k] = points[(size_t)3*t[2] + k] - points[(size_t)3*t[0] + k];
+      }
+      vtkMath::Cross(u, v, n);
+      vtkMath::Normalize(n);
+    };
+    describe(ta, cA, nA, eA);
+    describe(tb, cB, nB, eB);
+    double angle = std::acos(std::max(-1.0, std::min(1.0, vtkMath::Dot(nA, nB))))*180.0/vtkMath::Pi();
+    double length = std::sqrt(vtkMath::Distance2BetweenPoints(pairs[q].from, pairs[q].to));
+    double mid[3];
+    for (int k = 0; k < 3; k++) mid[k] = 0.5*(pairs[q].from[k] + pairs[q].to[k]);
+    int sharedCorners = 0, nextTo = 0;
+    double closest = std::numeric_limits<double>::max();
+    for (int i = 0; i < 3; i++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        if (ta[i] == tb[j]) sharedCorners++;
+        closest = std::min(closest, std::sqrt(vtkMath::Distance2BetweenPoints(&points[(size_t)3*ta[i]], &points[(size_t)3*tb[j]])));
+      }
+    }
+    // the second triangle's corners that are neighbours of the first's
+    for (int j = 0; j < 3; j++)
+    {
+      bool neighbour = false;
+      for (int i = 0; i < 3 && !neighbour; i++)
+      {
+        const std::vector<long long> &list = incident[(size_t)ta[i]];
+        for (size_t m = 0; m < list.size() && !neighbour; m++)
+        {
+          const long long *tt = &triangles[(size_t)3*list[m]];
+          for (int k = 0; k < 3; k++)
+          {
+            if (tt[k] == tb[j]) neighbour = true;
+          }
+        }
+      }
+      if (neighbour) nextTo++;
+    }
+    fprintf(stdout,"    %zu: triangles %lld and %lld cross along %.3g at (%.5g, %.5g, %.5g); centroids %.3g apart, normals %.1f degrees apart, %d shared corners, %d corners of the second next to the first, closest corners %.2g apart; edges %.3g %.3g %.3g and %.3g %.3g %.3g\n",
+        q + 1, A, B, length, mid[0], mid[1], mid[2], std::sqrt(vtkMath::Distance2BetweenPoints(cA, cB)), angle,
+        sharedCorners, nextTo, closest, eA[0], eA[1], eA[2], eB[0], eB[1], eB[2]);
+    double wanted = 0.0;
+    if (!interfaceCells.empty())
+    {
+      double distance = 0.0, meanEdge = 0.0;
+      long long m = nearestInterfaceCell(mid, distance);
+      double t = interfaceCellThickness(m, meanEdge);
+      fprintf(stdout,"       the nearest interface triangle is %.3g away, on face %d, thickness %.3g, edges about %.3g\n",
+          distance, (faceIds != nullptr) ? faceIds->GetValue(interfaceCells[(size_t)m]) : -1, t, meanEdge);
+      // The interface wanted around the crossing: five times the thickest
+      // wall within three thicknesses of it (the offset there reaches that
+      // far), and no less than ten edges.
+      double thickest = t;
+      double near = 3.0*std::max(t, meanEdge);
+      for (size_t n = 0; n + 2 < interfaceCentroids.size(); n += 3)
+      {
+        if (vtkMath::Distance2BetweenPoints(&interfaceCentroids[n], mid) <= near*near)
+        {
+          double e = 0.0;
+          thickest = std::max(thickest, interfaceCellThickness((long long)(n/3), e));
+        }
+      }
+      wanted = std::max(5.0*thickest, 10.0*meanEdge);
+    }
+    midpoints.insert(midpoints.end(), mid, mid + 3);
+    reach.push_back(wanted);
+    // the two rings around the pair
+    long long both[2] = {A, B};
+    for (int s = 0; s < 2; s++)
+    {
+      ring[(size_t)both[s]] = 0;
+      pairOf[(size_t)both[s]] = (int)q;
+    }
+    std::vector<long long> front(both, both + 2);
+    for (int r = 1; r <= 2; r++)
+    {
+      std::vector<long long> next;
+      for (size_t f = 0; f < front.size(); f++)
+      {
+        const long long *tt = &triangles[(size_t)3*front[f]];
+        for (int j = 0; j < 3; j++)
+        {
+          const std::vector<long long> &list = incident[(size_t)tt[j]];
+          for (size_t m = 0; m < list.size(); m++)
+          {
+            if (ring[(size_t)list[m]] < 0)
+            {
+              ring[(size_t)list[m]] = r;
+              next.push_back(list[m]);
+            }
+          }
+        }
+      }
+      front.swap(next);
+    }
+  }
+
+  // the surface around the crossings
+  {
+    std::vector<vtkIdType> cells;
+    std::vector<int> cellRing, cellPair;
+    size_t numCrossingTriangles = 0;
+    for (long long t = 0; t < numTris; t++)
+    {
+      if (ring[(size_t)t] < 0) continue;
+      if (ring[(size_t)t] == 0) numCrossingTriangles++;
+      cells.push_back(cellOfTriangle[(size_t)t]);
+      cellRing.push_back(ring[(size_t)t]);
+      cellPair.push_back(pairOf[(size_t)t]);
+    }
+    auto patch = vtkSmartPointer<vtkPolyData>::New();
+    std::vector<vtkIdType> sourcePoints;
+    ExtractTrianglePatch(surface, cells, patch, sourcePoints);
+    auto ringArray = vtkSmartPointer<vtkIntArray>::New();
+    ringArray->SetName("Ring");
+    ringArray->SetNumberOfValues((vtkIdType)cells.size());
+    auto pairArray = vtkSmartPointer<vtkIntArray>::New();
+    pairArray->SetName("CrossingPair");
+    pairArray->SetNumberOfValues((vtkIdType)cells.size());
+    for (size_t m = 0; m < cells.size(); m++)
+    {
+      ringArray->SetValue((vtkIdType)m, cellRing[m]);
+      pairArray->SetValue((vtkIdType)m, cellPair[m]);
+    }
+    patch->GetCellData()->AddArray(ringArray);
+    patch->GetCellData()->AddArray(pairArray);
+    std::string name = std::string(label) + "_crossings.vtp";
+    TGenUtils_WriteVTP(&name[0], patch);
+    fprintf(stdout,"  wrote %s: the %zu crossing triangles of the pairs above and two rings around them, %zu triangles in all\n",
+        name.c_str(), numCrossingTriangles, cells.size());
+  }
+
+  // the interface around the crossings, with the thickness the offset used
+  if (!interfaceCells.empty())
+  {
+    std::vector<vtkIdType> cells;
+    for (size_t n = 0; n + 2 < interfaceCentroids.size(); n += 3)
+    {
+      bool wanted = false;
+      for (size_t q = 0; q < reach.size() && !wanted; q++)
+      {
+        if (vtkMath::Distance2BetweenPoints(&interfaceCentroids[n], &midpoints[3*q]) <= reach[q]*reach[q])
+        {
+          wanted = true;
+        }
+      }
+      if (wanted) cells.push_back(interfaceCells[n/3]);
+    }
+    auto patch = vtkSmartPointer<vtkPolyData>::New();
+    std::vector<vtkIdType> sourcePoints;
+    ExtractTrianglePatch(interface, cells, patch, sourcePoints);
+    if (thickness != nullptr)
+    {
+      auto t = vtkSmartPointer<vtkDoubleArray>::New();
+      t->SetName("WallThickness");
+      t->SetNumberOfValues((vtkIdType)sourcePoints.size());
+      for (size_t m = 0; m < sourcePoints.size(); m++)
+      {
+        t->SetValue((vtkIdType)m, (sourcePoints[m] < thickness->GetNumberOfTuples()) ? thickness->GetValue(sourcePoints[m]) : 0.0);
+      }
+      patch->GetPointData()->RemoveArray("WallThickness");
+      patch->GetPointData()->AddArray(t);
+    }
+    std::string name = std::string(label) + "_crossings_interface.vtp";
+    TGenUtils_WriteVTP(&name[0], patch);
+    fprintf(stdout,"  wrote %s: the %zu interface triangles within reach of the crossings, with their thickness and normals\n",
+        name.c_str(), cells.size());
+  }
+  return SV_OK;
+}
+
 int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
     const std::vector<TGenUtilsCapRim> &caps, vtkPolyData *shell, int &numDegenerate,
     const std::vector<vtkPolyData *> *levels, const std::vector<std::vector<TGenUtilsCapRim> > *levelCaps)

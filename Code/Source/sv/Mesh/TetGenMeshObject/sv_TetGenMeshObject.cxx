@@ -2901,6 +2901,17 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     {
       fprintf(stderr,"The trimmed outer wall offset surface has %lld faults the volume mesher will refuse: %lld edges on more than two triangles, %lld wound against each other, %lld triangles passing through another, the first at (%.5g, %.5g, %.5g); see wall_outer_offset.vtp\n",
           numNonManifold + numMiswound + numCrossing, numNonManifold, numMiswound, numCrossing, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
+      if (numCrossing > 0)
+      {
+        // Where and how the surface passes through itself, in the log and
+        // in two small files (the crossings with two rings around them, and
+        // the interface under them with its thickness), so that the cause
+        // can be looked at without the whole model. Measured 2026-09-22 on
+        // the finer interface: 12 crossings at the roots of two thin
+        // branches, not reproduced on synthetic junctions of the same
+        // proportions, so the cause is still open.
+        TGenUtils_DescribeSurfaceCrossings(offsetOuter, surface, thicknessArray, "wall_outer", 12);
+      }
       return SV_ERROR;
     }
   }
@@ -2962,6 +2973,12 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       {
         fprintf(stderr,"The trimmed wall layer surface %d of %d has %lld faults the volume mesher will refuse (%lld edges on more than two triangles, %lld wound against each other, %lld triangles passing through another, the first at (%.5g, %.5g, %.5g))\n",
             k, numLayers, numNonManifold + numMiswound + numCrossing, numNonManifold, numMiswound, numCrossing, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
+        if (numCrossing > 0)
+        {
+          char layerLabel[64];
+          snprintf(layerLabel, sizeof(layerLabel), "wall_layer_%d_of_%d", k, numLayers);
+          TGenUtils_DescribeSurfaceCrossings(level, surface, thicknessArray, layerLabel, 12);
+        }
         return SV_ERROR;
       }
     }

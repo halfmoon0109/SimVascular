@@ -258,6 +258,29 @@ long long CountCrossingTriangles(const std::vector<double> &points,
     const std::vector<long long> &triangles, std::vector<unsigned char> &crossing,
     double firstAt[3]);
 
+/**
+ * @brief Two triangles that cross, and the segment along which they do.
+ */
+struct CrossingPair
+{
+  long long a = -1;
+  long long b = -1;
+  double from[3] = {0.0, 0.0, 0.0};
+  double to[3] = {0.0, 0.0, 0.0};
+};
+
+/**
+ * @brief Lists the pairs of triangles that cross, by the judgement of
+ * CountCrossingTriangles (a shared corner or an edge touching the other
+ * triangle is not a crossing).
+ * @param maxPairs How many pairs to keep at most; the count returned is of
+ * all of them.
+ * @return The number of crossing pairs.
+ */
+long long ListCrossingPairs(const std::vector<double> &points,
+    const std::vector<long long> &triangles, size_t maxPairs,
+    std::vector<CrossingPair> &pairs);
+
 }
 
 #endif

@@ -5383,16 +5383,17 @@ int CleanEnvelopeSlivers(Envelope &envelope, const std::vector<unsigned char> &f
 // CountCrossingTriangles
 //---------------------
 
-long long CountCrossingTriangles(const std::vector<double> &points,
-    const std::vector<long long> &triangles, std::vector<unsigned char> &crossing,
-    double firstAt[3])
+// Every pair of triangles that cross, in the judgement of
+// CountCrossingTriangles, handed to visit with the ends of the segment along
+// which they cross. The callers differ only in what they keep.
+static void VisitCrossingPairs(const std::vector<double> &points,
+    const std::vector<long long> &triangles,
+    const std::function<void(ll, ll, const CrossingEnd *)> &visit)
 {
   ll numTris = (ll)(triangles.size()/3);
-  crossing.assign((size_t)numTris, 0);
-  firstAt[0] = firstAt[1] = firstAt[2] = 0.0;
   if (numTris == 0)
   {
-    return 0;
+    return;
   }
   TriangleGeometry geometry;
   geometry.Build(points, triangles, numTris);
@@ -5407,8 +5408,6 @@ long long CountCrossingTriangles(const std::vector<double> &points,
   std::vector<ll> stamp((size_t)numTris, 0);
   ll stampValue = 0;
   const double baryTol = 1.0e-9;
-  ll numCrossing = 0;
-  ll first = -1;
   for (ll a = 0; a < numTris; a++)
   {
     if (geometry.degenerate[(size_t)a])
@@ -5458,25 +5457,40 @@ long long CountCrossingTriangles(const std::vector<double> &points,
             {
               continue;
             }
-            if (!crossing[(size_t)a])
-            {
-              crossing[(size_t)a] = 1;
-              numCrossing++;
-              if (first < 0)
-              {
-                first = a;
-              }
-            }
-            if (!crossing[(size_t)b])
-            {
-              crossing[(size_t)b] = 1;
-              numCrossing++;
-            }
+            visit(a, b, pair);
           }
         }
       }
     }
   }
+}
+
+long long CountCrossingTriangles(const std::vector<double> &points,
+    const std::vector<long long> &triangles, std::vector<unsigned char> &crossing,
+    double firstAt[3])
+{
+  ll numTris = (ll)(triangles.size()/3);
+  crossing.assign((size_t)numTris, 0);
+  firstAt[0] = firstAt[1] = firstAt[2] = 0.0;
+  ll numCrossing = 0;
+  ll first = -1;
+  VisitCrossingPairs(points, triangles, [&](ll a, ll b, const CrossingEnd *)
+  {
+    if (!crossing[(size_t)a])
+    {
+      crossing[(size_t)a] = 1;
+      numCrossing++;
+      if (first < 0)
+      {
+        first = a;
+      }
+    }
+    if (!crossing[(size_t)b])
+    {
+      crossing[(size_t)b] = 1;
+      numCrossing++;
+    }
+  });
   if (first >= 0)
   {
     const ll *tp = &triangles[(size_t)3*first];
@@ -5486,6 +5500,32 @@ long long CountCrossingTriangles(const std::vector<double> &points,
     }
   }
   return numCrossing;
+}
+
+long long ListCrossingPairs(const std::vector<double> &points,
+    const std::vector<long long> &triangles, size_t maxPairs,
+    std::vector<CrossingPair> &pairs)
+{
+  pairs.clear();
+  ll numPairs = 0;
+  VisitCrossingPairs(points, triangles, [&](ll a, ll b, const CrossingEnd *ends)
+  {
+    numPairs++;
+    if (pairs.size() >= maxPairs)
+    {
+      return;
+    }
+    CrossingPair pair;
+    pair.a = a;
+    pair.b = b;
+    for (int k = 0; k < 3; k++)
+    {
+      pair.from[k] = ends[0].p[k];
+      pair.to[k] = ends[1].p[k];
+    }
+    pairs.push_back(pair);
+  });
+  return numPairs;
 }
 
 }

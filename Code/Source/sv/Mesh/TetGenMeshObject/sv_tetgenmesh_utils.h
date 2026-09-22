@@ -240,6 +240,26 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_CountSurfaceFaults(vtkPolyData *surface,
     long long &numCrossing,
     double firstCrossingAt[3]);
 
+/**
+ * @brief Describes where a surface passes through itself, for the log and
+ * for a look afterwards. Each crossing pair, up to maxPairs, is logged with
+ * how far apart its two triangles are in distance and in rings, how they
+ * face, how long the crossing is and what the interface is like nearest to
+ * it. Two files are written: <label>_crossings.vtp, the crossing triangles
+ * with two rings around each (cell arrays CrossingPair and Ring), and, with
+ * an interface given, <label>_crossings_interface.vtp, the interface
+ * triangles within reach of the crossings with their point data and the
+ * thickness given - enough to build the offset field around a crossing
+ * without the rest of the model.
+ * @param interface The surface the offset was built from, or null.
+ * @param thickness The wall thickness per interface point, or null.
+ */
+SV_EXPORT_TETGEN_MESH int TGenUtils_DescribeSurfaceCrossings(vtkPolyData *surface,
+    vtkPolyData *interface,
+    vtkDoubleArray *thickness,
+    const char *label,
+    int maxPairs);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildWallShellSurface(vtkPolyData *surface,
     vtkPolyData *outer,
     const std::vector<TGenUtilsCapRim> &caps,
