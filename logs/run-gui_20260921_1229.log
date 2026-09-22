@@ -3956,3 +3956,6 @@ The dihedral angle between them is 3.44802e-05 degree.
 Hint:  You may use -p/# to decrease the dihedral angle  tolerance 0.1 (degree).
 ERROR: TetGen quit with error code 3 while filling the wall. The shell it was given is the inner surface, the outer wall envelope, and the annulus closing the two at each vessel end; TetGen prints the coordinates of the intersection above, so look them up to see which it is in. The envelope was checked against itself for crossings, holes and edges on the wrong number of triangles before this, so an intersection on it is one that check missed - look at the envelope log and at wall_outer_trimmed.vtp and wall_outer_dropped.vtp there. An intersection between the envelope and the inner surface is a piece kept inside another vessel, which its winding number should have dropped - the envelope log's winding counts say what the rays saw. Otherwise the inner surface is self-intersecting and the wall has inherited it - see the interface triangle quality report
 Problem with vessel wall meshing
+[154.444] Closing workbench...
+!154.499! WARNING: Empty filename passed to function
+[154.508] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
