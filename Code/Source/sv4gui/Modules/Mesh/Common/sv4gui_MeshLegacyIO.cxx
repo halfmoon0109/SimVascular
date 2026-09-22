@@ -47,6 +47,10 @@
 #include <vtkErrorCode.h>
 #include <vtkDataSetSurfaceFilter.h>
 #include <vtkThreshold.h>
+#include <vtkIdList.h>
+#include <vtkUnstructuredGrid.h>
+#include <string>
+#include <vector>
 
 //-----------------------
 // ComputeVolumeMeshMaps
@@ -79,7 +83,15 @@ static void ComputeVolumeMeshMaps(vtkSmartPointer<vtkUnstructuredGrid> volumeMes
 // Reset the node and element IDs for surface faces so they 
 // correctly index into their parent volume mesh.
 //
-static void ResetFaceSurfaceIds(vtkPolyData* surface, const std::map<int,int>& node_map, const std::map<int,int>& elem_map)
+// A face cell whose element id is not in this domain's volume mesh (measured
+// 2026-09-22 on the solid wall's free outer face: one cell carried element
+// 888626, a fluid element) is given back its element by its nodes: the one
+// cell of the volume mesh on all three of them. Faces this cannot mend keep
+// the id they came with, and the count is reported, since a face file whose
+// element ids do not index the domain's mesh is what the solver reads.
+//
+static void ResetFaceSurfaceIds(vtkPolyData* surface, const std::map<int,int>& node_map, const std::map<int,int>& elem_map,
+    vtkUnstructuredGrid* volumeMesh, const std::string& faceName)
 {
   // Reset surface node IDs.
   //
@@ -117,15 +129,63 @@ static void ResetFaceSurfaceIds(vtkPolyData* surface, const std::map<int,int>& n
   elem_ids_data->SetNumberOfValues(num_elems);
   elem_ids_data->SetName("GlobalElementID");
 
+  int num_missing = 0, num_recovered = 0, first_missing = 0;
+  auto cell_point_ids = vtkSmartPointer<vtkIdList>::New();
+  auto candidate_cells = vtkSmartPointer<vtkIdList>::New();
+  auto candidate_points = vtkSmartPointer<vtkIdList>::New();
+
   for (int i = 0; i < num_elems; i++) { 
     auto eid = elem_ids->GetValue(i);
-    try {
-      int index = elem_map.at(eid);
-      elem_ids_data->SetValue(i, index+1);
-    } catch (...) {
-      std::cout << "[ResetFaceSurfaceIds] Can't find element " << eid << std::endl;
-      return;
+    auto found = elem_map.find(eid);
+    if (found != elem_map.end()) {
+      elem_ids_data->SetValue(i, found->second+1);
+      continue;
     }
+    if (num_missing == 0) {
+      first_missing = eid;
+    }
+    num_missing++;
+    elem_ids_data->SetValue(i, eid);
+
+    // The volume cell on every node of this face cell.
+    if (volumeMesh == nullptr) {
+      continue;
+    }
+    surface->GetCellPoints(i, cell_point_ids);
+    std::vector<int> volume_points;
+    bool have_points = true;
+    for (vtkIdType k = 0; k < cell_point_ids->GetNumberOfIds(); k++) {
+      auto nid = node_ids->GetValue(cell_point_ids->GetId(k));
+      auto node_found = node_map.find(nid);
+      if (node_found == node_map.end()) {
+        have_points = false;
+        break;
+      }
+      volume_points.push_back(node_found->second);
+    }
+    if (!have_points || volume_points.empty()) {
+      continue;
+    }
+    volumeMesh->GetPointCells(volume_points[0], candidate_cells);
+    for (vtkIdType c = 0; c < candidate_cells->GetNumberOfIds(); c++) {
+      auto cell_id = candidate_cells->GetId(c);
+      volumeMesh->GetCellPoints(cell_id, candidate_points);
+      bool has_all = true;
+      for (size_t k = 1; k < volume_points.size() && has_all; k++) {
+        has_all = candidate_points->IsId(volume_points[k]) >= 0;
+      }
+      if (has_all) {
+        elem_ids_data->SetValue(i, (int)cell_id+1);
+        num_recovered++;
+        break;
+      }
+    }
+  }
+  if (num_missing > 0) {
+    std::cout << "[ResetFaceSurfaceIds] face '" << faceName << "': " << num_missing << " of " << num_elems
+        << " cells carry an element id that is not in this domain's volume mesh (the first is " << first_missing
+        << "); " << num_recovered << " were given their element back by their nodes"
+        << (num_missing > num_recovered ? ", the rest keep the id they came with" : "") << std::endl;
   }
   surface->GetCellData()->RemoveArray("GlobalElementID");
   surface->GetCellData()->AddArray(elem_ids_data);
@@ -240,6 +300,7 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
     std::map<int,int> node_map;
     std::map<int,int> elem_map;
     ComputeVolumeMeshMaps(volumeMesh, node_map, elem_map);
+    volumeMesh->BuildLinks();
 
     QString vtpFilePath = meshDir + "/mesh-complete.exterior.vtp";
     vtpFilePath = QDir::toNativeSeparators(vtpFilePath);
@@ -274,7 +335,7 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
       writtenNames.insert(face->name);
       PlyDtaUtils_GetFacePolyData(surfaceMesh.GetPointer(), &ident, facepd);
 
-      ResetFaceSurfaceIds(facepd, node_map, elem_map);
+      ResetFaceSurfaceIds(facepd, node_map, elem_map, volumeMesh.GetPointer(), face->name);
 
       vtpFilePath = meshDir + "/mesh-surfaces/" + QString::fromStdString(face->name) + ".vtp";
       vtpFilePath = QDir::toNativeSeparators(vtpFilePath);
@@ -311,7 +372,7 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
       for (auto ident : extraFaceIdents) {
         auto facepd = vtkSmartPointer<vtkPolyData>::New();
         PlyDtaUtils_GetFacePolyData(surfaceMesh.GetPointer(), &ident, facepd);
-        ResetFaceSurfaceIds(facepd, node_map, elem_map);
+        ResetFaceSurfaceIds(facepd, node_map, elem_map, volumeMesh.GetPointer(), std::string("face id ") + std::to_string(ident));
 
         QString name = (extraFaceIdents.size() == 1) ? QString("wall_outer") :
             QString("wall_outer_") + QString::number(ident);
@@ -388,7 +449,7 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
       } else {
         auto cleaned_surface = vtkSmartPointer<vtkPolyData>::New();
         cleaned_surface = cleaner->GetOutput(); 
-        ResetFaceSurfaceIds(cleaned_surface, node_map, elem_map);
+        ResetFaceSurfaceIds(cleaned_surface, node_map, elem_map, volumeMesh.GetPointer(), std::string("walls_combined"));
 
         vtpFilePath = meshDir + "/walls_combined.vtp";
         vtpFilePath = QDir::toNativeSeparators(vtpFilePath);

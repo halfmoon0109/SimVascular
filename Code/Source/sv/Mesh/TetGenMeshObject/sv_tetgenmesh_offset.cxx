@@ -1846,9 +1846,21 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
             return (twiceArea > 0.0 && perimeter > 0.0) ? std::max(lx, std::max(ly, lz))*perimeter/(2.0*twiceArea) : 1.0e300;
           };
           if (aspectOf(a, b, c, l1) < 20.0 && aspectOf(b, a, d, l2) < 20.0 && Dot(n1, n2) < 0.9*l1*l2) continue;
-          // and the new diagonal no longer than the old edge or the local size allows
+          // and the new diagonal no longer than the old edge or the local size
+          // allows - or, when one of the pair is a flat cap (its apex on the
+          // shared edge), no longer than the other's own edges: the flip then
+          // only splits that other triangle along a segment from its edge to
+          // its apex, which is never longer than its sides (9 caps of the
+          // user's model, apex valence 4, were kept by the size rule alone).
           double newDiagonal = Distance(&pts[(size_t)3*c], &pts[(size_t)3*d]);
-          if (newDiagonal > std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]), growFactor*std::min(target[(size_t)c], target[(size_t)d]))) continue;
+          double allowedDiagonal = std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]), growFactor*std::min(target[(size_t)c], target[(size_t)d]));
+          if (aspectOf(a, b, c, l1) > 40.0 || aspectOf(b, a, d, l2) > 40.0)
+          {
+            double sides = std::max(std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*d]), Distance(&pts[(size_t)3*b], &pts[(size_t)3*d])),
+                std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*c]), Distance(&pts[(size_t)3*b], &pts[(size_t)3*c])));
+            allowedDiagonal = std::max(allowedDiagonal, sides);
+          }
+          if (newDiagonal > allowedDiagonal) continue;
           // Worth it when the smaller of the smallest angles grows - or when
           // the new diagonal is short enough to be collapsed in the next
           // round: two flat caps on one long edge form a thin quad that
@@ -1919,16 +1931,40 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
           }
         }
         if (nr != 3) continue;
-        bool shortEdges = true;
-        for (int i = 0; i < 3; i++)
-        {
-          if (Distance(&pts[(size_t)3*u], &pts[(size_t)3*ring[i]]) >= options.collapseRatio*std::min(target[(size_t)u], target[(size_t)ring[i]])) shortEdges = false;
-        }
-        if (!shortEdges) continue;
         double nNew[3];
         normalOf(ring[0], ring[1], ring[2], nNew);
         double ln = Norm(nNew);
         if (!(ln > 0.0)) continue;
+        // A point lying (all but) on one of its ring's edges - the apex of a
+        // flat cap, which is what the collapses leave behind when they snap
+        // a point onto the zero level in a flat spot - has three triangles
+        // whose union is the ring triangle to within the cap's height:
+        // taking it out is not sized by the edge lengths (nothing grows),
+        // and the flat triangle's own normal, which is noise, gets no say.
+        // Measured on the user's model: the 199 triangles left above aspect
+        // 100 were all such caps, 190 of them in pairs on one long edge with
+        // apexes of valence 3, which no flip can take apart (the flipped
+        // pair is as flat) and which this removal refused for the noise
+        // normal.
+        bool onRingEdge = false;
+        for (int i = 0; i < 3; i++)
+        {
+          const ll *tt = &tris[(size_t)3*live[i]];
+          double nOld[3];
+          normalOf(tt[0], tt[1], tt[2], nOld);
+          double lo = Norm(nOld);
+          double e1 = Distance(&pts[(size_t)3*tt[0]], &pts[(size_t)3*tt[1]]), e2 = Distance(&pts[(size_t)3*tt[1]], &pts[(size_t)3*tt[2]]);
+          if (lo <= 0.05*e1*e2) onRingEdge = true;   // sine of the angle at the middle corner under 0.05: an aspect ratio past about 40
+        }
+        if (!onRingEdge)
+        {
+          bool shortEdges = true;
+          for (int i = 0; i < 3; i++)
+          {
+            if (Distance(&pts[(size_t)3*u], &pts[(size_t)3*ring[i]]) >= options.collapseRatio*std::min(target[(size_t)u], target[(size_t)ring[i]])) shortEdges = false;
+          }
+          if (!shortEdges) continue;
+        }
         bool agree = true;
         for (int i = 0; i < 3 && agree; i++)
         {
@@ -1936,7 +1972,9 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
           double nOld[3];
           normalOf(tt[0], tt[1], tt[2], nOld);
           double lo = Norm(nOld);
-          if (!(lo > 0.0) || Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) agree = false;
+          double e1 = Distance(&pts[(size_t)3*tt[0]], &pts[(size_t)3*tt[1]]), e2 = Distance(&pts[(size_t)3*tt[1]], &pts[(size_t)3*tt[2]]);
+          if (lo <= 0.05*e1*e2) continue;   // a flat triangle has no direction to agree with
+          if (Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) agree = false;
         }
         if (!agree) continue;
         double centre[3];
@@ -1958,6 +1996,165 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       }
       return numRemoved;
     };
+    // A flat cap whose apex has more than three triangles: the apex is taken
+    // out and its ring - a polygon with the cap's long edge as one side and
+    // the apex lying on that side - is fanned from one end of that edge,
+    // whichever gives the better smallest angle. The union is what it was to
+    // within the cap's height; no new edge is longer than the ring's own
+    // edges or the local size allow, none doubles an edge that exists, and
+    // every new triangle faces the way the old ones did. Measured on the
+    // user's model after the valence-three pass learned to take flat apexes:
+    // the 101 triangles left above aspect 100 were all such caps, in pairs
+    // on one long edge with both apexes of valence 4, which no flip can help
+    // (a flat pair flipped is a flat pair) and no collapse took (the edges
+    // it would make grew past the size rule).
+    auto removeFlatApexes = [&]() -> ll
+    {
+      ll numRemoved = 0;
+      ll slots[ringMax];
+      for (ll t0 = 0; t0 < nt; t0++)
+      {
+        if (dead[(size_t)t0]) continue;
+        // the apex: the corner whose angle is within three degrees of straight
+        int apexCorner = -1;
+        for (int q = 0; q < 3 && apexCorner < 0; q++)
+        {
+          ll c = tris[(size_t)3*t0 + q], a = tris[(size_t)3*t0 + (q+1)%3], b = tris[(size_t)3*t0 + (q+2)%3];
+          double ca[3], cb[3];
+          Sub(&pts[(size_t)3*a], &pts[(size_t)3*c], ca);
+          Sub(&pts[(size_t)3*b], &pts[(size_t)3*c], cb);
+          double la = Norm(ca), lb = Norm(cb);
+          if (!(la > 0.0 && lb > 0.0)) continue;
+          if (Dot(ca, cb) < -0.9986*la*lb) apexCorner = q;
+        }
+        if (apexCorner < 0) continue;
+        ll c = tris[(size_t)3*t0 + apexCorner], a = tris[(size_t)3*t0 + (apexCorner+1)%3], b = tris[(size_t)3*t0 + (apexCorner+2)%3];
+        // the ring around c, walked from (c, a, b) through the triangles (c, r_i, r_i+1)
+        int k = 0;
+        ringU[k++] = a;
+        ringU[k++] = b;
+        slots[0] = t0;
+        int numSlots = 1;
+        ll prevT = t0;
+        bool closed = false, bad = false;
+        while (!bad && !closed)
+        {
+          ll last = ringU[k-1];
+          ll found = -1, w = -1;
+          for (size_t m = 0; m < incident[(size_t)c].size(); m++)
+          {
+            ll t = incident[(size_t)c][m];
+            if (t == prevT || dead[(size_t)t]) continue;
+            for (int q = 0; q < 3; q++)
+            {
+              if (tris[(size_t)3*t + q] == c && tris[(size_t)3*t + (q+1)%3] == last)
+              {
+                found = t;
+                w = tris[(size_t)3*t + (q+2)%3];
+              }
+            }
+          }
+          if (found < 0 || numSlots >= ringMax) { bad = true; break; }
+          slots[numSlots++] = found;
+          prevT = found;
+          if (w == a) { closed = true; break; }
+          if (k >= ringMax) { bad = true; break; }
+          ringU[k++] = w;
+        }
+        if (bad || !closed || k < 4 || numSlots != k) continue;
+        // every live triangle on c must be in the ring
+        int numLive = 0;
+        for (size_t m = 0; m < incident[(size_t)c].size(); m++)
+        {
+          if (!dead[(size_t)incident[(size_t)c][m]]) numLive++;
+        }
+        if (numLive != k) continue;
+        // the way the old triangles face, with their areas
+        double avg[3] = {0.0, 0.0, 0.0};
+        double longestRingEdge = 0.0;
+        for (int i = 0; i < k; i++)
+        {
+          double n[3];
+          normalOf(c, ringU[i], ringU[(i+1)%k], n);
+          for (int d = 0; d < 3; d++) avg[d] += n[d];
+          longestRingEdge = std::max(longestRingEdge, Distance(&pts[(size_t)3*ringU[i]], &pts[(size_t)3*ringU[(i+1)%k]]));
+        }
+        double la = Norm(avg);
+        if (!(la > 0.0)) continue;
+        // the two fans: from ringU[0] over (r_i, r_i+1), i = 1..k-2, and from
+        // ringU[1] over (r_i, r_i+1), i = 2..k-1 with r_k = r_0
+        int bestPivot = -1;
+        double bestScore = 0.0;
+        for (int pivot = 0; pivot < 2 && k - 2 <= ringMax; pivot++)
+        {
+          ll p = ringU[pivot];
+          bool ok = true;
+          double score = 1.0e300;
+          for (int i = 0; i < k - 2 && ok; i++)
+          {
+            ll r1 = ringU[(pivot + 1 + i)%k], r2 = ringU[(pivot + 2 + i)%k];
+            double n[3];
+            normalOf(p, r1, r2, n);
+            double ln = Norm(n);
+            if (!(ln > 0.0) || Dot(n, avg) < options.collapseTurnCosine*ln*la) { ok = false; break; }
+            score = std::min(score, smallestAngleSine(p, r1, r2));
+            // the new edge p-r2 (r1 is p's ring neighbour on the first step): not already an edge, not too long
+            if (i < k - 3)
+            {
+              bool exists = false;
+              for (size_t m = 0; m < incident[(size_t)p].size() && !exists; m++)
+              {
+                ll t = incident[(size_t)p][m];
+                if (dead[(size_t)t]) continue;
+                for (int q = 0; q < 3; q++) if (tris[(size_t)3*t + q] == r2) exists = true;
+              }
+              if (exists) { ok = false; break; }
+              double L = Distance(&pts[(size_t)3*p], &pts[(size_t)3*r2]);
+              if (L > std::max(growFactor*std::min(target[(size_t)p], target[(size_t)r2]), 1.25*longestRingEdge)) { ok = false; break; }
+            }
+            if (options.collapseFieldTolerance > 0.0)
+            {
+              double centre[3];
+              for (int d = 0; d < 3; d++)
+              {
+                centre[d] = (pts[(size_t)3*p + d] + pts[(size_t)3*r1 + d] + pts[(size_t)3*r2 + d])/3.0;
+              }
+              if (std::abs(field.Evaluate(centre)) > options.collapseFieldTolerance*thick[(size_t)c]) { ok = false; break; }
+            }
+          }
+          if (ok && score > bestScore)
+          {
+            bestScore = score;
+            bestPivot = pivot;
+          }
+        }
+        if (bestPivot < 0) continue;
+        // apply: the old triangles leave their corners' lists, the fan takes k-2 of their slots
+        for (int i = 0; i < k; i++)
+        {
+          ll t = slots[i];
+          for (int q = 0; q < 3; q++) removeFromIncident(tris[(size_t)3*t + q], t);
+        }
+        ll p = ringU[bestPivot];
+        for (int i = 0; i < k - 2; i++)
+        {
+          ll t = slots[i];
+          ll r1 = ringU[(bestPivot + 1 + i)%k], r2 = ringU[(bestPivot + 2 + i)%k];
+          tris[(size_t)3*t] = p; tris[(size_t)3*t + 1] = r1; tris[(size_t)3*t + 2] = r2;
+          incident[(size_t)p].push_back(t);
+          incident[(size_t)r1].push_back(t);
+          incident[(size_t)r2].push_back(t);
+        }
+        dead[(size_t)slots[k-2]] = 1;
+        dead[(size_t)slots[k-1]] = 1;
+        incident[(size_t)c].clear();
+        for (int i = 0; i < k; i++) version[(size_t)ringU[i]]++;
+        version[(size_t)c]++;
+        numRemoved++;
+        report.numCollapsed++;
+      }
+      return numRemoved;
+    };
     for (int round = 0; round < 3; round++)
     {
       runCollapses();
@@ -1971,12 +2168,28 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
         if (runFlips() == 0) break;
       }
       removeValenceThree();
+      removeFlatApexes();
       for (ll v = 0; v < nv; v++)
       {
         if (!incident[(size_t)v].empty()) pushEdges(v);
       }
     }
     runCollapses();
+    // The last collapses leave flat caps of their own (a point snapped onto
+    // the zero level in a flat spot lands on the edge across from it), and
+    // nothing came after them to take those apart; now the flips and the
+    // valence-three removal do, as in every round before.
+    live.clear();
+    for (ll t = 0; t < nt; t++)
+    {
+      if (!dead[(size_t)t]) live.push_back(t);
+    }
+    for (int pass = 0; pass < 8; pass++)
+    {
+      if (runFlips() == 0) break;
+    }
+    removeValenceThree();
+    removeFlatApexes();
     std::vector<ll> newTris;
     std::vector<ll> newId((size_t)nv, -1);
     std::vector<double> newPts;
