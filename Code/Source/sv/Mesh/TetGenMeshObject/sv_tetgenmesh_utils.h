@@ -228,6 +228,18 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface
     vtkPolyData *outer,
     double &gridSpacing);
 
+/**
+ * @brief Counts what the volume mesher refuses on a triangle surface: edges
+ * on more than two triangles, edges traversed the same way twice, and
+ * triangles passing through another. Boundary edges are not counted, since
+ * a surface trimmed at the caps has its rims open by design.
+ */
+SV_EXPORT_TETGEN_MESH int TGenUtils_CountSurfaceFaults(vtkPolyData *surface,
+    long long &numNonManifold,
+    long long &numMiswound,
+    long long &numCrossing,
+    double firstCrossingAt[3]);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildWallShellSurface(vtkPolyData *surface,
     vtkPolyData *outer,
     const std::vector<TGenUtilsCapRim> &caps,

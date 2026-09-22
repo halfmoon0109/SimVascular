@@ -2379,8 +2379,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
         std::max(1, meshoptions_.numwallsublayers), std::max(1, meshoptions_.numwallsublayers) - 1);
   }
 
-  // Every thickness pass below except the gradation limit exists to keep a
-  // one-to-one outward extrusion valid, and each one buys that validity by
+  // Every thickness pass below exists to keep a one-to-one outward
+  // extrusion valid, and each one buys that validity by
   // taking thickness away - measured, the clamp, the rounding and the fold
   // limit between them left hundreds of points under half the wall asked for.
   // The shell fill extrudes at the full thickness and cuts away the part of
@@ -2546,7 +2546,16 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // points to level and each levelling makes the next step; measured, that
   // turned 15 infeasible junction regions into 37 thinned ones. Bounding the
   // gradient removes the fuel rather than the fire.
-  if (TGenUtils_LimitThicknessGradation(surface, thicknessArray,
+  //
+  // The offset fill needs none of it: its field is continuous whatever the
+  // thickness does from point to point, and a step between a thin branch and
+  // a thick parent is a crease of the union like any other. Measured on the
+  // finer interface of 2026-09-22, the limit lowered 1580 points and took the
+  // parent's wall next to a thin branch from 0.5 to 0.15 (340 points under
+  // a third of what was asked) - the junction depression back by another
+  // door. So it is the extrusion's alone.
+  if (extrudeWedges &&
+      TGenUtils_LimitThicknessGradation(surface, thicknessArray,
         wallThicknessMaxSlope, "requested wall thickness") != SV_OK)
   {
     fprintf(stderr,"Problem limiting the wall thickness gradation\n");
@@ -2869,14 +2878,31 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
   // The reports above are what the offset surface is judged by, so they run
   // whatever state the surface is in; but a surface with crossings or edges
-  // on the wrong number of triangles is one the volume mesher refuses, and
-  // the offset log has already said where they are, so this stops here
-  // rather than let the mesher say it again with less.
-  if (numUnresolved > 0)
+  // on the wrong number of triangles is one the volume mesher refuses, so
+  // this stops here rather than let the mesher say it again with less. The
+  // count is taken on the trimmed surface, the one the mesher gets: the
+  // offset log counted the untrimmed one, and a fault in the dome over a
+  // collar end (measured 2026-09-22: 16 crossings 3.3 past the aorta's cap
+  // plane, at the tip of that dome, on a finer interface) comes off with
+  // the trim and is no fault of the wall.
   {
-    fprintf(stderr,"The outer wall offset surface has %d faults the volume mesher will refuse (triangles passing through another, holes, edges on more than two triangles or wound against each other); see the offset log above and wall_outer_offset.vtp\n",
-        numUnresolved);
-    return SV_ERROR;
+    long long numNonManifold = 0, numMiswound = 0, numCrossing = 0;
+    double firstCrossingAt[3];
+    if (TGenUtils_CountSurfaceFaults(offsetOuter, numNonManifold, numMiswound, numCrossing, firstCrossingAt) != SV_OK)
+    {
+      return SV_ERROR;
+    }
+    if (numUnresolved > 0)
+    {
+      fprintf(stdout,"  the untrimmed offset surface had %d faults; after the trim at the caps it has %lld (edges on more than two triangles %lld, wound against each other %lld, triangles passing through another %lld)\n",
+          numUnresolved, numNonManifold + numMiswound + numCrossing, numNonManifold, numMiswound, numCrossing);
+    }
+    if (numNonManifold + numMiswound + numCrossing > 0)
+    {
+      fprintf(stderr,"The trimmed outer wall offset surface has %lld faults the volume mesher will refuse: %lld edges on more than two triangles, %lld wound against each other, %lld triangles passing through another, the first at (%.5g, %.5g, %.5g); see wall_outer_offset.vtp\n",
+          numNonManifold + numMiswound + numCrossing, numNonManifold, numMiswound, numCrossing, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
+      return SV_ERROR;
+    }
   }
 
   // The layers: with N layers asked for, N-1 more offset surfaces at k/N of
@@ -2914,16 +2940,30 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       fprintf(stderr,"Problem building the wall layer surface %d of %d\n", k, numLayers);
       return SV_ERROR;
     }
-    if (numLevelUnresolved > 0)
-    {
-      fprintf(stderr,"The wall layer surface %d of %d has %d faults the volume mesher will refuse\n", k, numLayers, numLevelUnresolved);
-      return SV_ERROR;
-    }
     std::vector<TGenUtilsCapRim> capsAtLevel;
     if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, level, scaled, maxScaled, capsAtLevel) != SV_OK)
     {
       fprintf(stderr,"Problem trimming the wall layer surface %d of %d at the cap planes\n", k, numLayers);
       return SV_ERROR;
+    }
+    {
+      long long numNonManifold = 0, numMiswound = 0, numCrossing = 0;
+      double firstCrossingAt[3];
+      if (TGenUtils_CountSurfaceFaults(level, numNonManifold, numMiswound, numCrossing, firstCrossingAt) != SV_OK)
+      {
+        return SV_ERROR;
+      }
+      if (numLevelUnresolved > 0)
+      {
+        fprintf(stdout,"  the untrimmed layer surface %d of %d had %d faults; after the trim it has %lld\n",
+            k, numLayers, numLevelUnresolved, numNonManifold + numMiswound + numCrossing);
+      }
+      if (numNonManifold + numMiswound + numCrossing > 0)
+      {
+        fprintf(stderr,"The trimmed wall layer surface %d of %d has %lld faults the volume mesher will refuse (%lld edges on more than two triangles, %lld wound against each other, %lld triangles passing through another, the first at (%.5g, %.5g, %.5g))\n",
+            k, numLayers, numNonManifold + numMiswound + numCrossing, numNonManifold, numMiswound, numCrossing, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
+        return SV_ERROR;
+      }
     }
     if (capsAtLevel.size() != caps.size())
     {

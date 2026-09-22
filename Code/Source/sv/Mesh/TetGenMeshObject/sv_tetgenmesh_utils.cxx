@@ -5854,6 +5854,43 @@ int TGenUtils_StitchCapAnnulus(vtkPoints *points,
  * @return SV_OK if the shell surface is built.
  */
 
+// -------------------------------------
+// TGenUtils_CountSurfaceFaults
+// -------------------------------------
+int TGenUtils_CountSurfaceFaults(vtkPolyData *surface, long long &numNonManifold,
+    long long &numMiswound, long long &numCrossing, double firstCrossingAt[3])
+{
+  numNonManifold = 0;
+  numMiswound = 0;
+  numCrossing = 0;
+  for (int k = 0; k < 3; k++) firstCrossingAt[k] = 0.0;
+  if (surface == nullptr)
+  {
+    fprintf(stderr,"Cannot count the faults of a missing surface\n");
+    return SV_ERROR;
+  }
+  std::vector<double> points((size_t)3*surface->GetNumberOfPoints());
+  for (vtkIdType ptId = 0; ptId < surface->GetNumberOfPoints(); ptId++)
+  {
+    surface->GetPoint(ptId, &points[(size_t)3*ptId]);
+  }
+  std::vector<long long> triangles;
+  surface->BuildCells();
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3) continue;
+    for (int j = 0; j < 3; j++) triangles.push_back((long long)pts[j]);
+  }
+  long long numBoundary = 0;
+  svoffset::CountEdges(triangles, numBoundary, numNonManifold, numMiswound);
+  std::vector<unsigned char> crossing;
+  numCrossing = svenvelope::CountCrossingTriangles(points, triangles, crossing, firstCrossingAt);
+  return SV_OK;
+}
+
 int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
     const std::vector<TGenUtilsCapRim> &caps, vtkPolyData *shell, int &numDegenerate,
     const std::vector<vtkPolyData *> *levels, const std::vector<std::vector<TGenUtilsCapRim> > *levelCaps)
