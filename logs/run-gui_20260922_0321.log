@@ -1,25 +1,25 @@
 Reading plugin paths SV_PLUGIN_PATH environment variable...
 
 
-[Tue Sep 22 02:25:22 2026 
-2.180] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
-[2.183] OpenCASCADE module loaded.
+[Tue Sep 22 03:21:59 2026 
+2.025] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
+[2.038] OpenCASCADE module loaded.
 sv4guiDataManagerPluginActivator::start()
 sv4guiMeshingPluginActivator::start()
-[2.523] BlueBerry Workbench ready
+[2.397] BlueBerry Workbench ready
 Expand
 Expand
 Expand
 Expand
-!33.098! WARNING: QPainter::end: Painter ended with 2 saved states
-!33.098! WARNING: QPainter::end: Painter ended with 2 saved states
-!33.098! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.157! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.158! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.158! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.215! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.215! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.215! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.974! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.974! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.974! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.988! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.989! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.989! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.047! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.047! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.047! WARNING: QPainter::end: Painter ended with 2 saved states
 Getting sizing function Surface
 Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
   Number of triangles: 4218044
@@ -42,7 +42,7 @@ Remeshing surface with MMG...
 
   -- MESH QUALITY   4218044
      BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
-  -- PHASE 1 COMPLETED.     3.309s
+  -- PHASE 1 COMPLETED.     3.199s
 
   -- PHASE 2 : ISOTROPIC MESHING
          3479 splitted,  1857468 collapsed,    93845 swapped, 5 iter.
@@ -50,7 +50,7 @@ Remeshing surface with MMG...
   -- GRADATION : 1.300000
           108 splitted,        4 collapsed,       52 swapped, 3 iter.
         32866 splitted,   106774 collapsed,    25987 swapped,  4129506 moved, 2 iter. 
-  -- PHASE 2 COMPLETED.     12.526s
+  -- PHASE 2 COMPLETED.     12.979s
 
   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
    END OF MODULE MMGS: IMB-LJLL 
@@ -64,7 +64,7 @@ Remeshing surface with MMG...
      NUMBER OF TRIANGLES    359700
      NUMBER OF EDGES          1658   RIDGES      1658
 
-   MMGSLIB: ELAPSED TIME  15.910s
+   MMGSLIB: ELAPSED TIME  16.248s
 Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
   Number of triangles: 356293
   Min / Avg / Max: 1.000 / 1.209 / 5.750
@@ -126,9 +126,9 @@ Wall outer surface as the offset of the interface, contoured from the distance f
   offset surface: the decimation of the contour to the interface's size
   wrote wall_outer_offset.vtp in /work
   thickness 0.1 to 1.2; 14 cap rims continued by collars of 962 triangles
-  the field was sampled on 716354 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges) in 5887413 tetrahedra, 1521231 of them cut by the zero level; 2.5 s for the field, 3.2 s for the tetrahedra
-  the contour had 1159126 points and 2318292 triangles (4.1 s); 873890 edges collapsed onto the zero level to the interface's own size, leaving 285236 points and 570512 triangles (34.6 s); 3348617 field evaluations in all
-  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another; 46.0 s
+  the field was sampled on 716354 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges) in 5887413 tetrahedra, 1521231 of them cut by the zero level; 2.5 s for the field, 2.9 s for the tetrahedra
+  the contour had 1159126 points and 2318292 triangles (4.0 s); 873890 edges collapsed onto the zero level to the interface's own size, leaving 285236 points and 570512 triangles (33.8 s); 3348617 field evaluations in all
+  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another; 45.0 s
   trimming at the caps by the ownership the offset surface carries
     cap at (-7.3439, -29.897, 73.208): 123 points past its plane came off, 33 moved onto it
     cap at (6.8066, -35.178, 74.937): 121 points past its plane came off, 30 moved onto it
@@ -201,21 +201,21 @@ Offset wall thickness [solid wall, offset]:
 Filling the wall with TetGen tetrahedra: shell surface has 460634 points and 921376 triangles closing 14 vessel ends
   TetGen wall fill started...
 Delaunizing vertices...
-Delaunay seconds:  1.64741
+Delaunay seconds:  1.59439
 Creating surface mesh ...
-Surface mesh seconds:  0.991314
+Surface mesh seconds:  0.933895
 Recovering boundaries...
-Boundary recovery seconds:  3.2298
+Boundary recovery seconds:  2.88107
 Removing exterior tetrahedra ...
-Exterior tets removal seconds:  1.26045
+Exterior tets removal seconds:  1.12878
 Suppressing Steiner points ...
-Steiner suppression seconds:  8.1e-05
+Steiner suppression seconds:  7.5e-05
 Recovering Delaunayness...
-Delaunay recovery seconds:  0.880824
+Delaunay recovery seconds:  0.841418
 Refining mesh...
-Refinement seconds:  2.84706
+Refinement seconds:  2.79075
 Optimizing mesh...
-Optimization seconds:  0.692052
+Optimization seconds:  0.713185
 
 Writing nodes.
 Writing elements.
@@ -223,8 +223,8 @@ Writing faces.
 Writing edges.
 Writing neighbors.
 
-Output seconds:  0.447087
-Total running seconds:  12.006
+Output seconds:  0.432726
+Total running seconds:  11.3194
 
 Statistics:
 
@@ -260,19 +260,19 @@ Converting to TetGen...
 Adding mesh sizing metric...
 TetGen Meshing Started...
 Delaunizing vertices...
-Delaunay seconds:  0.63618
+Delaunay seconds:  0.591471
 Creating surface mesh ...
-Surface mesh seconds:  0.346735
+Surface mesh seconds:  0.208783
 Recovering boundaries...
-Boundary recovery seconds:  1.04161
+Boundary recovery seconds:  0.89903
 Removing exterior tetrahedra ...
-Exterior tets removal seconds:  0.383192
+Exterior tets removal seconds:  0.36658
 Recovering Delaunayness...
-Delaunay recovery seconds:  0.200461
+Delaunay recovery seconds:  0.218444
 Refining mesh...
-Refinement seconds:  36.3054
+Refinement seconds:  35.3571
 Optimizing mesh...
-Optimization seconds:  1.69062
+Optimization seconds:  1.69221
 
 Writing nodes.
 Writing elements.
@@ -281,8 +281,8 @@ Writing edges.
 Writing metrics.
 Writing neighbors.
 
-Output seconds:  0.623054
-Total running seconds:  41.2303
+Output seconds:  0.48636
+Total running seconds:  39.8218
 
 Statistics:
 
@@ -323,31 +323,5 @@ Min / Avg / Max: 1.000 / 1.901 / 5626.454
 Aspect Ratio > 3 (distorted): 1325312 (11.83%)
 Aspect Ratio > 10 (poor): 854 (0.01%)
 Assessment: ACCEPTABLE (some distorted elements)
-!374.656! WARNING: QPainter::end: Painter ended with 2 saved states
-!374.656! WARNING: QPainter::end: Painter ended with 2 saved states
-!374.656! WARNING: QPainter::end: Painter ended with 2 saved states
-!374.776! WARNING: QPainter::end: Painter ended with 2 saved states
-!374.817! WARNING: QPainter::end: Painter ended with 2 saved states
-!374.973! WARNING: QPainter::end: Painter ended with 2 saved states
-!394.854! WARNING: QPainter::end: Painter ended with 2 saved states
-!394.854! WARNING: QPainter::end: Painter ended with 2 saved states
-!394.854! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.127! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.127! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.127! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.259! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.297! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.338! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.818! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.873! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.873! WARNING: QPainter::end: Painter ended with 2 saved states
-!395.873! WARNING: QPainter::end: Painter ended with 2 saved states
-[sv4guiMeshLegacyIO::WriteFiles] Writing domain 1
-[sv4guiMeshLegacyIO::WriteFiles] Writing domain 2
-[sv4guiMeshLegacyIO::WriteFiles] Face id 41 is not a face of the model; written as mesh-surfaces/wall_outer.vtp
-[ResetFaceSurfaceIds] Can't find element 888626
-!414.131! WARNING: QPainter::end: Painter ended with 2 saved states
-!414.171! WARNING: QPainter::end: Painter ended with 2 saved states
-[418.035] Closing workbench...
-!418.101! WARNING: Empty filename passed to function
-[418.111] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
+!356.233! WARNING: QPainter::end: Painter ended with 2 saved states
+!356.273! WARNING: QPainter::end: Painter ended with 2 saved states
