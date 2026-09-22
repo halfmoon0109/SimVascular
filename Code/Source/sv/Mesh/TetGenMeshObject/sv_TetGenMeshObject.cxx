@@ -2373,6 +2373,11 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   fprintf(stdout,"Wall mesh options in effect: WallThickness %g, CurvatureFactor %g, SmoothingIterations %d, NumberOfWallLayers %d\n",
       meshoptions_.wallthickness, meshoptions_.wallthicknesscurvaturefactor,
       meshoptions_.wallthicknesssmoothingiterations, meshoptions_.numwallsublayers);
+  if (meshoptions_.walltetgenshell)
+  {
+    fprintf(stdout,"  the wall is filled with TetGen tetrahedra, so NumberOfWallLayers (%d) does not apply: the fill is one unstructured region through the thickness, not layers of wedges; SmoothingIterations and CurvatureFactor act on the thickness field only\n",
+        meshoptions_.numwallsublayers);
+  }
 
   // Every thickness pass below except the gradation limit exists to keep a
   // one-to-one outward extrusion valid, and each one buys that validity by

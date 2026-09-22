@@ -447,9 +447,16 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
       // Write walls to a single file.
       //
       } else {
+        // The faces appended above already had their node and element ids
+        // reset to this domain's indices, so the combined surface is not
+        // reset again: a second pass would read those indices as global ids
+        // (measured 2026-09-22 on the solid wall domain, whose element ids
+        // do not start at one: all 356293 cells of walls_combined came back
+        // "not in this domain", and eleven were even handed a wrong element
+        // by their likewise doubly mapped nodes). The fluid domain, numbered
+        // from one, never showed it because there the two are the same.
         auto cleaned_surface = vtkSmartPointer<vtkPolyData>::New();
         cleaned_surface = cleaner->GetOutput(); 
-        ResetFaceSurfaceIds(cleaned_surface, node_map, elem_map, volumeMesh.GetPointer(), std::string("walls_combined"));
 
         vtpFilePath = meshDir + "/walls_combined.vtp";
         vtpFilePath = QDir::toNativeSeparators(vtpFilePath);
