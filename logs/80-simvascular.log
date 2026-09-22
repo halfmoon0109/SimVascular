@@ -50,3 +50,50 @@ Appending zipped resources to _simvascular_module_model
 [ 31%] Built target _simvascular_module_model
 [ 31%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model_occt.so
 [ 32%] Built target _simvascular_module_model_occt
+[ 33%] Linking CXX shared library ../../../../lib/lib_simvascular_tetgen_mesh.so
+[ 33%] Built target _simvascular_tetgen_mesh
+Consolidate compiler generated dependencies of target _simvascular_tetgen_adaptor
+[ 33%] Building CXX object Source/sv/Mesh/TetGenAdapt/CMakeFiles/_simvascular_tetgen_adaptor.dir/sv_TetGenAdapt.cxx.o
+[ 33%] Linking CXX shared library ../../../../lib/lib_simvascular_tetgen_adaptor.so
+[ 33%] Built target _simvascular_tetgen_adaptor
+Consolidate compiler generated dependencies of target _simvascular_module_mesh
+[ 33%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_mesh.so
+[ 34%] Built target _simvascular_module_mesh
+[ 34%] Linking CXX shared library ../../../../lib/lib_simvascular_module_rom_simulation.so
+[ 34%] Linking CXX shared library ../../../../lib/lib_simvascular_module_simulation.so
+[ 35%] Built target _simvascular_module_rom_simulation
+[ 36%] Built target _simvascular_module_simulation
+[ 36%] Linking CXX shared library ../../../../lib/lib_simvascular_module_projectmanagement.so
+[ 38%] Built target _simvascular_module_projectmanagement
+[ 38%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_projectdatanodes.so
+[ 38%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_datamanager.so
+[ 38%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_projectmanager.so
+[ 39%] Built target org_sv_projectdatanodes
+[ 42%] Built target org_sv_gui_qt_projectmanager
+[ 46%] Built target org_sv_gui_qt_datamanager
+[ 46%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_pathplanning.so
+[ 46%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_imageprocessing.so
+[ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_meshing.so
+[ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_multiphysics.so
+[ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_simulation.so
+[ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_segmentation.so
+[ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_mitksegmentation.so
+[ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_application.so
+[ 50%] Built target org_sv_gui_qt_meshing
+[ 57%] Built target org_sv_gui_qt_simulation
+[ 62%] Built target org_sv_gui_qt_segmentation
+[ 65%] Built target org_sv_gui_qt_pathplanning
+[ 69%] Built target org_sv_gui_qt_imageprocessing
+[ 73%] Built target org_sv_gui_qt_multiphysics
+[ 78%] Built target org_sv_gui_qt_application
+[ 84%] Built target org_sv_gui_qt_mitksegmentation
+[ 84%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_modeling.so
+[ 89%] Built target org_sv_gui_qt_modeling
+[ 89%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_romsimulation.so
+[ 97%] Built target org_sv_gui_qt_romsimulation
+[ 97%] Linking CXX shared library ../../lib/lib_simvascular_python_api.so
+[ 98%] Built target _simvascular_python_api
+[ 98%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_pythondatanodes.so
+[ 99%] Built target org_sv_pythondatanodes
+[100%] Linking CXX executable ../../bin/simvascular
+[100%] Built target simvascular
