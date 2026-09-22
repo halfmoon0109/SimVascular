@@ -184,3 +184,6 @@ Offset wall thickness [solid wall, offset]:
   the untrimmed offset surface had 28 faults; after the trim at the caps it has 12 (edges on more than two triangles 0, wound against each other 0, triangles passing through another 12)
 The trimmed outer wall offset surface has 12 faults the volume mesher will refuse: 0 edges on more than two triangles, 0 wound against each other, 12 triangles passing through another, the first at (-15.29, -32.928, 76.873); see wall_outer_offset.vtp
 Problem with vessel wall meshing
+[319.841] Closing workbench...
+!319.910! WARNING: Empty filename passed to function
+[319.921] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
