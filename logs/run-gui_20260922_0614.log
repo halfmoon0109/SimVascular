@@ -197,3 +197,212 @@ Offset wall thickness [solid wall, offset]:
   wrote wall_offset_diagnostics.vtp in /work
 The outer wall offset surface has 16 faults the volume mesher will refuse (triangles passing through another, holes, edges on more than two triangles or wound against each other); see the offset log above and wall_outer_offset.vtp
 Problem with vessel wall meshing
+Getting sizing function Surface
+Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 4218044
+  Min / Avg / Max: 1.000 / 1.157 / 46.986
+  Aspect ratio > 10: 1, > 30: 1, > 100: 0
+  aspect ratio 46.986 at (4.27209, -25.5107, 74.2352), edges 0.122389 0.160426 0.282619
+Remeshing surface with MMG...
+  -- MMGS, Release 5.3.8 (Apr. 10, 2017) 
+     Copyright (c) IMB-LJLL, 2004-
+     Jul  6 2026 02:09:01
+
+  -- MMGS: INPUT DATA
+  --  INPUT DATA COMPLETED.     0.000s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   MODULE MMGS: IMB-LJLL : 5.3.8 (Apr. 10, 2017)
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- PHASE 1 : ANALYSIS
+
+  -- MESH QUALITY   4218044
+     BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
+  -- PHASE 1 COMPLETED.     3.552s
+
+  -- PHASE 2 : ISOTROPIC MESHING
+        78112 splitted,  1499785 collapsed,    78452 swapped, 5 iter.
+
+  -- GRADATION : 1.300000
+         1065 splitted,       28 collapsed,       64 swapped, 3 iter.
+        90659 splitted,   356083 collapsed,    26568 swapped,  9421952 moved, 2 iter. 
+  -- PHASE 2 COMPLETED.     26.243s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   END OF MODULE MMGS: IMB-LJLL 
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- MESH QUALITY   896556
+     BEST   1.000000  AVRG.   0.971258  WRST.   0.231795 (879789)
+
+  -- MESH PACKED UP
+     NUMBER OF VERTICES     448272   CORNERS       10
+     NUMBER OF TRIANGLES    896556
+     NUMBER OF EDGES          2430   RIDGES      2430
+
+   MMGSLIB: ELAPSED TIME  29.911s
+Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 888201
+  Min / Avg / Max: 1.000 / 1.213 / 8.421
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+Checking surface mesh
+Regions: 1
+Number of Free Edges on Surface: 695
+Number of Non-Manifold Edges on Surface: 0
+[GenerateBoundaryLayerMesh] 
+[GenerateBoundaryLayerMesh] ========== cvTetGenMeshObject::GenerateBoundaryLayerMesh ==========
+[GenerateBoundaryLayerMesh] markerListName: CellEntityIds
+Surface triangle quality (fluid/wall interface surface), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 888201
+  Min / Avg / Max: 1.000 / 1.213 / 8.421
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+[GenerateBoundaryLayerMesh] negateWarpVectors: 1
+[GenerateBoundaryLayerMesh] useConstantThickness: 0
+[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals.
+Fluid boundary layer options in effect: MaxEdgeSize 0.1953, BLThicknessFactor 0.8, constant thickness 0 (total layer thickness 0.15624), NumSubLayers 3, SubLayerRatio 0.5
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [fluid boundary layer, inward]:
+  concave points: 444242 of 444428; points with t/R >= 1 / 2 / 4: 0/0/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  no point requests a thickness above its concave radius of curvature
+0 tangle triangles found
+Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: 0/0/0 of 444428
+Wall mesh options in effect: WallThickness 0.5, CurvatureFactor 0, SmoothingIterations 0, NumberOfWallLayers 3
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [solid wall, outward]:
+  concave points: 155494 of 444428; points with t/R >= 1 / 2 / 4: 270/2/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  concave regions with t/R >= 1: 23 in total (separated by 8.012), worst 8 shown:
+    [1] t/R 2.46 (t 0.615, R_typical 0.25027, R_smallest 0.17307) at (-37.999, -27.894, -95.685), 28 points
+    [2] t/R 2.24 (t 0.615, R_typical 0.27487, R_smallest 0.19032) at (22.59, -43.028, -90.82), 20 points
+    [3] t/R 1.93 (t 0.185, R_typical 0.095792, R_smallest 0.057058) at (-4.1857, -30.123, 71.498), 11 points
+    [4] t/R 1.88 (t 1, R_typical 0.53312, R_smallest 0.49049) at (-3.2667, -18.733, -177.7), 25 points
+    [5] t/R 1.88 (t 0.825, R_typical 0.43985, R_smallest 0.37062) at (-31.349, -36.111, -149.46), 11 points
+    [6] t/R 1.76 (t 0.385, R_typical 0.21898, R_smallest 0.16571) at (-9.2199, -34.288, 65.942), 6 points
+    [7] t/R 1.75 (t 0.935, R_typical 0.53477, R_smallest 0.40229) at (25.535, -7.364, -168.57), 21 points
+    [8] t/R 1.7 (t 0.485, R_typical 0.28502, R_smallest 0.18638) at (-26.571, -0.56279, -151.9), 16 points
+    ... 132 further points with t/R >= 1 in the remaining 15 regions
+Thickness gradation limit (max change 0.5 per unit distance) [requested wall thickness]: lowered 1580 of 444428 points; largest reduction 0.34735 at (13.091, -34.898, 75.338) (0.5 -> 0.15265)
+Thickness gradation limit (max change 0.5 per unit distance) [final wall extrusion length]: lowered 620 of 444428 points; largest reduction 0.53799 at (27.053, -7.4705, -168.92) (1.2 -> 0.66201)
+Wall thickness reduction (final vs requested): points below 90%/50%/25%: 2263/546/2 of 444428
+  thinned regions: 25 in total (separated by 8.012), worst 8 shown:
+    [1] ratio 0.178 (final 0.064 / requested 0.36) at (16.005, -33.954, 78.371), 360 points
+    [2] ratio 0.229 (final 0.19456 / requested 0.85) at (-38.418, -26.6, -95.544), 191 points
+    [3] ratio 0.286 (final 0.2432 / requested 0.85) at (22.578, -42.789, -90.646), 165 points
+    [4] ratio 0.287 (final 0.192 / requested 0.67) at (17.897, -12.831, -148.78), 184 points
+    [5] ratio 0.287 (final 0.11059 / requested 0.385) at (-9.5307, -35.19, 65.868), 46 points
+    [6] ratio 0.317 (final 0.1536 / requested 0.485) at (-26.653, -0.88105, -151.47), 170 points
+    [7] ratio 0.337 (final 0.064 / requested 0.19) at (-1.9147, -38.653, 80.48), 57 points
+    [8] ratio 0.341 (final 0.4096 / requested 1.2) at (-1.8488, -19.501, -176.48), 84 points
+    ... 1006 further thinned points in the remaining 17 regions
+Achieved thickness (outer point to the whole inner surface, vs requested) [solid wall, outward]:
+  points below 90%/50%/25%: 2707/785/67 of 444428 measured
+  this is the wall actually produced; the extrusion length reported separately is an upper bound on it
+  regions below 90%: 32 in total (separated by 8.012), worst 8 shown:
+    [1] ratio 0.014 (achieved 0.0042653 / requested 0.3, extruded 0.28995) at (5.4205, -21.315, 21.21), 89 points
+    [2] ratio 0.026 (achieved 0.022054 / requested 0.85, extruded 0.37642) at (-37.803, -28.097, -95.455), 203 points
+    [3] ratio 0.143 (achieved 0.088102 / requested 0.615, extruded 0.19456) at (21.388, -43.075, -90.498), 168 points
+    [4] ratio 0.154 (achieved 0.15438 / requested 1, extruded 0.512) at (-0.91318, -21.738, -176.02), 105 points
+    [5] ratio 0.157 (achieved 0.028963 / requested 0.185, extruded 0.08) at (-4.1857, -30.123, 71.498), 104 points
+    [6] ratio 0.161 (achieved 0.080602 / requested 0.5, extruded 0.24931) at (-9.0493, -34.906, 65.891), 60 points
+    [7] ratio 0.177 (achieved 0.063805 / requested 0.36, extruded 0.064) at (16.005, -33.954, 78.371), 362 points
+    [8] ratio 0.199 (achieved 0.20367 / requested 1.025, extruded 0.4352) at (10.202, -19.889, -170.77), 61 points
+    ... 1555 further points in the remaining 24 regions
+  wrote wall_diagnostics.vtp in /work
+4 tangle triangles found
+untangle procedure.. 
+2 tangle triangles found
+0 tangle triangles found
+try last : 0 tangle triangles found
+Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: 12/0/0 of 444428
+  tilted regions: 6 in total (separated by 8.012), worst 6 shown:
+    [1] tilt 24.6558 deg at (-2.08106, -38.8221, 80.6066), 2 points
+    [2] tilt 18.7663 deg at (14.5032, -36.332, 76.2919), 5 points
+    [3] tilt 17.584 deg at (-15.9578, -34.292, 76.1479), 2 points
+    [4] tilt 16.538 deg at (10.2024, -19.8891, -170.77), 1 points
+    [5] tilt 15.4779 deg at (21.3876, -43.0748, -90.4982), 1 points
+    [6] tilt 15.3159 deg at (3.26657, -20.7713, 23.3651), 1 points
+Getting sizing function caps
+Got function caps
+Iteration 1/10
+Iteration 2/10
+Iteration 3/10
+Iteration 4/10
+Iteration 5/10
+Iteration 6/10
+Iteration 7/10
+Iteration 8/10
+Iteration 9/10
+Iteration 10/10
+Final mesh improvement
+Converting to TetGen...
+Adding mesh sizing metric...
+TetGen Meshing Started...
+Delaunizing vertices...
+Delaunay seconds:  1.53126
+Creating surface mesh ...
+Surface mesh seconds:  0.754249
+Recovering boundaries...
+Boundary recovery seconds:  2.63465
+Removing exterior tetrahedra ...
+Exterior tets removal seconds:  1.11413
+Recovering Delaunayness...
+Delaunay recovery seconds:  0.721018
+Refining mesh...
+Refinement seconds:  134.148
+Optimizing mesh...
+Optimization seconds:  7.09849
+
+Writing nodes.
+Writing elements.
+Writing faces.
+Writing edges.
+Writing metrics.
+Writing neighbors.
+
+Output seconds:  2.69422
+Total running seconds:  150.702
+
+Statistics:
+
+  Input points: 447689
+  Input facets: 895390
+  Input holes: 0
+  Input regions: 0
+
+  Mesh points: 3450250
+  Mesh tetrahedra: 20468594
+  Mesh faces: 41384883
+  Mesh faces on facets: 895390
+  Mesh edges on segments: 1343085
+  Steiner points inside domain: 3002561
+
+TetGen Meshing Finished...
+Note: the NewRegionBoundaryLayer option is ignored when generating a wall mesh
+Appending Boundary Layer and Volume Mesh
+Mesh Appended
+Mesh quality (aspect ratio, 1.0 is an equilateral tetrahedron):
+  Number of elements: 36456212
+  Min / Avg / Max: 1.000 / 1.867 / 65035.247
+  Elements with aspect ratio > 3 (distorted): 3343878 (9.17%)
+  Elements with aspect ratio > 10 (poor): 726 (0.00%)
+  Mesh quality assessment: ACCEPTABLE (some distorted elements)
+  aspect ratio 65035.247 at element centroid (5.2592, -21.036, 21.335)
+  aspect ratio 12390.881 at element centroid (5.7662, -21.892, 21.601)
+  aspect ratio 1345.895 at element centroid (-26.449, -0.079576, -152.39)
+  aspect ratio 935.932 at element centroid (0.057194, -24.186, -175.79)
+  aspect ratio 781.656 at element centroid (5.0269, -20.856, 21.429)
+Number of Nodes: 6116818
+Number of Elems: 36456212
+Number of Edges: 4020198
+Number of Faces: 2680132
+
+Mesh Quality (Aspect Ratio):
+Min / Avg / Max: 1.000 / 1.867 / 65035.247
+Aspect Ratio > 3 (distorted): 3343878 (9.17%)
+Aspect Ratio > 10 (poor): 726 (0.00%)
+Assessment: ACCEPTABLE (some distorted elements)
+[1465.261] Closing workbench...
+!1465.850! WARNING: Empty filename passed to function
+[1465.893] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
