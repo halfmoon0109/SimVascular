@@ -173,11 +173,13 @@ struct Report
   double smallestThickness = 0.0;
   double largestThickness = 0.0;
   long long numCloudPoints = 0;
+  long long numZeroCloudPoints = 0;      // cloud points on the zero level itself (within rounding)
   long long numTetrahedra = 0;
   long long numTetrahedraCut = 0;        // by the zero level
   long long numFieldEvaluations = 0;
   long long numContourPoints = 0;        // as marched
   long long numContourTriangles = 0;
+  long long numDegenerateContourTriangles = 0; // left out of the contour: naming a point twice, or emitted twice around points on the level
   long long numCollapsed = 0;            // edges collapsed by the decimation
   long long numPoints = 0;               // of the result
   long long numTriangles = 0;

@@ -1390,6 +1390,29 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       base += (ll)loop.size();
     }
   }
+  // A cloud point can lie on the zero level itself, within rounding: a
+  // branch's far layer landing on its parent's offset, say. Marching
+  // tetrahedra keyed by edge would then put one contour point per edge on
+  // that one spot, and the surface would carry triangles that touch without
+  // sharing a point, which the checks read as crossings and the mesher as
+  // folded facets. Such a value is made exactly zero here, and the marching
+  // below gives the point one contour point of its own.
+  ll numZero = 0;
+  {
+    double tiny = 1.0e-9*std::max(report.largestThickness, 0.0);
+    for (size_t i = 0; i < value.size(); i++)
+    {
+      if (value[i] != 0.0 && std::fabs(value[i]) <= tiny)
+      {
+        value[i] = 0.0;
+      }
+      if (value[i] == 0.0)
+      {
+        numZero++;
+      }
+    }
+    report.numZeroCloudPoints = numZero;
+  }
   report.numCloudPoints = (ll)(cloud.size()/3);
   auto t1 = std::chrono::steady_clock::now();
   report.secondsField = std::chrono::duration<double>(t1 - t0).count();
@@ -1427,7 +1450,12 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   // have values of opposite sign (a value of zero counts as outside), placed
   // by linear interpolation and then put on the exact zero level by secant
   // steps along the edge; a tetrahedron with one corner inside gives one
-  // triangle, with two, a quad as two triangles. The winding comes from the
+  // triangle, with two, a quad as two triangles. A cloud point whose value
+  // is zero is on the level already: every cut edge ending there gets the
+  // one contour point placed on it (not one per edge), a triangle that then
+  // names a point twice has no area and is left out, and a triangle emitted
+  // twice (a face with all three corners on the level and the inside on both
+  // sides of it) is a sheet of no thickness and is left out with its twin. The winding comes from the
   // tetrahedron itself, not from the triangle's geometry (which a sliver
   // cannot be trusted for): with the corners ordered so that the
   // tetrahedron is positively oriented, the face opposite corner i wound
@@ -1441,9 +1469,32 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   std::vector<ll> &tris = surface.triangles;
   std::unordered_map<unsigned long long, ll> onEdge;
   onEdge.reserve((size_t)numCloud*2);
+  std::vector<ll> zeroPoint;
+  if (numZero > 0)
+  {
+    zeroPoint.assign((size_t)numCloud, -1);
+  }
+  auto pointAt = [&](ll v) -> ll
+  {
+    if (zeroPoint[(size_t)v] < 0)
+    {
+      zeroPoint[(size_t)v] = (ll)(pts.size()/3);
+      pts.insert(pts.end(), &cloud[(size_t)3*v], &cloud[(size_t)3*v] + 3);
+    }
+    return zeroPoint[(size_t)v];
+  };
   auto edgePoint = [&](ll a, ll b) -> ll
   {
     if (a > b) std::swap(a, b);
+    // a cut edge has one end inside, so at most one on the level
+    if (value[(size_t)a] == 0.0)
+    {
+      return pointAt(a);
+    }
+    if (value[(size_t)b] == 0.0)
+    {
+      return pointAt(b);
+    }
     unsigned long long key = (unsigned long long)a*4294967311ULL + (unsigned long long)b;
     std::unordered_map<unsigned long long, ll>::iterator it = onEdge.find(key);
     if (it != onEdge.end())
@@ -1487,6 +1538,15 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     onEdge[key] = id;
     return id;
   };
+  auto emit = [&](ll a, ll b, ll d)
+  {
+    if (a == b || b == d || d == a)
+    {
+      report.numDegenerateContourTriangles++;
+      return;
+    }
+    tris.push_back(a); tris.push_back(b); tris.push_back(d);
+  };
   const int oppositeFace[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
   for (size_t q = 0; q + 3 < tets.size(); q += 4)
   {
@@ -1527,11 +1587,11 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       ll a = edgePoint(c[apex], c[f[0]]), b = edgePoint(c[apex], c[f[1]]), d = edgePoint(c[apex], c[f[2]]);
       if (numIn == 1)
       {
-        tris.push_back(a); tris.push_back(b); tris.push_back(d);
+        emit(a, b, d);
       }
       else
       {
-        tris.push_back(a); tris.push_back(d); tris.push_back(b);
+        emit(a, d, b);
       }
     }
     else
@@ -1551,9 +1611,54 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
         std::swap(k, l);
       }
       ll p00 = edgePoint(c[i], c[k]), p01 = edgePoint(c[i], c[l]), p11 = edgePoint(c[j], c[l]), p10 = edgePoint(c[j], c[k]);
-      tris.push_back(p00); tris.push_back(p01); tris.push_back(p11);
-      tris.push_back(p00); tris.push_back(p11); tris.push_back(p10);
+      emit(p00, p01, p11);
+      emit(p00, p11, p10);
     }
+  }
+  if (numZero > 0)
+  {
+    // A triangle emitted twice: only possible around points on the level,
+    // as the cut of a face lies in the face and is shared by two tetrahedra
+    // exactly. Both copies go, and their sheet of no thickness with them.
+    std::unordered_map<unsigned long long, ll> seen;
+    std::vector<unsigned char> twin(tris.size()/3, 0);
+    for (size_t m = 0; m + 2 < tris.size(); m += 3)
+    {
+      ll u[3] = {tris[m], tris[m + 1], tris[m + 2]};
+      std::sort(u, u + 3);
+      unsigned long long key = ((unsigned long long)u[0]*4294967311ULL + (unsigned long long)u[1])*4294967291ULL + (unsigned long long)u[2];
+      std::unordered_map<unsigned long long, ll>::iterator it = seen.find(key);
+      if (it == seen.end())
+      {
+        seen[key] = (ll)(m/3);
+      }
+      else
+      {
+        ll other = it->second;
+        const ll *w = &tris[(size_t)3*other];
+        ll v[3] = {w[0], w[1], w[2]};
+        std::sort(v, v + 3);
+        if (v[0] == u[0] && v[1] == u[1] && v[2] == u[2])
+        {
+          twin[m/3] = 1;
+          twin[(size_t)other] = 1;
+        }
+      }
+    }
+    size_t kept = 0;
+    for (size_t m = 0; m < twin.size(); m++)
+    {
+      if (twin[m])
+      {
+        report.numDegenerateContourTriangles++;
+        continue;
+      }
+      tris[3*kept] = tris[3*m];
+      tris[3*kept + 1] = tris[3*m + 1];
+      tris[3*kept + 2] = tris[3*m + 2];
+      kept++;
+    }
+    tris.resize(3*kept);
   }
   report.numContourPoints = (ll)(pts.size()/3);
   report.numContourTriangles = (ll)(tris.size()/3);
