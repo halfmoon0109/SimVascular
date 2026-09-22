@@ -142,7 +142,8 @@ bash /work/SimVascular/Docker/scripts/run-gui.sh
 effect: ...`, envelope/슬리버 정리 통계, 진단 vtp 절대 경로 등)은 전부 이 표준출력에
 찍히므로, **메싱을 돌린 뒤 GUI를 닫고 호스트에서 `scripts\build.ps1`을 실행하면**
 빌드 로그와 메싱 로그가 함께 저장소 `logs/`에 커밋된다. 따로 `| tee` 하거나 터미널
-출력을 복사할 필요 없다.
+출력을 복사할 필요 없다. 트림 뒤 교차가 남아 메셔가 `/work`에 쓰는 교차 진단
+`wall_*_crossings*.vtp`도 같은 스크립트가 `logs/`로 복사해 함께 커밋한다.
 
 ### 빌드 반영 검증(실행 전 확인용)
 ```bash

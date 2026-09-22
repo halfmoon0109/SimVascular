@@ -5,6 +5,10 @@
 # 호스트에서는 이 저장소의 상위 폴더(D:\sv\logs)로 그대로 보인다.
 # 이 스크립트는 그 최신 상태를 저장소 안 logs/ 로 복사하고,
 # 실제로 바뀐 내용이 있을 때만 commit+push 한다.
+# 메셔가 GUI의 작업 폴더(컨테이너의 /work = 호스트의 D:\sv)에 남기는 교차 진단
+# vtp(wall_*_crossings*.vtp)도 같이 복사한다: 웹 세션이 VTK 없이 읽어 교차를
+# 국소 재현하는 데 쓴다. 지난 실행의 파일이 그대로 남아 있을 수 있으니, 교차가
+# 없는 실행 뒤에 남은 것은 로그의 날짜와 맞지 않는 옛 파일이다.
 
 $ErrorActionPreference = "Stop"
 
@@ -20,6 +24,7 @@ if (-not (Test-Path $SourceLogs)) {
 
 New-Item -ItemType Directory -Force -Path $DestLogs | Out-Null
 Copy-Item -Path (Join-Path $SourceLogs "*.log") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
+Copy-Item -Path (Join-Path $WorkRoot "wall_*_crossings*.vtp") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
 
 Push-Location $RepoRoot
 try {
