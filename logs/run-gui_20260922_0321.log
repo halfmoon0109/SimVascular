@@ -325,3 +325,7 @@ Aspect Ratio > 10 (poor): 854 (0.01%)
 Assessment: ACCEPTABLE (some distorted elements)
 !356.233! WARNING: QPainter::end: Painter ended with 2 saved states
 !356.273! WARNING: QPainter::end: Painter ended with 2 saved states
+[sv4guiMeshLegacyIO::WriteFiles] Writing domain 1
+[sv4guiMeshLegacyIO::WriteFiles] Writing domain 2
+[sv4guiMeshLegacyIO::WriteFiles] Face id 41 is not a face of the model; written as mesh-surfaces/wall_outer.vtp
+[ResetFaceSurfaceIds] Can't find element 888626
