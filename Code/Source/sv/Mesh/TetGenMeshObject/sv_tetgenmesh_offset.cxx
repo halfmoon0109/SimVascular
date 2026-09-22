@@ -1846,9 +1846,21 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
             return (twiceArea > 0.0 && perimeter > 0.0) ? std::max(lx, std::max(ly, lz))*perimeter/(2.0*twiceArea) : 1.0e300;
           };
           if (aspectOf(a, b, c, l1) < 20.0 && aspectOf(b, a, d, l2) < 20.0 && Dot(n1, n2) < 0.9*l1*l2) continue;
-          // and the new diagonal no longer than the old edge or the local size allows
+          // and the new diagonal no longer than the old edge or the local size
+          // allows - or, when one of the pair is a flat cap (its apex on the
+          // shared edge), no longer than the other's own edges: the flip then
+          // only splits that other triangle along a segment from its edge to
+          // its apex, which is never longer than its sides (9 caps of the
+          // user's model, apex valence 4, were kept by the size rule alone).
           double newDiagonal = Distance(&pts[(size_t)3*c], &pts[(size_t)3*d]);
-          if (newDiagonal > std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]), growFactor*std::min(target[(size_t)c], target[(size_t)d]))) continue;
+          double allowedDiagonal = std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]), growFactor*std::min(target[(size_t)c], target[(size_t)d]));
+          if (aspectOf(a, b, c, l1) > 40.0 || aspectOf(b, a, d, l2) > 40.0)
+          {
+            double sides = std::max(std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*d]), Distance(&pts[(size_t)3*b], &pts[(size_t)3*d])),
+                std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*c]), Distance(&pts[(size_t)3*b], &pts[(size_t)3*c])));
+            allowedDiagonal = std::max(allowedDiagonal, sides);
+          }
+          if (newDiagonal > allowedDiagonal) continue;
           // Worth it when the smaller of the smallest angles grows - or when
           // the new diagonal is short enough to be collapsed in the next
           // round: two flat caps on one long edge form a thin quad that
@@ -1919,16 +1931,40 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
           }
         }
         if (nr != 3) continue;
-        bool shortEdges = true;
-        for (int i = 0; i < 3; i++)
-        {
-          if (Distance(&pts[(size_t)3*u], &pts[(size_t)3*ring[i]]) >= options.collapseRatio*std::min(target[(size_t)u], target[(size_t)ring[i]])) shortEdges = false;
-        }
-        if (!shortEdges) continue;
         double nNew[3];
         normalOf(ring[0], ring[1], ring[2], nNew);
         double ln = Norm(nNew);
         if (!(ln > 0.0)) continue;
+        // A point lying (all but) on one of its ring's edges - the apex of a
+        // flat cap, which is what the collapses leave behind when they snap
+        // a point onto the zero level in a flat spot - has three triangles
+        // whose union is the ring triangle to within the cap's height:
+        // taking it out is not sized by the edge lengths (nothing grows),
+        // and the flat triangle's own normal, which is noise, gets no say.
+        // Measured on the user's model: the 199 triangles left above aspect
+        // 100 were all such caps, 190 of them in pairs on one long edge with
+        // apexes of valence 3, which no flip can take apart (the flipped
+        // pair is as flat) and which this removal refused for the noise
+        // normal.
+        bool onRingEdge = false;
+        for (int i = 0; i < 3; i++)
+        {
+          const ll *tt = &tris[(size_t)3*live[i]];
+          double nOld[3];
+          normalOf(tt[0], tt[1], tt[2], nOld);
+          double lo = Norm(nOld);
+          double e1 = Distance(&pts[(size_t)3*tt[0]], &pts[(size_t)3*tt[1]]), e2 = Distance(&pts[(size_t)3*tt[1]], &pts[(size_t)3*tt[2]]);
+          if (lo <= 0.05*e1*e2) onRingEdge = true;   // sine of the angle at the middle corner under 0.05: an aspect ratio past about 40
+        }
+        if (!onRingEdge)
+        {
+          bool shortEdges = true;
+          for (int i = 0; i < 3; i++)
+          {
+            if (Distance(&pts[(size_t)3*u], &pts[(size_t)3*ring[i]]) >= options.collapseRatio*std::min(target[(size_t)u], target[(size_t)ring[i]])) shortEdges = false;
+          }
+          if (!shortEdges) continue;
+        }
         bool agree = true;
         for (int i = 0; i < 3 && agree; i++)
         {
@@ -1936,7 +1972,9 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
           double nOld[3];
           normalOf(tt[0], tt[1], tt[2], nOld);
           double lo = Norm(nOld);
-          if (!(lo > 0.0) || Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) agree = false;
+          double e1 = Distance(&pts[(size_t)3*tt[0]], &pts[(size_t)3*tt[1]]), e2 = Distance(&pts[(size_t)3*tt[1]], &pts[(size_t)3*tt[2]]);
+          if (lo <= 0.05*e1*e2) continue;   // a flat triangle has no direction to agree with
+          if (Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) agree = false;
         }
         if (!agree) continue;
         double centre[3];
@@ -1977,6 +2015,20 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       }
     }
     runCollapses();
+    // The last collapses leave flat caps of their own (a point snapped onto
+    // the zero level in a flat spot lands on the edge across from it), and
+    // nothing came after them to take those apart; now the flips and the
+    // valence-three removal do, as in every round before.
+    live.clear();
+    for (ll t = 0; t < nt; t++)
+    {
+      if (!dead[(size_t)t]) live.push_back(t);
+    }
+    for (int pass = 0; pass < 8; pass++)
+    {
+      if (runFlips() == 0) break;
+    }
+    removeValenceThree();
     std::vector<ll> newTris;
     std::vector<ll> newId((size_t)nv, -1);
     std::vector<double> newPts;
