@@ -694,7 +694,7 @@ OffsetField::~OffsetField()
   delete data_;
 }
 
-int OffsetField::Build(const Interface &input, Report &report, std::string &error)
+int OffsetField::Build(const Interface &input, Report &report, std::string &error, double chordTolerance)
 {
   Data &d = *data_;
   d = Data();
@@ -1054,7 +1054,7 @@ int OffsetField::Build(const Interface &input, Report &report, std::string &erro
         radius = std::min(radius, L/turn);
       }
     }
-    double chord = std::sqrt(8.0*(radius + thickness)*0.05*thickness);
+    double chord = std::sqrt(8.0*(radius + thickness)*chordTolerance*thickness);
     d.localSize[(size_t)t] = std::max(std::min(meanEdge, chord), 1.0e-6*d.meanEdge);
     d.localThickness[(size_t)t] = thickness;
   }
@@ -1292,7 +1292,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   auto t0 = std::chrono::steady_clock::now();
   say("the distance field: the interface, its collars and their search grid");
   OffsetField field;
-  if (field.Build(input, report, error) != 0)
+  if (field.Build(input, report, error, options.chordTolerance) != 0)
   {
     return 1;
   }

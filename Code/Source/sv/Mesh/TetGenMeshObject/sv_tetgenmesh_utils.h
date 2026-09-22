@@ -203,7 +203,9 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,
     vtkPolyData *outer,
-    int &numUnresolved);
+    int &numUnresolved,
+    double thicknessFraction = 1.0,
+    const char *label = nullptr);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,
@@ -230,7 +232,9 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_BuildWallShellSurface(vtkPolyData *surface,
     vtkPolyData *outer,
     const std::vector<TGenUtilsCapRim> &caps,
     vtkPolyData *shell,
-    int &numDegenerate);
+    int &numDegenerate,
+    const std::vector<vtkPolyData *> *levels = nullptr,
+    const std::vector<std::vector<TGenUtilsCapRim> > *levelCaps = nullptr);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_FindLumenHolePoint(vtkPolyData *surface,
     double holePoint[3]);

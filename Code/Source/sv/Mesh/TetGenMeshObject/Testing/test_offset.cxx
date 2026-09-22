@@ -549,12 +549,78 @@ static void TestNeighbouringEnds()
   Check(worst > 0.9, "the neighbouring tube's wall past the short tube's cap is intact");
 }
 
+// 5. Layers: offsets at 1/3, 2/3 and 1 of the thickness of a tube, each
+// trimmed at the cap planes, must nest without crossing one another or the
+// interface, each a layer thick from the interface, at one size (the chord
+// tolerance scaled by the reciprocal of the fraction).
+static void TestLayers()
+{
+  printf("test 5: three layer surfaces of a tube of radius 1 with a wall of 0.3\n");
+  Interface iface;
+  AddTube(iface, 0.0, 0.0, 1.0, 0.0, 10.0, 32, 40, 0.3);
+  const int numLayers = 3;
+  std::vector<Surface> levels;
+  std::vector<double> allPts;
+  std::vector<ll> allTris;
+  // the interface itself, for the crossing check
+  allPts = iface.points;
+  allTris = iface.triangles;
+  Surface interfaceAsSurface;
+  interfaceAsSurface.points = iface.points;
+  interfaceAsSurface.triangles = iface.triangles;
+  bool ok = true;
+  for (int k = 1; k <= numLayers && ok; k++)
+  {
+    double fraction = (double)k/numLayers;
+    Interface scaled = iface;
+    for (size_t i = 0; i < scaled.thickness.size(); i++) scaled.thickness[i] *= fraction;
+    Options options;
+    options.chordTolerance = 0.05/fraction;
+    Surface s; Report r;
+    if (!Build(scaled, options, s, r)) { ok = false; break; }
+    std::vector<svoffset::CapPlane> planes = PlanesFromRims(scaled, s);
+    svoffset::TrimReport trim; std::string err;
+    if (svoffset::TrimSurfaceAtCaps(s, planes, 0.1, trim, err) != 0) { printf("  FAIL trim of layer %d: %s\n", k, err.c_str()); numFailed++; ok = false; break; }
+    // the layer is k/N of the wall from the interface, away from the ends
+    double worst = 1e300, best = 0.0;
+    for (size_t i = 0; i < s.points.size()/3; i++)
+    {
+      const double *p = &s.points[3*i];
+      if (p[2] < 0.6 || p[2] > 9.4) continue;
+      double d = DistanceToSurface(interfaceAsSurface, p)/(0.3*fraction);
+      worst = std::min(worst, d); best = std::max(best, d);
+    }
+    // its size: the mean edge against the interface's
+    double meanEdge = 0.0; ll numEdges = 0;
+    for (size_t i = 0; i + 2 < s.triangles.size(); i += 3) for (int j = 0; j < 3; j++) { meanEdge += Dist(&s.points[3*(size_t)s.triangles[i+j]], &s.points[3*(size_t)s.triangles[i+(j+1)%3]]); numEdges++; }
+    meanEdge /= (double)numEdges;
+    int loops = 0;
+    std::vector<int> loopPlane = LoopPlanes(s, planes, 1e-6, loops);
+    printf("  layer %d (%.2f of the wall): %lld points, %lld triangles, mean edge %.3f, %d rims; distance from the interface %.3f..%.3f of its own offset\n",
+        k, fraction, (ll)(s.points.size()/3), (ll)(s.triangles.size()/3), meanEdge, loops, worst, best);
+    Check(loops == 2, "the layer is trimmed to two rims");
+    Check(worst > 0.9 && best < 1.1, "the layer stands its own fraction of the wall off the interface");
+    Check(meanEdge > 0.12 && meanEdge < 0.3, "the layer is decimated to about the interface's size, not its own thinner offset");
+    ll base = (ll)(allPts.size()/3);
+    allPts.insert(allPts.end(), s.points.begin(), s.points.end());
+    for (size_t i = 0; i < s.triangles.size(); i++) allTris.push_back(s.triangles[i] + base);
+    levels.push_back(s);
+  }
+  if (!ok) return;
+  std::vector<unsigned char> crossing;
+  double at[3];
+  ll numCrossing = svenvelope::CountCrossingTriangles(allPts, allTris, crossing, at);
+  printf("  all layers with the interface: %lld crossing triangles\n", numCrossing);
+  Check(numCrossing == 0, "no layer surface crosses another, the outer surface or the interface");
+}
+
 int main()
 {
   TestTube();
   TestThinTube();
   TestSeptum();
   TestNeighbouringEnds();
+  TestLayers();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }

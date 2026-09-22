@@ -131,6 +131,13 @@ struct Options
   double collapseRatio = 0.8;   // edges shorter than this times the local interface size are collapsed; zero or less leaves the contour as marched
   double collapseTurnCosine = 0.7;   // a collapse may not turn a triangle's normal by more than this cosine (slivers, whose normal means little, excepted)
   double collapseFieldTolerance = 0.1;   // no triangle a collapse makes may have its centre farther off the zero level than this fraction of the local thickness
+  // The target edge of the offset surface is the interface's own edge, or
+  // shorter where a chord of that length would stand off a surface of the
+  // interface's curvature plus the wall by more than this fraction of the
+  // wall thickness. A layer surface inside the wall (a fraction of the
+  // thickness) is decimated against the whole wall, so its caller raises this
+  // by the reciprocal of the fraction.
+  double chordTolerance = 0.05;
 };
 
 /**
@@ -239,7 +246,7 @@ public:
    * cap rim, and the search structure.
    * @return 0 on success, 1 with error set otherwise.
    */
-  int Build(const Interface &input, Report &report, std::string &error);
+  int Build(const Interface &input, Report &report, std::string &error, double chordTolerance = 0.05);
 
   /// The value at x; positive outside the wall, negative inside it and in the lumen.
   double Evaluate(const double x[3]) const;

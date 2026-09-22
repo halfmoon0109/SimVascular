@@ -2375,8 +2375,8 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
       meshoptions_.wallthicknesssmoothingiterations, meshoptions_.numwallsublayers);
   if (meshoptions_.walltetgenshell)
   {
-    fprintf(stdout,"  the wall is filled with TetGen tetrahedra, so NumberOfWallLayers (%d) does not apply: the fill is one unstructured region through the thickness, not layers of wedges; SmoothingIterations and CurvatureFactor act on the thickness field only\n",
-        meshoptions_.numwallsublayers);
+    fprintf(stdout,"  the wall is filled with TetGen tetrahedra in %d layer(s) through the thickness: %d offset surface(s) at fractions of the thickness go into the shell as facets the mesher keeps, so each layer is one tetrahedron thick; SmoothingIterations and CurvatureFactor act on the thickness field only\n",
+        std::max(1, meshoptions_.numwallsublayers), std::max(1, meshoptions_.numwallsublayers) - 1);
   }
 
   // Every thickness pass below except the gradation limit exists to keep a
@@ -2879,9 +2879,72 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     return SV_ERROR;
   }
 
+  // The layers: with N layers asked for, N-1 more offset surfaces at k/N of
+  // the thickness, each trimmed at the same cap planes. They go into the
+  // shell as facets the mesher has to keep, and the mesher, forbidden to
+  // split facets, cannot put a tetrahedron across one; the wall then comes
+  // out N tetrahedra thick, each layer bounded by two consecutive surfaces,
+  // with the junction geometry of every layer right because each is a
+  // level set of the same field. A single unstructured fill was measured
+  // one tetrahedron thick almost everywhere (78k interior points over 461k
+  // shell points), which a solid solver cannot bend.
+  const int numLayers = std::max(1, meshoptions_.numwallsublayers);
+  std::vector<vtkSmartPointer<vtkPolyData> > levelSurfaces;
+  std::vector<vtkPolyData *> levelPointers;
+  std::vector<std::vector<TGenUtilsCapRim> > levelCaps;
+  for (int k = 1; k < numLayers; k++)
+  {
+    const double fraction = (double)k/(double)numLayers;
+    auto scaled = vtkSmartPointer<vtkDoubleArray>::New();
+    scaled->SetName(thicknessArray->GetName());
+    scaled->SetNumberOfComponents(1);
+    scaled->SetNumberOfTuples(thicknessArray->GetNumberOfTuples());
+    double maxScaled = 0.0;
+    for (vtkIdType ptId = 0; ptId < thicknessArray->GetNumberOfTuples(); ptId++)
+    {
+      scaled->SetValue(ptId, fraction*thicknessArray->GetValue(ptId));
+      maxScaled = std::max(maxScaled, scaled->GetValue(ptId));
+    }
+    char label[32];
+    snprintf(label, sizeof(label), "layer_%d_of_%d", k, numLayers);
+    auto level = vtkSmartPointer<vtkPolyData>::New();
+    int numLevelUnresolved = 0;
+    if (TGenUtils_BuildContouredOuterSurface(surface, scaled, level, numLevelUnresolved, fraction, label) != SV_OK)
+    {
+      fprintf(stderr,"Problem building the wall layer surface %d of %d\n", k, numLayers);
+      return SV_ERROR;
+    }
+    if (numLevelUnresolved > 0)
+    {
+      fprintf(stderr,"The wall layer surface %d of %d has %d faults the volume mesher will refuse\n", k, numLayers, numLevelUnresolved);
+      return SV_ERROR;
+    }
+    std::vector<TGenUtilsCapRim> capsAtLevel;
+    if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, level, scaled, maxScaled, capsAtLevel) != SV_OK)
+    {
+      fprintf(stderr,"Problem trimming the wall layer surface %d of %d at the cap planes\n", k, numLayers);
+      return SV_ERROR;
+    }
+    if (capsAtLevel.size() != caps.size())
+    {
+      fprintf(stderr,"The wall layer surface %d of %d closes %zu vessel ends where the wall has %zu\n", k, numLayers, capsAtLevel.size(), caps.size());
+      return SV_ERROR;
+    }
+    char quality[64];
+    snprintf(quality, sizeof(quality), "wall layer %d of %d offset", k, numLayers);
+    TGenUtils_ReportSurfaceTriangleQuality(level, quality);
+    surface->GetPointData()->RemoveArray("OffsetThicknessRatio");
+    fprintf(stdout,"  wall layer surface %d of %d at %.3g of the thickness: %lld points, %lld triangles, trimmed at %zu cap planes\n",
+        k, numLayers, fraction, (long long)level->GetNumberOfPoints(), (long long)level->GetNumberOfCells(), capsAtLevel.size());
+    levelSurfaces.push_back(level);
+    levelPointers.push_back(level.GetPointer());
+    levelCaps.push_back(capsAtLevel);
+  }
+
   auto shell = vtkSmartPointer<vtkPolyData>::New();
   int numDegenerate = 0;
-  if (TGenUtils_BuildWallShellSurface(surface, offsetOuter, caps, shell, numDegenerate) != SV_OK)
+  if (TGenUtils_BuildWallShellSurface(surface, offsetOuter, caps, shell, numDegenerate,
+        levelPointers.empty() ? nullptr : &levelPointers, levelCaps.empty() ? nullptr : &levelCaps) != SV_OK)
   {
     fprintf(stderr,"Problem building the wall shell surface\n");
     return SV_ERROR;
@@ -2916,40 +2979,52 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   const int innerSurfaceCellId = 1;
   const int outerSurfaceCellId = 2;
   const int sidewallCellEntityId = 9999;
+  const int layerCellEntityBase = 100;   // 100 + k: the k-th layer surface inside the wall
   const vtkIdType numInner = surface->GetNumberOfPoints();
-  vtkIdType numShellInner = 0, numShellOuter = 0, numShellSide = 0;
+  vtkIdType numShellInner = 0, numShellOuter = 0, numShellSide = 0, numShellLayer = 0;
   std::vector<int> shellRole((size_t)shell->GetNumberOfCells(), sidewallCellEntityId);
+  auto shellRoles = vtkIntArray::SafeDownCast(shell->GetCellData()->GetArray("ShellRole"));
+  if (shellRoles != nullptr && shellRoles->GetNumberOfTuples() != shell->GetNumberOfCells())
+  {
+    shellRoles = nullptr;
+  }
   for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
   {
-    vtkIdType npts;
-    const vtkIdType *pts;
-    shell->GetCellPoints(cellId, npts, pts);
-    int numInnerPts = 0;
-    for (vtkIdType j = 0; j < npts; j++)
+    int role = sidewallCellEntityId;
+    if (shellRoles != nullptr)
     {
-      if (pts[j] < numInner)
-      {
-        numInnerPts++;
-      }
-    }
-    if (npts == 3 && numInnerPts == 3)
-    {
-      shellRole[(size_t)cellId] = innerSurfaceCellId;
-      numShellInner++;
-    }
-    else if (npts == 3 && numInnerPts == 0)
-    {
-      shellRole[(size_t)cellId] = outerSurfaceCellId;
-      numShellOuter++;
+      role = shellRoles->GetValue(cellId);
     }
     else
     {
-      numShellSide++;
+      // Without the shell's own roles: by the points, inner ones first.
+      vtkIdType npts;
+      const vtkIdType *pts;
+      shell->GetCellPoints(cellId, npts, pts);
+      int numInnerPts = 0;
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] < numInner)
+        {
+          numInnerPts++;
+        }
+      }
+      if (npts == 3 && numInnerPts == 3) role = innerSurfaceCellId;
+      else if (npts == 3 && numInnerPts == 0) role = outerSurfaceCellId;
     }
+    shellRole[(size_t)cellId] = role;
+    if (role == innerSurfaceCellId) numShellInner++;
+    else if (role == outerSurfaceCellId) numShellOuter++;
+    else if (role >= layerCellEntityBase) numShellLayer++;
+    else numShellSide++;
     if (cellId < shellInMesh->numberoffacets)
     {
-      shellInMesh->facetmarkerlist[cellId] = shellRole[(size_t)cellId];
+      shellInMesh->facetmarkerlist[cellId] = role;
     }
+  }
+  if (numShellLayer > 0)
+  {
+    fprintf(stdout,"  the shell carries %lld layer-surface triangles as facets inside the wall\n", (long long)numShellLayer);
   }
 
   // A closed inner surface encloses the lumen as well as the wall, so the
@@ -2994,6 +3069,18 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   shellBehavior->quality = 1;
   shellBehavior->minratio = 1.414;
   shellBehavior->mindihedral = 10.0;
+  if (numLayers > 1)
+  {
+    // A layer a fraction of the wall thick, bounded by facets the mesher
+    // may not split whose triangles are the interface's size, holds
+    // tetrahedra flatter than the usual bounds allow, and refinement cannot
+    // mend that from inside the layer. The bounds are loosened so that the
+    // mesher does not spend itself trying.
+    shellBehavior->minratio = 2.0;
+    shellBehavior->mindihedral = 5.0;
+    fprintf(stdout,"  %d layers: the fill's quality bounds are loosened to radius-edge %.3g and dihedral %.3g degrees\n",
+        numLayers, shellBehavior->minratio, shellBehavior->mindihedral);
+  }
   // The conversion below reads the tetrahedra adjacent to each boundary face,
   // which TetGen only writes at this level.
   shellBehavior->neighout = 2;
@@ -3173,7 +3260,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       shellByPoints[key] = cellId;
     }
 
-    int numInnerCells = 0, numOuterCells = 0, numSideCells = 0;
+    int numInnerCells = 0, numOuterCells = 0, numSideCells = 0, numLayerFaces = 0;
     int numInnerOffShell = 0, numOtherOffShell = 0, numMarkedOtherwise = 0;
     std::vector<unsigned char> shellSeen((size_t)shell->GetNumberOfCells(), 0);
 
@@ -3259,6 +3346,13 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         numOtherOffShell++;
       }
 
+      // A face of a layer surface lies inside the wall: it is no boundary
+      // and is not inserted.
+      if (role >= layerCellEntityBase)
+      {
+        numLayerFaces++;
+        continue;
+      }
       int entityId = sidewallCellEntityId;
       int modelFaceId = sidewallCellEntityId;
       if (role == innerSurfaceCellId)
@@ -3338,9 +3432,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     wallmesh_->GetCellData()->AddArray(cellEntityIds);
     wallmesh_->GetCellData()->AddArray(modelFaceIds);
 
-    fprintf(stdout,"  wall boundary tagged from %lld TetGen boundary faces: %d interface, %d outer, %d side wall triangles (shell had %lld, %lld, %lld); the outer wall is ModelFaceID %d\n",
+    fprintf(stdout,"  wall boundary tagged from %lld TetGen boundary faces: %d interface, %d outer, %d side wall triangles (shell had %lld, %lld, %lld), %d faces of layer surfaces inside the wall left out (shell had %lld); the outer wall is ModelFaceID %d\n",
         (long long)wallSurfaceMesh->GetNumberOfCells(), numInnerCells, numOuterCells, numSideCells,
-        (long long)numShellInner, (long long)numShellOuter, (long long)numShellSide, outerWallFaceId);
+        (long long)numShellInner, (long long)numShellOuter, (long long)numShellSide, numLayerFaces, (long long)numShellLayer, outerWallFaceId);
   }
 
   delete shellBehavior;

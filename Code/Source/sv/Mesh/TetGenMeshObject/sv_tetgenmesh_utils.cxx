@@ -4771,9 +4771,15 @@ static void OffsetProgress(const char *stage, void *)
  */
 
 int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
-    vtkPolyData *outer, int &numUnresolved)
+    vtkPolyData *outer, int &numUnresolved, double thicknessFraction, const char *label)
 {
   numUnresolved = 0;
+  if (!(thicknessFraction > 0.0))
+  {
+    fprintf(stderr,"The offset surface's thickness fraction must be positive, not %g\n", thicknessFraction);
+    return SV_ERROR;
+  }
+  const std::string what = (label != nullptr) ? std::string(label) : std::string("outer");
   if (surface == nullptr || array == nullptr || outer == nullptr)
   {
     fprintf(stderr,"Cannot build the offset outer surface without a surface, a thickness array and an output\n");
@@ -4837,10 +4843,21 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
     return SV_ERROR;
   }
 
-  fprintf(stdout,"Wall outer surface as the offset of the interface, contoured from the distance field:\n");
+  if (label != nullptr)
+  {
+    fprintf(stdout,"Wall %s surface as the offset of the interface at %.3g of the thickness, contoured from the distance field:\n", what.c_str(), thicknessFraction);
+  }
+  else
+  {
+    fprintf(stdout,"Wall outer surface as the offset of the interface, contoured from the distance field:\n");
+  }
   fprintf(stdout,"  %lld interface points and %lld triangles\n", (long long)numPts, (long long)(inner.triangles.size()/3));
   fflush(stdout);
   svoffset::Options options;
+  // A surface inside the wall is decimated against the whole wall's
+  // thickness, not its own fraction of it, so that the layers come out at
+  // one size.
+  options.chordTolerance = 0.05/thicknessFraction;
   svoffset::Surface offset;
   svoffset::Report report;
   std::string error;
@@ -4929,8 +4946,8 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
       crossingArray->InsertNextValue(crossing[cc] ? 1 : 0);
     }
     outer->GetCellData()->AddArray(crossingArray);
-    char offsetFile[] = "wall_outer_offset.vtp";
-    TGenUtils_WriteVTP(offsetFile, outer);
+    std::string offsetFile = std::string("wall_") + what + "_offset.vtp";
+    TGenUtils_WriteVTP(&offsetFile[0], outer);
   }
 
   double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -5838,16 +5855,15 @@ int TGenUtils_StitchCapAnnulus(vtkPoints *points,
  */
 
 int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
-    const std::vector<TGenUtilsCapRim> &caps, vtkPolyData *shell, int &numDegenerate)
+    const std::vector<TGenUtilsCapRim> &caps, vtkPolyData *shell, int &numDegenerate,
+    const std::vector<vtkPolyData *> *levels, const std::vector<std::vector<TGenUtilsCapRim> > *levelCaps)
 {
   numDegenerate = 0;
-
   if (surface == nullptr || outer == nullptr || shell == nullptr)
   {
     fprintf(stderr,"Cannot build the wall shell without an inner surface, an offset surface and an output\n");
     return SV_ERROR;
   }
-
   vtkIdType numPts = surface->GetNumberOfPoints();
   vtkIdType numOuterPts = outer->GetNumberOfPoints();
   if (numPts == 0 || numOuterPts == 0)
@@ -5856,29 +5872,70 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
         (long long)numPts, (long long)numOuterPts);
     return SV_ERROR;
   }
+  // The layer surfaces inside the wall, if any: offsets at fractions of the
+  // thickness, each trimmed at the caps like the outer one. They go into the
+  // shell as facets the mesher must keep, so that no tetrahedron crosses
+  // them and the wall comes out as one layer of tetrahedra between each
+  // pair of consecutive surfaces.
+  size_t numLevels = (levels != nullptr) ? levels->size() : 0;
+  if (numLevels > 0 && (levelCaps == nullptr || levelCaps->size() != numLevels))
+  {
+    fprintf(stderr,"Every layer surface of the wall shell needs its cap rims\n");
+    return SV_ERROR;
+  }
+  std::vector<vtkIdType> levelBase(numLevels, 0);
+  vtkIdType numLevelPts = 0;
+  for (size_t k = 0; k < numLevels; k++)
+  {
+    vtkPolyData *level = (*levels)[k];
+    if (level == nullptr || level->GetNumberOfPoints() == 0 || (*levelCaps)[k].size() != caps.size())
+    {
+      fprintf(stderr,"Layer surface %zu of the wall shell is empty or has %zu cap rims where the wall has %zu\n",
+          k + 1, (level == nullptr) ? (size_t)0 : (*levelCaps)[k].size(), caps.size());
+      return SV_ERROR;
+    }
+    levelBase[k] = numPts + numLevelPts;
+    numLevelPts += level->GetNumberOfPoints();
+  }
+  const vtkIdType outerBase = numPts + numLevelPts;
 
-  // Double, so that neither surface's points are rounded on the way in; the
-  // interface points in particular have to come out as they went in.
+  // The points: the inner surface, then the layer surfaces, then the outer.
   auto points = vtkSmartPointer<vtkPoints>::New();
   points->SetDataTypeToDouble();
-  points->SetNumberOfPoints(numPts + numOuterPts);
+  points->SetNumberOfPoints(outerBase + numOuterPts);
   for (vtkIdType ptId = 0; ptId < numPts; ptId++)
   {
     double p[3];
     surface->GetPoint(ptId, p);
     points->SetPoint(ptId, p);
   }
+  for (size_t k = 0; k < numLevels; k++)
+  {
+    vtkPolyData *level = (*levels)[k];
+    for (vtkIdType ptId = 0; ptId < level->GetNumberOfPoints(); ptId++)
+    {
+      double p[3];
+      level->GetPoint(ptId, p);
+      points->SetPoint(levelBase[k] + ptId, p);
+    }
+  }
   for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
   {
     double p[3];
     outer->GetPoint(ptId, p);
-    points->SetPoint(numPts + ptId, p);
+    points->SetPoint(outerBase + ptId, p);
   }
 
-  auto cells = vtkSmartPointer<vtkCellArray>::New();
+  // Each triangle's role, for the facet markers: 1 inner, 2 outer, 9999 a
+  // side wall closing the wall at a cap, 100 + k the k-th layer surface.
+  auto roles = vtkSmartPointer<vtkIntArray>::New();
+  roles->SetName("ShellRole");
+  roles->SetNumberOfComponents(1);
+  const int innerRole = 1, outerRole = 2, sideRole = 9999, levelRoleBase = 100;
 
-  // The input normals point out of the lumen, so an inner triangle in its
-  // input winding faces into the wall; reversing it makes it face out.
+  // The inner surface faces the lumen; the wall lies behind it, so it is
+  // reversed to face out of the wall like every other shell triangle.
+  auto cells = vtkSmartPointer<vtkCellArray>::New();
   for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
   {
     vtkIdType npts;
@@ -5890,25 +5947,40 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
     }
     vtkIdType innerTriangle[3] = {pts[2], pts[1], pts[0]};
     cells->InsertNextCell(3, innerTriangle);
+    roles->InsertNextValue(innerRole);
   }
 
-  // Which way the contoured triangles face is a property of the contouring
-  // filter rather than of this wall, and a shell wound inside out is filled
-  // inside out. Measure it: an offset point lies away from the inner surface,
-  // so the outward direction there is the direction from the nearest inner
-  // point to it. A sample settles it, because the contour is wound
-  // consistently; a sample that does not agree with itself means it is not,
-  // which is worse than either answer and is reported rather than voted on.
+  // The layer surfaces as they are; a facet inside the volume has no side
+  // to face.
+  for (size_t k = 0; k < numLevels; k++)
+  {
+    vtkPolyData *level = (*levels)[k];
+    for (vtkIdType cellId = 0; cellId < level->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      level->GetCellPoints(cellId, npts, pts);
+      if (npts != 3)
+      {
+        continue;
+      }
+      vtkIdType levelTriangle[3] = {pts[0] + levelBase[k], pts[1] + levelBase[k], pts[2] + levelBase[k]};
+      cells->InsertNextCell(3, levelTriangle);
+      roles->InsertNextValue(levelRoleBase + (int)k + 1);
+    }
+  }
+
+  // Which way the offset surface faces is measured rather than assumed: on a
+  // sample of its triangles, whether the normal points away from the inner
+  // surface. The surface is reversed when the majority points inward.
   auto locator = vtkSmartPointer<vtkCellLocator>::New();
   locator->SetDataSet(surface);
   locator->BuildLocator();
   auto genericCell = vtkSmartPointer<vtkGenericCell>::New();
-
   vtkIdType numOuterCells = outer->GetNumberOfCells();
   const vtkIdType maxSamples = 5000;
   vtkIdType sampleStride = (numOuterCells > maxSamples) ? (numOuterCells/maxSamples) : 1;
   int numAgree = 0, numDisagree = 0;
-
   for (vtkIdType cellId = 0; cellId < numOuterCells; cellId += sampleStride)
   {
     vtkIdType npts;
@@ -5918,12 +5990,10 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
     {
       continue;
     }
-
     double p0[3], p1[3], p2[3];
     outer->GetPoint(pts[0], p0);
     outer->GetPoint(pts[1], p1);
     outer->GetPoint(pts[2], p2);
-
     double e1[3], e2[3], normal[3];
     vtkMath::Subtract(p1, p0, e1);
     vtkMath::Subtract(p2, p0, e2);
@@ -5932,19 +6002,16 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
     {
       continue;
     }
-
     double centroid[3];
     for (int k = 0; k < 3; k++)
     {
       centroid[k] = (p0[k] + p1[k] + p2[k])/3.0;
     }
-
     double closest[3];
     vtkIdType closestCell = -1;
     int subId = 0;
     double distanceSquared = 0.0;
     locator->FindClosestPoint(centroid, closest, genericCell, closestCell, subId, distanceSquared);
-
     double away[3];
     vtkMath::Subtract(centroid, closest, away);
     if (vtkMath::Dot(normal, away) >= 0.0)
@@ -5956,13 +6023,11 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
       numDisagree++;
     }
   }
-
   if (numAgree + numDisagree == 0)
   {
     fprintf(stderr,"The offset surface has no triangle with an area, so which way it faces cannot be measured\n");
     return SV_ERROR;
   }
-
   int numMajority = std::max(numAgree, numDisagree);
   if (numMajority < 0.9*(numAgree + numDisagree))
   {
@@ -5970,13 +6035,11 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
         numAgree, numDisagree);
     return SV_ERROR;
   }
-
   bool reverseOuter = (numDisagree > numAgree);
   if (reverseOuter)
   {
     fprintf(stdout,"  the offset surface is wound facing the wall, so its triangles are reversed into the shell\n");
   }
-
   for (vtkIdType cellId = 0; cellId < numOuterCells; cellId++)
   {
     vtkIdType npts;
@@ -5989,45 +6052,70 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
     vtkIdType outerTriangle[3];
     if (reverseOuter)
     {
-      outerTriangle[0] = pts[2] + numPts;
-      outerTriangle[1] = pts[1] + numPts;
-      outerTriangle[2] = pts[0] + numPts;
+      outerTriangle[0] = pts[2] + outerBase;
+      outerTriangle[1] = pts[1] + outerBase;
+      outerTriangle[2] = pts[0] + outerBase;
     }
     else
     {
-      outerTriangle[0] = pts[0] + numPts;
-      outerTriangle[1] = pts[1] + numPts;
-      outerTriangle[2] = pts[2] + numPts;
+      outerTriangle[0] = pts[0] + outerBase;
+      outerTriangle[1] = pts[1] + outerBase;
+      outerTriangle[2] = pts[2] + outerBase;
     }
     cells->InsertNextCell(3, outerTriangle);
+    roles->InsertNextValue(outerRole);
   }
 
-  // Close each vessel end between its two rims. The offset rim ids are those of
-  // the offset surface, so they move with it into the shell's numbering.
+  // The vessel ends: at each cap, an annulus between every pair of
+  // consecutive rims - the inner surface's, each layer surface's in order,
+  // the outer surface's - so that the layers are closed off separately and
+  // the side wall is made of rings a layer thick.
   for (size_t c = 0; c < caps.size(); c++)
   {
-    std::vector<vtkIdType> outerLoop(caps[c].outerLoop.size());
-    for (size_t m = 0; m < caps[c].outerLoop.size(); m++)
+    std::vector<std::vector<vtkIdType> > rims;
+    rims.push_back(caps[c].innerLoop);
+    for (size_t k = 0; k < numLevels; k++)
     {
-      outerLoop[m] = caps[c].outerLoop[m] + numPts;
+      const std::vector<vtkIdType> &loop = (*levelCaps)[k][c].outerLoop;
+      std::vector<vtkIdType> shifted(loop.size());
+      for (size_t m = 0; m < loop.size(); m++)
+      {
+        shifted[m] = loop[m] + levelBase[k];
+      }
+      rims.push_back(shifted);
     }
-
-    int numCapDegenerate = 0;
-    if (TGenUtils_StitchCapAnnulus(points, caps[c].innerLoop, outerLoop,
-          caps[c].outward, cells, numCapDegenerate) != SV_OK)
     {
-      fprintf(stderr,"Problem closing the wall at the cap at (%.5g, %.5g, %.5g)\n",
-          caps[c].origin[0], caps[c].origin[1], caps[c].origin[2]);
-      return SV_ERROR;
+      std::vector<vtkIdType> shifted(caps[c].outerLoop.size());
+      for (size_t m = 0; m < caps[c].outerLoop.size(); m++)
+      {
+        shifted[m] = caps[c].outerLoop[m] + outerBase;
+      }
+      rims.push_back(shifted);
     }
-    numDegenerate += numCapDegenerate;
+    for (size_t r = 0; r + 1 < rims.size(); r++)
+    {
+      vtkIdType before = cells->GetNumberOfCells();
+      int numCapDegenerate = 0;
+      if (TGenUtils_StitchCapAnnulus(points, rims[r], rims[r+1],
+            caps[c].outward, cells, numCapDegenerate) != SV_OK)
+      {
+        fprintf(stderr,"Problem closing the wall at the cap at (%.5g, %.5g, %.5g) between its rims %zu and %zu\n",
+            caps[c].origin[0], caps[c].origin[1], caps[c].origin[2], r, r + 1);
+        return SV_ERROR;
+      }
+      numDegenerate += numCapDegenerate;
+      for (vtkIdType added = before; added < cells->GetNumberOfCells(); added++)
+      {
+        roles->InsertNextValue(sideRole);
+      }
+    }
   }
 
   shell->Initialize();
   shell->SetPoints(points);
   shell->SetPolys(cells);
+  shell->GetCellData()->AddArray(roles);
   shell->BuildLinks();
-
   return SV_OK;
 }
 
