@@ -329,3 +329,6 @@ Assessment: ACCEPTABLE (some distorted elements)
 [sv4guiMeshLegacyIO::WriteFiles] Writing domain 2
 [sv4guiMeshLegacyIO::WriteFiles] Face id 41 is not a face of the model; written as mesh-surfaces/wall_outer.vtp
 [ResetFaceSurfaceIds] Can't find element 888626
+[394.730] Closing workbench...
+!394.788! WARNING: Empty filename passed to function
+[394.798] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
