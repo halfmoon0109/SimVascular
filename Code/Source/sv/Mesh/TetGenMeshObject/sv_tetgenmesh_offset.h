@@ -127,7 +127,8 @@ struct Options
   double outerLayer = 1.5;
   double farLayer = 3.0;
   double farSpacing = 1.5;
-  int snapIterations = 1;       // secant steps putting a contour point on the exact zero level (0 leaves the linear interpolation)
+  int snapIterations = 16;      // at most this many secant steps (bisection when the secant leaves the bracket) putting a contour point on the zero level; 0 leaves the linear interpolation
+  double snapTolerance = 1.0e-3;     // a contour point is on the level once |field| is within this fraction of the larger of its edge's end values (about the thickness)
   double collapseRatio = 0.8;   // edges shorter than this times the local interface size are collapsed; zero or less leaves the contour as marched
   double collapseTurnCosine = 0.7;   // a collapse may not turn a triangle's normal by more than this cosine (slivers, whose normal means little, excepted)
   double collapseFieldTolerance = 0.1;   // no triangle a collapse makes may have its centre farther off the zero level than this fraction of the local thickness
@@ -179,6 +180,7 @@ struct Report
   long long numFieldEvaluations = 0;
   long long numContourPoints = 0;        // as marched
   long long numContourTriangles = 0;
+  long long numContourPointsOffLevel = 0;  // whose last evaluated position was still off the level by more than snapTolerance (the field jumps along the edge, or the steps ran out)
   long long numDegenerateContourTriangles = 0; // left out of the contour: naming a point twice, or emitted twice around points on the level
   long long numCollapsed = 0;            // edges collapsed by the decimation
   long long numPoints = 0;               // of the result

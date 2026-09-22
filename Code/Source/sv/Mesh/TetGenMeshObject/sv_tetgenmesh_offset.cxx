@@ -1448,9 +1448,17 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   say("marching tetrahedra over the cloud");
   // Marching tetrahedra: one contour point per tetrahedron edge whose ends
   // have values of opposite sign (a value of zero counts as outside), placed
-  // by linear interpolation and then put on the exact zero level by secant
-  // steps along the edge; a tetrahedron with one corner inside gives one
-  // triangle, with two, a quad as two triangles. A cloud point whose value
+  // by linear interpolation and then put on the zero level by secant steps
+  // along the edge, bisection when the secant leaves the bracket, until the
+  // field there is within the tolerance or the steps run out; a tetrahedron
+  // with one corner inside gives one triangle, with two, a quad as two
+  // triangles. The steps are counted out one by one rather than taken once:
+  // where two walls' bands come close - a thin branch's root on a thick
+  // parent - an edge crosses the ridge of the field between them and is
+  // far from linear, and one step from the linear guess left points off
+  // the level by up to one and a half thicknesses (measured 2026-09-22 on
+  // the user's model: the decimation then folded triangles over one another
+  // at two such roots, 12 crossings, gone with the steps run to convergence). A cloud point whose value
   // is zero is on the level already: every cut edge ending there gets the
   // one contour point placed on it (not one per edge), a triangle that then
   // names a point twice has no area and is left out, and a triangle emitted
@@ -1505,6 +1513,8 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     const double *pa = &cloud[(size_t)3*a], *pb = &cloud[(size_t)3*b];
     double s = va/(va - vb);
     double lo = 0.0, hi = 1.0, flo = va, fhi = vb;
+    const double closeEnough = options.snapTolerance*std::max(std::fabs(va), std::fabs(vb));
+    bool onLevel = options.snapIterations <= 0;
     for (int it2 = 0; it2 < options.snapIterations; it2++)
     {
       double pm[3];
@@ -1513,8 +1523,9 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
         pm[k] = pa[k] + s*(pb[k] - pa[k]);
       }
       double fm = field.Evaluate(pm);
-      if (fm == 0.0)
+      if (std::fabs(fm) <= closeEnough)
       {
+        onLevel = true;
         break;
       }
       if ((fm < 0.0) == (flo < 0.0))
@@ -1529,6 +1540,10 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       }
       double next = (flo*hi - fhi*lo)/(flo - fhi);
       s = (next > lo && next < hi) ? next : 0.5*(lo + hi);
+    }
+    if (!onLevel)
+    {
+      report.numContourPointsOffLevel++;
     }
     ll id = (ll)(pts.size()/3);
     for (int k = 0; k < 3; k++)

@@ -4956,8 +4956,9 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
   fprintf(stdout,"  the field was sampled on %lld points (the interface and its offsets at %.2g, %.2g and %.2g of the thickness, the last no nearer than %.2g edges) in %lld tetrahedra, %lld of them cut by the zero level; %.1f s for the field, %.1f s for the tetrahedra\n",
       report.numCloudPoints, options.innerLayer, options.outerLayer, options.farLayer, options.farSpacing,
       report.numTetrahedra, report.numTetrahedraCut, report.secondsField, report.secondsDelaunay);
-  fprintf(stdout,"  the contour had %lld points and %lld triangles (%.1f s); %lld edges collapsed onto the zero level to the interface's own size, leaving %lld points and %lld triangles (%.1f s); %lld field evaluations in all\n",
-      report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numCollapsed,
+  fprintf(stdout,"  the contour had %lld points and %lld triangles (%.1f s; %lld points on the zero level itself, %lld triangles of no area left out, %lld points still off the level after %d steps); %lld edges collapsed onto the zero level to the interface's own size, leaving %lld points and %lld triangles (%.1f s); %lld field evaluations in all\n",
+      report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numZeroCloudPoints,
+      report.numDegenerateContourTriangles, report.numContourPointsOffLevel, options.snapIterations, report.numCollapsed,
       report.numPoints, report.numTriangles, report.secondsDecimate, report.numFieldEvaluations);
   fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another; %.1f s\n",
       report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing, seconds);
