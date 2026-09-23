@@ -4770,20 +4770,94 @@ static void OffsetProgress(const char *stage, void *)
  * @return SV_OK if the surface was built; its faults are counted, not failed.
  */
 
-int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
-    vtkPolyData *outer, int &numUnresolved, double thicknessFraction, const char *label)
+// -------------------------------------
+// OffsetSurfaceToPolyData
+// -------------------------------------
+// The core's surface as a polydata with the arrays the trim reads: the
+// vessel end each point belongs to as 'OffsetRimAnchor' (the interface
+// point anchoring that end's rim, -1 for none), and which triangles pass
+// through another as 'TrimCrossing'.
+static void OffsetSurfaceToPolyData(const svoffset::Surface &offset,
+    const std::vector<unsigned char> &crossing, vtkPolyData *out)
 {
-  numUnresolved = 0;
-  if (!(thicknessFraction > 0.0))
+  vtkIdType numOuterPts = (vtkIdType)(offset.points.size()/3);
+  auto outerPoints = vtkSmartPointer<vtkPoints>::New();
+  outerPoints->SetDataTypeToDouble();
+  outerPoints->SetNumberOfPoints(numOuterPts);
+  for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
   {
-    fprintf(stderr,"The offset surface's thickness fraction must be positive, not %g\n", thicknessFraction);
+    outerPoints->SetPoint(ptId, &offset.points[(size_t)3*ptId]);
+  }
+  auto outerCells = vtkSmartPointer<vtkCellArray>::New();
+  size_t numOuterCells = offset.triangles.size()/3;
+  for (size_t cc = 0; cc < numOuterCells; cc++)
+  {
+    vtkIdType triangle[3];
+    for (int j = 0; j < 3; j++)
+    {
+      triangle[j] = (vtkIdType)offset.triangles[3*cc + j];
+    }
+    outerCells->InsertNextCell(3, triangle);
+  }
+  out->Initialize();
+  out->SetPoints(outerPoints);
+  out->SetPolys(outerCells);
+  auto kindArray = vtkSmartPointer<vtkIntArray>::New();
+  kindArray->SetName("TrimPointKind");
+  auto footArray = vtkSmartPointer<vtkIdTypeArray>::New();
+  footArray->SetName("TrimFoot");
+  auto anchorArray = vtkSmartPointer<vtkIdTypeArray>::New();
+  anchorArray->SetName("OffsetRimAnchor");
+  for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
+  {
+    kindArray->InsertNextValue(3);
+    footArray->InsertNextValue((vtkIdType)-1);
+    long long rim = (ptId < (vtkIdType)offset.pointRim.size()) ? offset.pointRim[(size_t)ptId] : -1;
+    vtkIdType anchor = -1;
+    if (rim >= 0 && rim < (long long)offset.rims.size() && !offset.rims[(size_t)rim].empty())
+    {
+      anchor = (vtkIdType)offset.rims[(size_t)rim][0];
+    }
+    anchorArray->InsertNextValue(anchor);
+  }
+  out->GetPointData()->AddArray(kindArray);
+  out->GetPointData()->AddArray(footArray);
+  out->GetPointData()->AddArray(anchorArray);
+  auto crossingArray = vtkSmartPointer<vtkIntArray>::New();
+  crossingArray->SetName("TrimCrossing");
+  for (size_t cc = 0; cc < numOuterCells; cc++)
+  {
+    crossingArray->InsertNextValue((cc < crossing.size() && crossing[cc]) ? 1 : 0);
+  }
+  out->GetCellData()->AddArray(crossingArray);
+}
+
+// -------------------------------------
+// TGenUtils_BuildContouredOffsetSurfaces
+// -------------------------------------
+int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray *array,
+    const std::vector<double> &fractions, std::vector<vtkSmartPointer<vtkPolyData> > &surfaces,
+    std::vector<int> &numUnresolved)
+{
+  surfaces.clear();
+  numUnresolved.clear();
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot build the offset surfaces without a surface and a thickness array\n");
     return SV_ERROR;
   }
-  const std::string what = (label != nullptr) ? std::string(label) : std::string("outer");
-  if (surface == nullptr || array == nullptr || outer == nullptr)
+  if (fractions.empty())
   {
-    fprintf(stderr,"Cannot build the offset outer surface without a surface, a thickness array and an output\n");
+    fprintf(stderr,"No fraction of the thickness was asked for an offset surface at\n");
     return SV_ERROR;
+  }
+  for (size_t f = 0; f < fractions.size(); f++)
+  {
+    if (!(fractions[f] > 0.0 && fractions[f] <= 1.0) || (f > 0 && !(fractions[f] > fractions[f-1])))
+    {
+      fprintf(stderr,"The fractions of the thickness for the offset surfaces must rise within (0, 1]\n");
+      return SV_ERROR;
+    }
   }
   vtkIdType numPts = surface->GetNumberOfPoints();
   if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
@@ -4842,10 +4916,15 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
     fprintf(stderr,"The surface has no triangles to offset\n");
     return SV_ERROR;
   }
-
-  if (label != nullptr)
+  const size_t numLevels = fractions.size();
+  if (numLevels > 1)
   {
-    fprintf(stdout,"Wall %s surface as the offset of the interface at %.3g of the thickness, contoured from the distance field:\n", what.c_str(), thicknessFraction);
+    fprintf(stdout,"Wall outer surface and its %zu layer surface(s) as offsets of the interface at", numLevels - 1);
+    for (size_t f = 0; f < numLevels; f++)
+    {
+      fprintf(stdout," %.3g", fractions[f]);
+    }
+    fprintf(stdout," of the thickness, contoured from one distance field so that they are nested:\n");
   }
   else
   {
@@ -4854,18 +4933,14 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
   fprintf(stdout,"  %lld interface points and %lld triangles\n", (long long)numPts, (long long)(inner.triangles.size()/3));
   fflush(stdout);
   svoffset::Options options;
-  // A surface inside the wall is decimated against the whole wall's
-  // thickness, not its own fraction of it, so that the layers come out at
-  // one size.
-  options.chordTolerance = 0.05/thicknessFraction;
-  svoffset::Surface offset;
-  svoffset::Report report;
+  std::vector<svoffset::Surface> offsets;
+  std::vector<svoffset::Report> reports;
   std::string error;
   int built = 1;
   try
   {
-    built = svoffset::BuildOffsetSurface(inner, options, OffsetDelaunayWithTetGen, nullptr,
-        offset, report, error, OffsetProgress);
+    built = svoffset::BuildOffsetSurfaces(inner, options, fractions, OffsetDelaunayWithTetGen, nullptr,
+        offsets, reports, error, OffsetProgress);
   }
   catch (const std::bad_alloc &)
   {
@@ -4875,108 +4950,82 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
   {
     error = e.what();
   }
-  if (built != 0)
+  if (built != 0 || offsets.size() != numLevels || reports.size() != numLevels)
   {
-    fprintf(stderr,"Problem building the offset outer surface: %s\n", error.c_str());
+    fprintf(stderr,"Problem building the offset surfaces: %s\n", error.empty() ? "the core returned the wrong number of surfaces" : error.c_str());
     return SV_ERROR;
   }
-
-  // What the volume mesher would refuse: the surface's own accounting, then
-  // its triangles against each other. A boundary edge counts too: the
-  // surface is closed until the trim at the caps opens it, so an open edge
-  // here is a hole, and the trim would only turn it into a spare rim.
-  std::vector<unsigned char> crossing;
-  double firstCrossingAt[3];
-  long long numCrossing = svenvelope::CountCrossingTriangles(offset.points, offset.triangles,
-      crossing, firstCrossingAt);
-  numUnresolved = (int)(report.numBoundaryEdges + report.numNonManifoldEdges + report.numMiswoundEdges + numCrossing);
-
-  // The surface as polydata, with the tags the thickness diagnostics read.
-  vtkIdType numOuterPts = (vtkIdType)(offset.points.size()/3);
-  auto outerPoints = vtkSmartPointer<vtkPoints>::New();
-  outerPoints->SetDataTypeToDouble();
-  outerPoints->SetNumberOfPoints(numOuterPts);
-  for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
-  {
-    outerPoints->SetPoint(ptId, &offset.points[(size_t)3*ptId]);
-  }
-  auto outerCells = vtkSmartPointer<vtkCellArray>::New();
-  size_t numOuterCells = offset.triangles.size()/3;
-  for (size_t cc = 0; cc < numOuterCells; cc++)
-  {
-    vtkIdType triangle[3];
-    for (int j = 0; j < 3; j++)
-    {
-      triangle[j] = (vtkIdType)offset.triangles[3*cc + j];
-    }
-    outerCells->InsertNextCell(3, triangle);
-  }
-  outer->Initialize();
-  outer->SetPoints(outerPoints);
-  outer->SetPolys(outerCells);
-  {
-    auto kindArray = vtkSmartPointer<vtkIntArray>::New();
-    kindArray->SetName("TrimPointKind");
-    auto footArray = vtkSmartPointer<vtkIdTypeArray>::New();
-    footArray->SetName("TrimFoot");
-    // Which vessel end a point belongs to, as the interface point id that
-    // anchors that end's rim (the first point of its loop), -1 for none; the
-    // trim at the caps reads it to cut only what belongs to each cap.
-    auto anchorArray = vtkSmartPointer<vtkIdTypeArray>::New();
-    anchorArray->SetName("OffsetRimAnchor");
-    for (vtkIdType ptId = 0; ptId < numOuterPts; ptId++)
-    {
-      kindArray->InsertNextValue(3);
-      footArray->InsertNextValue((vtkIdType)-1);
-      long long rim = (ptId < (vtkIdType)offset.pointRim.size()) ? offset.pointRim[(size_t)ptId] : -1;
-      vtkIdType anchor = -1;
-      if (rim >= 0 && rim < (long long)offset.rims.size() && !offset.rims[(size_t)rim].empty())
-      {
-        anchor = (vtkIdType)offset.rims[(size_t)rim][0];
-      }
-      anchorArray->InsertNextValue(anchor);
-    }
-    outer->GetPointData()->AddArray(kindArray);
-    outer->GetPointData()->AddArray(footArray);
-    outer->GetPointData()->AddArray(anchorArray);
-    auto crossingArray = vtkSmartPointer<vtkIntArray>::New();
-    crossingArray->SetName("TrimCrossing");
-    for (size_t cc = 0; cc < numOuterCells; cc++)
-    {
-      crossingArray->InsertNextValue(crossing[cc] ? 1 : 0);
-    }
-    outer->GetCellData()->AddArray(crossingArray);
-    std::string offsetFile = std::string("wall_") + what + "_offset.vtp";
-    TGenUtils_WriteVTP(&offsetFile[0], outer);
-  }
-
-  double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  const svoffset::Report &shared = reports[0];
   fprintf(stdout,"  thickness %.4g to %.4g; %lld cap rims continued by collars of %lld triangles\n",
-      report.smallestThickness, report.largestThickness, report.numRims, report.numCollarTriangles);
-  fprintf(stdout,"  the field was sampled on %lld points (the interface and its offsets at %.2g, %.2g and %.2g of the thickness, the last no nearer than %.2g edges) in %lld tetrahedra, %lld of them cut by the zero level; %.1f s for the field, %.1f s for the tetrahedra\n",
-      report.numCloudPoints, options.innerLayer, options.outerLayer, options.farLayer, options.farSpacing,
-      report.numTetrahedra, report.numTetrahedraCut, report.secondsField, report.secondsDelaunay);
-  fprintf(stdout,"  the contour had %lld points and %lld triangles (%.1f s; %lld points on the zero level itself, %lld triangles of no area left out, %lld points still off the level after %d steps); %lld edges collapsed onto the zero level to the interface's own size, leaving %lld points and %lld triangles (%.1f s); %lld field evaluations in all\n",
-      report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numZeroCloudPoints,
-      report.numDegenerateContourTriangles, report.numContourPointsOffLevel, options.snapIterations, report.numCollapsed,
-      report.numPoints, report.numTriangles, report.secondsDecimate, report.numFieldEvaluations);
-  fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another; %.1f s\n",
-      report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing, seconds);
-  if (!report.firstFault.empty())
+      shared.smallestThickness, shared.largestThickness, shared.numRims, shared.numCollarTriangles);
+  fprintf(stdout,"  the field was sampled on %lld points (the interface and its offsets at %.2g, %.2g and %.2g of the thickness, the last no nearer than %.2g edges); %.1f s for the field\n",
+      shared.numCloudPoints, options.innerLayer, options.outerLayer, options.farLayer, options.farSpacing, shared.secondsField);
+  surfaces.resize(numLevels);
+  numUnresolved.resize(numLevels, 0);
+  for (size_t f = 0; f < numLevels; f++)
   {
-    fprintf(stdout,"  the first fault is %s at (%.5g, %.5g, %.5g)\n", report.firstFault.c_str(),
-        report.firstFaultAt[0], report.firstFaultAt[1], report.firstFaultAt[2]);
+    const svoffset::Report &report = reports[f];
+    std::vector<unsigned char> crossing;
+    double firstCrossingAt[3];
+    long long numCrossing = svenvelope::CountCrossingTriangles(offsets[f].points, offsets[f].triangles,
+        crossing, firstCrossingAt);
+    numUnresolved[f] = (int)(report.numBoundaryEdges + report.numNonManifoldEdges + report.numMiswoundEdges + numCrossing);
+    surfaces[f] = vtkSmartPointer<vtkPolyData>::New();
+    OffsetSurfaceToPolyData(offsets[f], crossing, surfaces[f]);
+    std::string name = (fractions[f] == 1.0) ? std::string("outer") : std::string("layer_") + std::to_string(f + 1) + "_of_" + std::to_string(numLevels);
+    std::string offsetFile = std::string("wall_") + name + "_offset.vtp";
+    TGenUtils_WriteVTP(&offsetFile[0], surfaces[f]);
+    if (numLevels > 1)
+    {
+      fprintf(stdout,"  surface %zu of %zu, at %.3g of the thickness (%s):\n", f + 1, numLevels, fractions[f], name.c_str());
+    }
+    fprintf(stdout,"  %lld tetrahedra over the cloud, %lld of them cut by the level (%.1f s); the contour had %lld points and %lld triangles (%.1f s; %lld cloud points on the level itself, %lld triangles of no area left out, %lld points still off the level after %d steps); %lld edges collapsed onto the level to the interface's own size, leaving %lld points and %lld triangles (%.1f s)\n",
+        report.numTetrahedra, report.numTetrahedraCut, report.secondsDelaunay,
+        report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numZeroCloudPoints,
+        report.numDegenerateContourTriangles, report.numContourPointsOffLevel, options.snapIterations, report.numCollapsed,
+        report.numPoints, report.numTriangles, report.secondsDecimate);
+    fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another\n",
+        report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing);
+    if (!report.firstFault.empty())
+    {
+      fprintf(stdout,"  the first fault is %s at (%.5g, %.5g, %.5g)\n", report.firstFault.c_str(),
+          report.firstFaultAt[0], report.firstFaultAt[1], report.firstFaultAt[2]);
+    }
+    if (numCrossing > 0)
+    {
+      fprintf(stdout,"  the first crossing is at (%.5g, %.5g, %.5g)\n", firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
+    }
   }
-  if (numCrossing > 0)
-  {
-    fprintf(stdout,"  the first crossing is at (%.5g, %.5g, %.5g)\n", firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
-  }
+  double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  fprintf(stdout,"  %lld field evaluations in all; %.1f s for the %zu surface(s)\n",
+      reports.back().numFieldEvaluations, seconds, numLevels);
   return SV_OK;
 }
 
 // -------------------------------------
-// TGenUtils_BuildTrimmedExtrudedOuterSurface
+// TGenUtils_BuildContouredOuterSurface
 // -------------------------------------
+int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *array,
+    vtkPolyData *outer, int &numUnresolved)
+{
+  numUnresolved = 0;
+  if (outer == nullptr)
+  {
+    fprintf(stderr,"Cannot build the offset outer surface without an output\n");
+    return SV_ERROR;
+  }
+  std::vector<double> fractions(1, 1.0);
+  std::vector<vtkSmartPointer<vtkPolyData> > surfaces;
+  std::vector<int> unresolved;
+  if (TGenUtils_BuildContouredOffsetSurfaces(surface, array, fractions, surfaces, unresolved) != SV_OK)
+  {
+    return SV_ERROR;
+  }
+  outer->ShallowCopy(surfaces[0]);
+  numUnresolved = unresolved[0];
+  return SV_OK;
+}
+
 /**
  * @brief Builds the outer surface of the wall as the envelope of the inner
  * surface extruded along its normals: the extrusion with everything that runs

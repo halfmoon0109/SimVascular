@@ -2833,14 +2833,30 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // the grid are resolved; the field then closes the septum between two
   // vessels and creases where their walls meet by construction. It is trimmed
   // back to the cap planes as the grid offset was.
-  auto offsetOuter = vtkSmartPointer<vtkPolyData>::New();
-  std::vector<TGenUtilsCapRim> caps;
-  int numUnresolved = 0;
-  if (TGenUtils_BuildContouredOuterSurface(surface, thicknessArray, offsetOuter, numUnresolved) != SV_OK)
+  // With N layers asked for, the N-1 layer surfaces inside the wall (at
+  // k/N of the thickness) are built together with the outer surface, from
+  // one field and one point cloud, so that they are nested: built each from
+  // its own scaled interface they crossed one another where the wall is
+  // thin (measured 2026-09-23 on the user's 178k model: the two-thirds
+  // surface through the outer one at a branch root, 17 crossings, and the
+  // mesher refused the shell).
+  const int numLayers = std::max(1, meshoptions_.numwallsublayers);
+  std::vector<double> fractions;
+  for (int k = 1; k <= numLayers; k++)
   {
-    fprintf(stderr,"Problem building the outer wall offset surface\n");
+    fractions.push_back((double)k/(double)numLayers);
+  }
+  std::vector<vtkSmartPointer<vtkPolyData> > offsetSurfaces;
+  std::vector<int> unresolvedPerLevel;
+  if (TGenUtils_BuildContouredOffsetSurfaces(surface, thicknessArray, fractions, offsetSurfaces, unresolvedPerLevel) != SV_OK ||
+      offsetSurfaces.size() != (size_t)numLayers)
+  {
+    fprintf(stderr,"Problem building the outer wall offset surface%s\n", numLayers > 1 ? " and the layer surfaces" : "");
     return SV_ERROR;
   }
+  vtkSmartPointer<vtkPolyData> offsetOuter = offsetSurfaces.back();
+  std::vector<TGenUtilsCapRim> caps;
+  int numUnresolved = unresolvedPerLevel.back();
   {
     double maxThickness = 0.0;
     for (vtkIdType ptId = 0; ptId < thicknessArray->GetNumberOfTuples(); ptId++)
@@ -2925,7 +2941,6 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // level set of the same field. A single unstructured fill was measured
   // one tetrahedron thick almost everywhere (78k interior points over 461k
   // shell points), which a solid solver cannot bend.
-  const int numLayers = std::max(1, meshoptions_.numwallsublayers);
   std::vector<vtkSmartPointer<vtkPolyData> > levelSurfaces;
   std::vector<vtkPolyData *> levelPointers;
   std::vector<std::vector<TGenUtilsCapRim> > levelCaps;
@@ -2942,15 +2957,8 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       scaled->SetValue(ptId, fraction*thicknessArray->GetValue(ptId));
       maxScaled = std::max(maxScaled, scaled->GetValue(ptId));
     }
-    char label[32];
-    snprintf(label, sizeof(label), "layer_%d_of_%d", k, numLayers);
-    auto level = vtkSmartPointer<vtkPolyData>::New();
-    int numLevelUnresolved = 0;
-    if (TGenUtils_BuildContouredOuterSurface(surface, scaled, level, numLevelUnresolved, fraction, label) != SV_OK)
-    {
-      fprintf(stderr,"Problem building the wall layer surface %d of %d\n", k, numLayers);
-      return SV_ERROR;
-    }
+    vtkSmartPointer<vtkPolyData> level = offsetSurfaces[(size_t)k - 1];
+    int numLevelUnresolved = unresolvedPerLevel[(size_t)k - 1];
     std::vector<TGenUtilsCapRim> capsAtLevel;
     if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, level, scaled, maxScaled, capsAtLevel) != SV_OK)
     {
@@ -3009,6 +3017,33 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
   fprintf(stdout,"Filling the wall with TetGen tetrahedra: shell surface has %lld points and %lld triangles closing %zu vessel ends\n",
       (long long)shell->GetNumberOfPoints(), (long long)shell->GetNumberOfCells(), caps.size());
+  // The shell as a whole, before the mesher sees it: every surface in it
+  // was checked against itself, but a layer surface can pass through the
+  // outer one or an annulus, which only a check over all of them together
+  // finds. The rim of each layer surface is on three facets (the layer and
+  // the annuli on both sides), which is not a fault of the shell but the
+  // way an internal facet meets the side wall, so that count is only
+  // reported.
+  {
+    long long numNonManifold = 0, numMiswound = 0, numCrossing = 0;
+    double firstCrossingAt[3];
+    if (TGenUtils_CountSurfaceFaults(shell, numNonManifold, numMiswound, numCrossing, firstCrossingAt) != SV_OK)
+    {
+      return SV_ERROR;
+    }
+    fprintf(stdout,"  the shell has %lld edges on three facets (the rims of the layer surfaces), %lld wound against each other, %lld triangles passing through another\n",
+        numNonManifold, numMiswound, numCrossing);
+    if (numMiswound > 0 || numCrossing > 0)
+    {
+      fprintf(stderr,"The wall shell has %lld triangles passing through another and %lld edges wound against each other, which the volume mesher will refuse; the first crossing is at (%.5g, %.5g, %.5g)\n",
+          numCrossing, numMiswound, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
+      if (numCrossing > 0)
+      {
+        TGenUtils_DescribeSurfaceCrossings(shell, surface, thicknessArray, "wall_shell", 12);
+      }
+      return SV_ERROR;
+    }
+  }
   if (numDegenerate > 0)
   {
     fprintf(stdout,"  %d of the vessel end triangles have no area; they are kept because dropping one would leave a hole in the wall, but the mesher may refuse them\n",

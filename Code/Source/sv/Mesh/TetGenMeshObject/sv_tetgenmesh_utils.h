@@ -50,6 +50,7 @@
 #include "svTetGenMeshExports.h" // For exports
 
 #include "vtkPolyData.h"
+#include "vtkSmartPointer.h"
 #include "vtkUnstructuredGrid.h"
 #include "vtkDoubleArray.h"
 #include "vtkPoints.h"
@@ -200,12 +201,29 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface
     double maxThickness,
     std::vector<TGenUtilsCapRim> &caps);
 
+/**
+ * @brief Builds the offset surfaces of the wall at the given fractions of
+ * the thickness (1 is the outer surface, k/N a layer surface inside the
+ * wall) in one pass over one distance field and one point cloud, so that
+ * they are nested and never cross one another (see
+ * svoffset::BuildOffsetSurfaces). Each is written to wall_outer_offset.vtp
+ * or wall_layer_k_of_N_offset.vtp with the arrays the trim reads.
+ * @param fractions Each in (0, 1], in rising order.
+ * @param surfaces Set to one surface per fraction.
+ * @param numUnresolved Set per fraction to the faults the volume mesher
+ * would refuse, counted on the untrimmed surface (the trim takes the domes
+ * over the collar ends off, and with them their faults).
+ */
+SV_EXPORT_TETGEN_MESH int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    const std::vector<double> &fractions,
+    std::vector<vtkSmartPointer<vtkPolyData> > &surfaces,
+    std::vector<int> &numUnresolved);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,
     vtkPolyData *outer,
-    int &numUnresolved,
-    double thicknessFraction = 1.0,
-    const char *label = nullptr);
+    int &numUnresolved);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,
