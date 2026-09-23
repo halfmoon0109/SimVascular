@@ -394,3 +394,9 @@ The trimmed outer wall offset surface has 12 faults the volume mesher will refus
   wrote wall_outer_crossings_interface.vtp in /work
   wrote wall_outer_crossings_interface.vtp: the 2158 interface triangles within reach of the crossings, with their thickness and normals
 Problem with vessel wall meshing
+!670.003! WARNING: QPainter::end: Painter ended with 2 saved states
+!670.004! WARNING: QPainter::end: Painter ended with 2 saved states
+!670.004! WARNING: QPainter::end: Painter ended with 2 saved states
+[685.050] Closing workbench...
+!685.958! WARNING: Empty filename passed to function
+[686.028] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
