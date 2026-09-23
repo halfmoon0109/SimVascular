@@ -248,22 +248,32 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface
 
 /**
  * @brief Counts what the volume mesher refuses on a triangle surface: edges
- * on more than two triangles, edges traversed the same way twice, and
- * triangles passing through another. Boundary edges are not counted, since
- * a surface trimmed at the caps has its rims open by design.
+ * on more than two triangles, edges traversed the same way twice, triangles
+ * passing through another, and edges whose two triangles lie on each other
+ * within svoffset::foldDegrees (TetGen's "nearly self-intersecting facets").
+ * Boundary edges are not counted, since a surface trimmed at the caps has its
+ * rims open by design.
+ * @param smallestFoldDegrees Set to the smallest angle between the two
+ * triangles on any edge (180 is flat, 0 folded).
  */
 SV_EXPORT_TETGEN_MESH int TGenUtils_CountSurfaceFaults(vtkPolyData *surface,
     long long &numNonManifold,
     long long &numMiswound,
     long long &numCrossing,
-    double firstCrossingAt[3]);
+    double firstCrossingAt[3],
+    long long &numFolded,
+    double &smallestFoldDegrees,
+    double firstFoldAt[3]);
 
 /**
  * @brief Describes where a surface passes through itself, for the log and
  * for a look afterwards. Each crossing pair, up to maxPairs, is logged with
  * how far apart its two triangles are in distance and in rings, how they
  * face, how long the crossing is and what the interface is like nearest to
- * it. Two files are written: <label>_crossings.vtp, the crossing triangles
+ * it; so is each pair folded onto each other across an edge (within
+ * svoffset::foldDegrees), up to maxPairs more, with the edge as its segment
+ * and the angle between the two. Two files are written: <label>_crossings.vtp,
+ * the crossing (and folded) triangles
  * with two rings around each (cell arrays CrossingPair and Ring), and, with
  * an interface given, <label>_crossings_interface.vtp, the interface
  * triangles within reach of the crossings with their point data and the

@@ -783,6 +783,82 @@ void CountEdges(const std::vector<long long> &triangles, long long &numBoundary,
 }
 
 //---------------------
+// ListFoldedEdges
+//---------------------
+
+long long ListFoldedEdges(const std::vector<double> &points, const std::vector<long long> &triangles,
+    double maxDegrees, size_t maxPairs, std::vector<FoldedPair> &pairs, double &smallestDegrees)
+{
+  pairs.clear();
+  smallestDegrees = 180.0;
+  // every edge of every triangle, sorted so that the uses of one edge are together
+  struct Use
+  {
+    ll a, b, t;
+    bool forward;
+    bool operator<(const Use &o) const { return (a != o.a) ? (a < o.a) : (b != o.b) ? (b < o.b) : (t < o.t); }
+  };
+  ll nt = (ll)(triangles.size()/3);
+  std::vector<Use> uses;
+  uses.reserve((size_t)3*nt);
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll p = triangles[(size_t)3*t + j], q = triangles[(size_t)3*t + (j+1)%3];
+      uses.push_back(Use{std::min(p, q), std::max(p, q), t, p < q});
+    }
+  }
+  std::sort(uses.begin(), uses.end());
+  auto unitNormal = [&](ll t, double n[3]) -> bool
+  {
+    const ll *T = &triangles[(size_t)3*t];
+    double e1[3], e2[3];
+    Sub(&points[(size_t)3*T[1]], &points[(size_t)3*T[0]], e1);
+    Sub(&points[(size_t)3*T[2]], &points[(size_t)3*T[0]], e2);
+    Cross(e1, e2, n);
+    double L = Norm(n);
+    if (!(L > 0.0)) return false;
+    for (int k = 0; k < 3; k++) n[k] /= L;
+    return true;
+  };
+  std::vector<FoldedPair> all;
+  for (size_t i = 0; i < uses.size(); )
+  {
+    size_t j = i;
+    while (j < uses.size() && uses[j].a == uses[i].a && uses[j].b == uses[i].b) j++;
+    if (j - i == 2 && uses[i].forward != uses[i+1].forward)
+    {
+      double n1[3], n2[3];
+      if (unitNormal(uses[i].t, n1) && unitNormal(uses[i+1].t, n2))
+      {
+        // between the faces: 180 when the two lie flat out, 0 when folded
+        double c[3];
+        Cross(n1, n2, c);
+        double degrees = std::atan2(Norm(c), -Dot(n1, n2))*(180.0/3.14159265358979323846);
+        smallestDegrees = std::min(smallestDegrees, degrees);
+        if (degrees < maxDegrees)
+        {
+          FoldedPair f;
+          f.a = uses[i].t;
+          f.b = uses[i+1].t;
+          f.edge[0] = uses[i].a;
+          f.edge[1] = uses[i].b;
+          f.degrees = degrees;
+          all.push_back(f);
+        }
+      }
+    }
+    i = j;
+  }
+  std::sort(all.begin(), all.end(), [](const FoldedPair &x, const FoldedPair &y) { return x.degrees < y.degrees; });
+  ll numFolded = (ll)all.size();
+  if (all.size() > maxPairs) all.resize(maxPairs);
+  pairs.swap(all);
+  return numFolded;
+}
+
+//---------------------
 // OffsetField
 //---------------------
 
@@ -2735,6 +2811,19 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
         NoteFault(report, it->second.first > 2 ? "an edge of the offset surface on more than two triangles" : "an edge of the offset surface traversed the same way by both its triangles", at);
         break;
       }
+    }
+  }
+  {
+    std::vector<FoldedPair> folded;
+    report.numFoldedEdges = ListFoldedEdges(pts, tris, foldDegrees, 1, folded, report.smallestFoldDegrees);
+    if (!folded.empty())
+    {
+      double at[3];
+      for (int k = 0; k < 3; k++)
+      {
+        at[k] = 0.5*(pts[(size_t)3*folded[0].edge[0] + k] + pts[(size_t)3*folded[0].edge[1] + k]);
+      }
+      NoteFault(report, "two triangles of the offset surface lying on each other across an edge", at);
     }
   }
   }  // the level's value

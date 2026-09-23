@@ -372,6 +372,11 @@ static void FillJunction(double tParent, double tBranch, double rBranch, int num
   printf("  shell: %lld points, %zu triangles; %lld boundary edges, %lld on three facets (%lld layer rim edges), %lld miswound, %lld crossing, %d annulus triangles of no area\n",
       (ll)(pts.size()/3), tris.size()/3, nb, nn, layerRimEdges, nm, crossings, numDegenerate);
   Check(nb == 0 && nm == 0 && nn == layerRimEdges && crossings == 0 && numDegenerate == 0, "the shell is closed, wound consistently and free of crossings");
+  std::vector<FoldedPair> folds; double smallestFold = 180.0;
+  ll numFolded = ListFoldedEdges(pts, tris, foldDegrees, 1, folds, smallestFold);
+  printf("  shell: %lld edges whose two triangles lie on each other within %.2g degree; the smallest angle between two triangles on an edge %.2f degrees\n",
+      numFolded, foldDegrees, smallestFold);
+  Check(numFolded == 0, "no two shell triangles on an edge lie on each other (TetGen would refuse them)");
   if (nb || nm || crossings) return;
   // TetGen as the fill flow calls it
   tetgenio in, out; in.firstnumber = 0; in.numberofpoints = (int)(pts.size()/3); in.pointlist = new REAL[pts.size()]; for (size_t i = 0; i < pts.size(); i++) in.pointlist[i] = pts[i];

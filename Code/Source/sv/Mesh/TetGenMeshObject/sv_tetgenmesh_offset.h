@@ -200,6 +200,8 @@ struct Report
   long long numDegenerateContourTriangles = 0; // left out of the contour: naming a point twice, or emitted twice around points on the level
   long long numCollapsed = 0;            // edges collapsed by the decimation
   long long numRefusedForCrossing = 0;   // decimation operations refused because a triangle they would make passes through a live triangle near it
+  long long numFoldedEdges = 0;          // of the result: edges whose two triangles still lie on each other within foldDegrees, which the volume mesher refuses
+  double smallestFoldDegrees = 180.0;    // of the result: the smallest angle between the two triangles on an edge (180 is flat, 0 is folded)
   long long numPoints = 0;               // of the result
   long long numTriangles = 0;
   long long numBoundaryEdges = 0;        // of the result; none expected before the caller trims it
@@ -387,6 +389,40 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
  */
 void CountEdges(const std::vector<long long> &triangles, long long &numBoundary,
     long long &numNonManifold, long long &numMiswound);
+
+/**
+ * @brief The angle below which TetGen refuses two facets on one edge as
+ * "nearly self-intersecting" (its -p/# tolerance, 0.1 degree by default).
+ */
+const double foldDegrees = 0.1;
+
+/**
+ * @brief Two triangles on one edge that lie on each other.
+ */
+struct FoldedPair
+{
+  long long a = -1, b = -1;              // the two triangles
+  long long edge[2] = {-1, -1};          // the points of the edge they share
+  double degrees = 0.0;                  // the angle between them: 0 is folded flat
+};
+
+/**
+ * @brief Lists the edges on exactly two triangles, wound against each other,
+ * whose triangles meet at an angle below maxDegrees: folded onto each other.
+ * A crossing count does not see them (the two share an edge), and the volume
+ * mesher refuses them below its tolerance (foldDegrees) as two facets
+ * intersecting - measured 2026-09-23 on the user's model, two outer wall
+ * triangles 0.03 degree apart, after every crossing count was zero.
+ * Degenerate triangles (no normal) and edges on one or more than two
+ * triangles are left to the other counts.
+ * @param maxPairs How many pairs to keep, the most folded first; the count
+ * returned is of all of them.
+ * @param smallestDegrees Set to the smallest angle over every edge on two
+ * triangles, folded or not (180 when there is none).
+ * @return The number of folded edges.
+ */
+long long ListFoldedEdges(const std::vector<double> &points, const std::vector<long long> &triangles,
+    double maxDegrees, size_t maxPairs, std::vector<FoldedPair> &pairs, double &smallestDegrees);
 
 }  // namespace svoffset
 

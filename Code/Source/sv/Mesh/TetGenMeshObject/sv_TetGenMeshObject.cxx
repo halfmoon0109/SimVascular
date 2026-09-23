@@ -37,6 +37,7 @@
 #include "sv_polydatasolid_utils.h"
 
 #include "sv_tetgenmesh_utils.h"
+#include "sv_tetgenmesh_offset.h"
 
 #include "sv_sys_geom.h"
 #include "vtkGeometryFilter.h"
@@ -2902,22 +2903,26 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // plane, at the tip of that dome, on a finer interface) comes off with
   // the trim and is no fault of the wall.
   {
-    long long numNonManifold = 0, numMiswound = 0, numCrossing = 0;
-    double firstCrossingAt[3];
-    if (TGenUtils_CountSurfaceFaults(offsetOuter, numNonManifold, numMiswound, numCrossing, firstCrossingAt) != SV_OK)
+    long long numNonManifold = 0, numMiswound = 0, numCrossing = 0, numFolded = 0;
+    double firstCrossingAt[3], firstFoldAt[3], smallestFoldDegrees = 180.0;
+    if (TGenUtils_CountSurfaceFaults(offsetOuter, numNonManifold, numMiswound, numCrossing, firstCrossingAt,
+          numFolded, smallestFoldDegrees, firstFoldAt) != SV_OK)
     {
       return SV_ERROR;
     }
     if (numUnresolved > 0)
     {
-      fprintf(stdout,"  the untrimmed offset surface had %d faults; after the trim at the caps it has %lld (edges on more than two triangles %lld, wound against each other %lld, triangles passing through another %lld)\n",
-          numUnresolved, numNonManifold + numMiswound + numCrossing, numNonManifold, numMiswound, numCrossing);
+      fprintf(stdout,"  the untrimmed offset surface had %d faults; after the trim at the caps it has %lld (edges on more than two triangles %lld, wound against each other %lld, triangles passing through another %lld, folded onto each other %lld)\n",
+          numUnresolved, numNonManifold + numMiswound + numCrossing + numFolded, numNonManifold, numMiswound, numCrossing, numFolded);
     }
-    if (numNonManifold + numMiswound + numCrossing > 0)
+    fprintf(stdout,"  the smallest angle between two triangles on an edge of the trimmed outer wall offset surface is %.3g degrees (the mesher refuses under %.2g)\n",
+        smallestFoldDegrees, svoffset::foldDegrees);
+    if (numNonManifold + numMiswound + numCrossing + numFolded > 0)
     {
-      fprintf(stderr,"The trimmed outer wall offset surface has %lld faults the volume mesher will refuse: %lld edges on more than two triangles, %lld wound against each other, %lld triangles passing through another, the first at (%.5g, %.5g, %.5g); see wall_outer_offset.vtp\n",
-          numNonManifold + numMiswound + numCrossing, numNonManifold, numMiswound, numCrossing, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
-      if (numCrossing > 0)
+      fprintf(stderr,"The trimmed outer wall offset surface has %lld faults the volume mesher will refuse: %lld edges on more than two triangles, %lld wound against each other, %lld triangles passing through another, the first at (%.5g, %.5g, %.5g), %lld edges whose two triangles lie on each other, the first at (%.5g, %.5g, %.5g); see wall_outer_offset.vtp\n",
+          numNonManifold + numMiswound + numCrossing + numFolded, numNonManifold, numMiswound, numCrossing, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2],
+          numFolded, firstFoldAt[0], firstFoldAt[1], firstFoldAt[2]);
+      if (numCrossing + numFolded > 0)
       {
         // Where and how the surface passes through itself, in the log and
         // in two small files (the crossings with two rings around them, and
@@ -2966,22 +2971,26 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       return SV_ERROR;
     }
     {
-      long long numNonManifold = 0, numMiswound = 0, numCrossing = 0;
-      double firstCrossingAt[3];
-      if (TGenUtils_CountSurfaceFaults(level, numNonManifold, numMiswound, numCrossing, firstCrossingAt) != SV_OK)
+      long long numNonManifold = 0, numMiswound = 0, numCrossing = 0, numFolded = 0;
+      double firstCrossingAt[3], firstFoldAt[3], smallestFoldDegrees = 180.0;
+      if (TGenUtils_CountSurfaceFaults(level, numNonManifold, numMiswound, numCrossing, firstCrossingAt,
+            numFolded, smallestFoldDegrees, firstFoldAt) != SV_OK)
       {
         return SV_ERROR;
       }
       if (numLevelUnresolved > 0)
       {
         fprintf(stdout,"  the untrimmed layer surface %d of %d had %d faults; after the trim it has %lld\n",
-            k, numLayers, numLevelUnresolved, numNonManifold + numMiswound + numCrossing);
+            k, numLayers, numLevelUnresolved, numNonManifold + numMiswound + numCrossing + numFolded);
       }
-      if (numNonManifold + numMiswound + numCrossing > 0)
+      fprintf(stdout,"  the smallest angle between two triangles on an edge of the trimmed layer surface %d of %d is %.3g degrees\n",
+          k, numLayers, smallestFoldDegrees);
+      if (numNonManifold + numMiswound + numCrossing + numFolded > 0)
       {
-        fprintf(stderr,"The trimmed wall layer surface %d of %d has %lld faults the volume mesher will refuse (%lld edges on more than two triangles, %lld wound against each other, %lld triangles passing through another, the first at (%.5g, %.5g, %.5g))\n",
-            k, numLayers, numNonManifold + numMiswound + numCrossing, numNonManifold, numMiswound, numCrossing, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
-        if (numCrossing > 0)
+        fprintf(stderr,"The trimmed wall layer surface %d of %d has %lld faults the volume mesher will refuse (%lld edges on more than two triangles, %lld wound against each other, %lld triangles passing through another, the first at (%.5g, %.5g, %.5g), %lld edges whose two triangles lie on each other, the first at (%.5g, %.5g, %.5g))\n",
+            k, numLayers, numNonManifold + numMiswound + numCrossing + numFolded, numNonManifold, numMiswound, numCrossing, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2],
+            numFolded, firstFoldAt[0], firstFoldAt[1], firstFoldAt[2]);
+        if (numCrossing + numFolded > 0)
         {
           char layerLabel[64];
           snprintf(layerLabel, sizeof(layerLabel), "wall_layer_%d_of_%d", k, numLayers);
@@ -3025,19 +3034,20 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // way an internal facet meets the side wall, so that count is only
   // reported.
   {
-    long long numNonManifold = 0, numMiswound = 0, numCrossing = 0;
-    double firstCrossingAt[3];
-    if (TGenUtils_CountSurfaceFaults(shell, numNonManifold, numMiswound, numCrossing, firstCrossingAt) != SV_OK)
+    long long numNonManifold = 0, numMiswound = 0, numCrossing = 0, numFolded = 0;
+    double firstCrossingAt[3], firstFoldAt[3], smallestFoldDegrees = 180.0;
+    if (TGenUtils_CountSurfaceFaults(shell, numNonManifold, numMiswound, numCrossing, firstCrossingAt,
+          numFolded, smallestFoldDegrees, firstFoldAt) != SV_OK)
     {
       return SV_ERROR;
     }
-    fprintf(stdout,"  the shell has %lld edges on three facets (the rims of the layer surfaces), %lld wound against each other, %lld triangles passing through another\n",
-        numNonManifold, numMiswound, numCrossing);
-    if (numMiswound > 0 || numCrossing > 0)
+    fprintf(stdout,"  the shell has %lld edges on three facets (the rims of the layer surfaces), %lld wound against each other, %lld triangles passing through another, %lld edges whose two triangles lie on each other (the smallest angle between two triangles on an edge is %.3g degrees)\n",
+        numNonManifold, numMiswound, numCrossing, numFolded, smallestFoldDegrees);
+    if (numMiswound > 0 || numCrossing > 0 || numFolded > 0)
     {
-      fprintf(stderr,"The wall shell has %lld triangles passing through another and %lld edges wound against each other, which the volume mesher will refuse; the first crossing is at (%.5g, %.5g, %.5g)\n",
-          numCrossing, numMiswound, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2]);
-      if (numCrossing > 0)
+      fprintf(stderr,"The wall shell has %lld triangles passing through another, %lld edges wound against each other and %lld edges whose two triangles lie on each other, which the volume mesher will refuse; the first crossing is at (%.5g, %.5g, %.5g), the first fold at (%.5g, %.5g, %.5g)\n",
+          numCrossing, numMiswound, numFolded, firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2], firstFoldAt[0], firstFoldAt[1], firstFoldAt[2]);
+      if (numCrossing + numFolded > 0)
       {
         TGenUtils_DescribeSurfaceCrossings(shell, surface, thicknessArray, "wall_shell", 12);
       }

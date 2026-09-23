@@ -4969,7 +4969,7 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
     double firstCrossingAt[3];
     long long numCrossing = svenvelope::CountCrossingTriangles(offsets[f].points, offsets[f].triangles,
         crossing, firstCrossingAt);
-    numUnresolved[f] = (int)(report.numBoundaryEdges + report.numNonManifoldEdges + report.numMiswoundEdges + numCrossing);
+    numUnresolved[f] = (int)(report.numBoundaryEdges + report.numNonManifoldEdges + report.numMiswoundEdges + numCrossing + report.numFoldedEdges);
     surfaces[f] = vtkSmartPointer<vtkPolyData>::New();
     OffsetSurfaceToPolyData(offsets[f], crossing, surfaces[f]);
     std::string name = (fractions[f] == 1.0) ? std::string("outer") : std::string("layer_") + std::to_string(f + 1) + "_of_" + std::to_string(numLevels);
@@ -4984,8 +4984,9 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
         report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numZeroCloudPoints,
         report.numDegenerateContourTriangles, report.numContourPointsOffLevel, options.snapIterations, report.numCollapsed,
         report.numPoints, report.numTriangles, report.secondsDecimate, report.numRefusedForCrossing);
-    fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another\n",
-        report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing);
+    fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another, %lld edges whose two triangles lie on each other within %.2g degree (the smallest angle between two triangles on an edge is %.3g degrees)\n",
+        report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing,
+        report.numFoldedEdges, svoffset::foldDegrees, report.smallestFoldDegrees);
     if (!report.firstFault.empty())
     {
       fprintf(stdout,"  the first fault is %s at (%.5g, %.5g, %.5g)\n", report.firstFault.c_str(),
@@ -5908,12 +5909,16 @@ int TGenUtils_StitchCapAnnulus(vtkPoints *points,
 // TGenUtils_CountSurfaceFaults
 // -------------------------------------
 int TGenUtils_CountSurfaceFaults(vtkPolyData *surface, long long &numNonManifold,
-    long long &numMiswound, long long &numCrossing, double firstCrossingAt[3])
+    long long &numMiswound, long long &numCrossing, double firstCrossingAt[3],
+    long long &numFolded, double &smallestFoldDegrees, double firstFoldAt[3])
 {
   numNonManifold = 0;
   numMiswound = 0;
   numCrossing = 0;
+  numFolded = 0;
+  smallestFoldDegrees = 180.0;
   for (int k = 0; k < 3; k++) firstCrossingAt[k] = 0.0;
+  for (int k = 0; k < 3; k++) firstFoldAt[k] = 0.0;
   if (surface == nullptr)
   {
     fprintf(stderr,"Cannot count the faults of a missing surface\n");
@@ -5938,6 +5943,17 @@ int TGenUtils_CountSurfaceFaults(vtkPolyData *surface, long long &numNonManifold
   svoffset::CountEdges(triangles, numBoundary, numNonManifold, numMiswound);
   std::vector<unsigned char> crossing;
   numCrossing = svenvelope::CountCrossingTriangles(points, triangles, crossing, firstCrossingAt);
+  // Two triangles on one edge folded onto each other are not a crossing (they
+  // share the edge) but the mesher refuses them all the same.
+  std::vector<svoffset::FoldedPair> folded;
+  numFolded = svoffset::ListFoldedEdges(points, triangles, svoffset::foldDegrees, 1, folded, smallestFoldDegrees);
+  if (!folded.empty())
+  {
+    for (int k = 0; k < 3; k++)
+    {
+      firstFoldAt[k] = 0.5*(points[(size_t)3*folded[0].edge[0] + k] + points[(size_t)3*folded[0].edge[1] + k]);
+    }
+  }
   return SV_OK;
 }
 
@@ -6017,9 +6033,29 @@ int TGenUtils_DescribeSurfaceCrossings(vtkPolyData *surface, vtkPolyData *interf
   }
   std::vector<svenvelope::CrossingPair> pairs;
   long long numPairs = svenvelope::ListCrossingPairs(points, triangles, (size_t)std::max(maxPairs, 0), pairs);
-  if (numPairs == 0)
+  // Pairs folded onto each other across their shared edge go the same way,
+  // after the crossings, with the edge as their segment: the mesher refuses
+  // them as it does a crossing, and the files are what the cause is found by.
+  std::vector<svoffset::FoldedPair> folds;
+  double smallestFoldDegrees = 180.0;
+  long long numFolds = svoffset::ListFoldedEdges(points, triangles, svoffset::foldDegrees,
+      (size_t)std::max(maxPairs, 0), folds, smallestFoldDegrees);
+  const size_t numCrossingListed = pairs.size();
+  for (size_t f = 0; f < folds.size(); f++)
   {
-    fprintf(stdout,"  no two triangles of the %s surface cross\n", label);
+    svenvelope::CrossingPair pair;
+    pair.a = folds[f].a;
+    pair.b = folds[f].b;
+    for (int k = 0; k < 3; k++)
+    {
+      pair.from[k] = points[(size_t)3*folds[f].edge[0] + k];
+      pair.to[k] = points[(size_t)3*folds[f].edge[1] + k];
+    }
+    pairs.push_back(pair);
+  }
+  if (numPairs == 0 && numFolds == 0)
+  {
+    fprintf(stdout,"  no two triangles of the %s surface cross or lie on each other\n", label);
     return SV_OK;
   }
   long long numPts = (long long)(points.size()/3), numTris = (long long)(triangles.size()/3);
@@ -6096,7 +6132,8 @@ int TGenUtils_DescribeSurfaceCrossings(vtkPolyData *surface, vtkPolyData *interf
     return t;
   };
 
-  fprintf(stdout,"  %lld pairs of triangles of the %s surface cross; the first %zu:\n", numPairs, label, pairs.size());
+  fprintf(stdout,"  %lld pairs of triangles of the %s surface cross and %lld lie on each other across an edge within %.2g degree; the first %zu and %zu:\n",
+      numPairs, label, numFolds, svoffset::foldDegrees, numCrossingListed, folds.size());
   std::vector<int> ring((size_t)numTris, -1), pairOf((size_t)numTris, -1);
   std::vector<double> midpoints, reach;
   for (size_t q = 0; q < pairs.size(); q++)
@@ -6154,9 +6191,18 @@ int TGenUtils_DescribeSurfaceCrossings(vtkPolyData *surface, vtkPolyData *interf
       }
       if (neighbour) nextTo++;
     }
-    fprintf(stdout,"    %zu: triangles %lld and %lld cross along %.3g at (%.5g, %.5g, %.5g); centroids %.3g apart, normals %.1f degrees apart, %d shared corners, %d corners of the second next to the first, closest corners %.2g apart; edges %.3g %.3g %.3g and %.3g %.3g %.3g\n",
-        q + 1, A, B, length, mid[0], mid[1], mid[2], std::sqrt(vtkMath::Distance2BetweenPoints(cA, cB)), angle,
-        sharedCorners, nextTo, closest, eA[0], eA[1], eA[2], eB[0], eB[1], eB[2]);
+    if (q < numCrossingListed)
+    {
+      fprintf(stdout,"    %zu: triangles %lld and %lld cross along %.3g at (%.5g, %.5g, %.5g); centroids %.3g apart, normals %.1f degrees apart, %d shared corners, %d corners of the second next to the first, closest corners %.2g apart; edges %.3g %.3g %.3g and %.3g %.3g %.3g\n",
+          q + 1, A, B, length, mid[0], mid[1], mid[2], std::sqrt(vtkMath::Distance2BetweenPoints(cA, cB)), angle,
+          sharedCorners, nextTo, closest, eA[0], eA[1], eA[2], eB[0], eB[1], eB[2]);
+    }
+    else
+    {
+      fprintf(stdout,"    %zu: triangles %lld and %lld lie on each other across their edge of %.3g at (%.5g, %.5g, %.5g), %.3g degrees apart; centroids %.3g apart; edges %.3g %.3g %.3g and %.3g %.3g %.3g\n",
+          q + 1, A, B, length, mid[0], mid[1], mid[2], folds[q - numCrossingListed].degrees,
+          std::sqrt(vtkMath::Distance2BetweenPoints(cA, cB)), eA[0], eA[1], eA[2], eB[0], eB[1], eB[2]);
+    }
     double wanted = 0.0;
     if (!interfaceCells.empty())
     {
@@ -6244,7 +6290,7 @@ int TGenUtils_DescribeSurfaceCrossings(vtkPolyData *surface, vtkPolyData *interf
     patch->GetCellData()->AddArray(pairArray);
     std::string name = std::string(label) + "_crossings.vtp";
     TGenUtils_WriteVTP(&name[0], patch);
-    fprintf(stdout,"  wrote %s: the %zu crossing triangles of the pairs above and two rings around them, %zu triangles in all\n",
+    fprintf(stdout,"  wrote %s: the %zu crossing or folded triangles of the pairs above and two rings around them, %zu triangles in all\n",
         name.c_str(), numCrossingTriangles, cells.size());
   }
 

@@ -240,6 +240,9 @@ static bool Build(const Interface &iface, const Options &options, Surface &s, Re
   printf("  built: %lld cloud points, %lld tetrahedra (%lld cut), contour %lld -> %lld triangles after %lld collapses; boundary %lld, non-manifold %lld, miswound %lld; %.1f s\n",
       r.numCloudPoints, r.numTetrahedra, r.numTetrahedraCut, r.numContourTriangles, r.numTriangles, r.numCollapsed,
       r.numBoundaryEdges, r.numNonManifoldEdges, r.numMiswoundEdges, r.secondsField + r.secondsDelaunay + r.secondsContour + r.secondsDecimate);
+  printf("  folds: %lld within %.2g degree; the smallest angle between two triangles on an edge %.2f degrees\n",
+      r.numFoldedEdges, svoffset::foldDegrees, r.smallestFoldDegrees);
+  Check(r.numFoldedEdges == 0, "no two triangles on an edge lie on each other (TetGen would refuse them)");
   return true;
 }
 
@@ -558,6 +561,33 @@ static void TestNeighbouringEnds()
   Check(worst > 0.85, "the neighbouring tube's wall past the short tube's cap is intact");
 }
 
+// 0. The fold count itself: a pair of triangles on one edge lying on each
+// other is counted with the angle between them, a pair lying flat out or at a
+// right angle is not, and neither is an edge on one triangle.
+static void TestFoldCount()
+{
+  printf("test 0: the fold count on three hand-made pairs\n");
+  // a-b-c and b-a-d share the edge a-b; d lies over the triangle a-b-c, a
+  // hundred-thousandth off its plane: folded. b-a-e lies flat beside a-b-c,
+  // and b-a-f stands at a right angle to it.
+  std::vector<double> pts = {0,0,0,  1,0,0,  0.5,1,0,  0.5,0.3,1e-5,  0.5,-1,0,  0.5,0,1};
+  std::vector<ll> folded = {0,1,2,  1,0,3};
+  std::vector<ll> flat = {0,1,2,  1,0,4};
+  std::vector<ll> square = {0,1,2,  1,0,5};
+  std::vector<svoffset::FoldedPair> pairs;
+  double smallest = 0.0;
+  ll n = svoffset::ListFoldedEdges(pts, folded, svoffset::foldDegrees, 4, pairs, smallest);
+  printf("  folded pair: %lld folded, %.4f degrees\n", n, smallest);
+  Check(n == 1 && pairs.size() == 1 && pairs[0].degrees < 0.01 && std::min(pairs[0].edge[0], pairs[0].edge[1]) == 0 && std::max(pairs[0].edge[0], pairs[0].edge[1]) == 1,
+      "a pair lying on each other is counted, on its shared edge, at about no angle");
+  n = svoffset::ListFoldedEdges(pts, flat, svoffset::foldDegrees, 4, pairs, smallest);
+  printf("  flat pair: %lld folded, %.4f degrees\n", n, smallest);
+  Check(n == 0 && std::abs(smallest - 180.0) < 1e-6, "a pair lying flat out is not, at 180 degrees");
+  n = svoffset::ListFoldedEdges(pts, square, svoffset::foldDegrees, 4, pairs, smallest);
+  printf("  right-angled pair: %lld folded, %.4f degrees\n", n, smallest);
+  Check(n == 0 && std::abs(smallest - 90.0) < 1e-6, "a pair at a right angle is not, at 90 degrees");
+}
+
 // 5. Layers: offsets at 1/3, 2/3 and 1 of the thickness of a tube, each
 // trimmed at the cap planes, must nest without crossing one another or the
 // interface, each a layer thick from the interface, at one size (the chord
@@ -592,6 +622,7 @@ static void TestLayers()
     double fraction = (double)k/numLayers;
     Surface s = built[(size_t)k - 1]; Report r = reports[(size_t)k - 1];
     Check(r.numNonManifoldEdges == 0 && r.numMiswoundEdges == 0, "the layer surface is a manifold");
+    Check(r.numFoldedEdges == 0, "and has no two triangles on an edge lying on each other");
     std::vector<svoffset::CapPlane> planes = PlanesFromRims(iface, s);
     svoffset::TrimReport trim; std::string err;
     if (svoffset::TrimSurfaceAtCaps(s, planes, 0.1, trim, err) != 0) { printf("  FAIL trim of layer %d: %s\n", k, err.c_str()); numFailed++; ok = false; break; }
@@ -630,6 +661,7 @@ static void TestLayers()
 
 int main()
 {
+  TestFoldCount();
   TestTube();
   TestThinTube();
   TestSeptum();
