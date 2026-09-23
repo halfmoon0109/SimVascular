@@ -1,25 +1,25 @@
 Reading plugin paths SV_PLUGIN_PATH environment variable...
 
 
-[Wed Sep 23 05:40:37 2026 
-2.257] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
-[2.261] OpenCASCADE module loaded.
+[Wed Sep 23 06:34:30 2026 
+2.096] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
+[2.109] OpenCASCADE module loaded.
 sv4guiDataManagerPluginActivator::start()
 sv4guiMeshingPluginActivator::start()
-[2.627] BlueBerry Workbench ready
+[2.476] BlueBerry Workbench ready
 Expand
 Expand
 Expand
 Expand
-!33.288! WARNING: QPainter::end: Painter ended with 2 saved states
-!33.288! WARNING: QPainter::end: Painter ended with 2 saved states
-!33.288! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.260! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.260! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.261! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.316! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.316! WARNING: QPainter::end: Painter ended with 2 saved states
-!34.316! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.843! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.844! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.844! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.896! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.897! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.897! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.954! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.954! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.954! WARNING: QPainter::end: Painter ended with 2 saved states
 Getting sizing function Surface
 Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
   Number of triangles: 4218044
@@ -42,7 +42,7 @@ Remeshing surface with MMG...
 
   -- MESH QUALITY   4218044
      BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
-  -- PHASE 1 COMPLETED.     3.391s
+  -- PHASE 1 COMPLETED.     3.032s
 
   -- PHASE 2 : ISOTROPIC MESHING
         78112 splitted,  1499785 collapsed,    78452 swapped, 5 iter.
@@ -50,7 +50,7 @@ Remeshing surface with MMG...
   -- GRADATION : 1.300000
          1065 splitted,       28 collapsed,       64 swapped, 3 iter.
         90659 splitted,   356083 collapsed,    26568 swapped,  9421952 moved, 2 iter. 
-  -- PHASE 2 COMPLETED.     24.948s
+  -- PHASE 2 COMPLETED.     23.808s
 
   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
    END OF MODULE MMGS: IMB-LJLL 
@@ -64,7 +64,7 @@ Remeshing surface with MMG...
      NUMBER OF TRIANGLES    896556
      NUMBER OF EDGES          2430   RIDGES      2430
 
-   MMGSLIB: ELAPSED TIME  28.470s
+   MMGSLIB: ELAPSED TIME  26.953s
 Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
   Number of triangles: 888201
   Min / Avg / Max: 1.000 / 1.213 / 8.421
@@ -128,17 +128,17 @@ Wall outer surface and its 2 layer surface(s) as offsets of the interface at 0.3
   the field was sampled on 1781882 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges, each offset point 0.1 of its distance off its ray); 11.1 s for the field
   wrote wall_layer_1_of_3_offset.vtp in /work
   surface 1 of 3, at 0.333 of the thickness (layer_1_of_3):
-  12731290 tetrahedra over the cloud, 3212441 of them cut by the level (8.3 s); the contour had 2316833 points and 4633678 triangles (16.8 s; 0 cloud points on the level itself, 0 triangles of no area left out, 39 points still off the level after 16 steps); 1720750 edges collapsed onto the level to the interface's own size, leaving 596083 points and 1192178 triangles (149.7 s; 0 operations refused because a triangle they would make passes through a neighbour)
+  12731290 tetrahedra over the cloud, 3212441 of them cut by the level (8.2 s); the contour had 2316833 points and 4633678 triangles (16.5 s; 0 cloud points on the level itself, 0 triangles of no area left out, 39 points still off the level after 16 steps); 1720750 edges collapsed onto the level to the interface's own size, leaving 596083 points and 1192178 triangles (147.7 s; 0 operations refused because a triangle they would make passes through a neighbour)
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another
   wrote wall_layer_2_of_3_offset.vtp in /work
   surface 2 of 3, at 0.667 of the thickness (layer_2_of_3):
-  12731290 tetrahedra over the cloud, 3113623 of them cut by the level (8.1 s); the contour had 2215297 points and 4430602 triangles (16.1 s; 0 cloud points on the level itself, 0 triangles of no area left out, 34 points still off the level after 16 steps); 1644798 edges collapsed onto the level to the interface's own size, leaving 570499 points and 1141006 triangles (138.0 s; 4 operations refused because a triangle they would make passes through a neighbour)
+  12731290 tetrahedra over the cloud, 3113623 of them cut by the level (8.5 s); the contour had 2215297 points and 4430602 triangles (16.5 s; 0 cloud points on the level itself, 0 triangles of no area left out, 34 points still off the level after 16 steps); 1644798 edges collapsed onto the level to the interface's own size, leaving 570499 points and 1141006 triangles (140.1 s; 4 operations refused because a triangle they would make passes through a neighbour)
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another
   wrote wall_outer_offset.vtp in /work
   surface 3 of 3, at 1 of the thickness (outer):
-  12731290 tetrahedra over the cloud, 3101780 of them cut by the level (8.3 s); the contour had 2207072 points and 4414176 triangles (16.9 s; 0 cloud points on the level itself, 0 triangles of no area left out, 70 points still off the level after 16 steps); 1496998 edges collapsed onto the level to the interface's own size, leaving 710074 points and 1420180 triangles (143.9 s; 1 operations refused because a triangle they would make passes through a neighbour)
+  12731290 tetrahedra over the cloud, 3101780 of them cut by the level (7.9 s); the contour had 2207072 points and 4414176 triangles (16.8 s; 0 cloud points on the level itself, 0 triangles of no area left out, 70 points still off the level after 16 steps); 1496998 edges collapsed onto the level to the interface's own size, leaving 710074 points and 1420180 triangles (142.7 s; 1 operations refused because a triangle they would make passes through a neighbour)
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another
-  30962685 field evaluations in all; 551.8 s for the 3 surface(s)
+  30962685 field evaluations in all; 550.1 s for the 3 surface(s)
   trimming at the caps by the ownership the offset surface carries
     cap at (-7.3418, -29.886, 73.207): 125 points past its plane came off, 28 moved onto it
     cap at (6.8102, -35.173, 74.946): 125 points past its plane came off, 29 moved onto it
@@ -286,7 +286,7 @@ Filling the wall with TetGen tetrahedra: shell surface has 2309570 points and 46
   3 layers: the fill's quality bounds are loosened to radius-edge 2 and dihedral 5 degrees
   TetGen wall fill started...
 Delaunizing vertices...
-Delaunay seconds:  8.33027
+Delaunay seconds:  8.09934
 Creating surface mesh ...
 Found two nearly self-intersecting facets.
   1st: [1744643, 2063323, 1742611] #2
@@ -295,6 +295,3 @@ The dihedral angle between them is 0.0307493 degree.
 Hint:  You may use -p/# to decrease the dihedral angle  tolerance 0.1 (degree).
 ERROR: TetGen quit with error code 3 while filling the wall. The shell it was given is the inner surface, the outer wall envelope, and the annulus closing the two at each vessel end; TetGen prints the coordinates of the intersection above, so look them up to see which it is in. The envelope was checked against itself for crossings, holes and edges on the wrong number of triangles before this, so an intersection on it is one that check missed - look at the envelope log and at wall_outer_trimmed.vtp and wall_outer_dropped.vtp there. An intersection between the envelope and the inner surface is a piece kept inside another vessel, which its winding number should have dropped - the envelope log's winding counts say what the rays saw. Otherwise the inner surface is self-intersecting and the wall has inherited it - see the interface triangle quality report
 Problem with vessel wall meshing
-[728.508] Closing workbench...
-!728.979! WARNING: Empty filename passed to function
-[729.029] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
