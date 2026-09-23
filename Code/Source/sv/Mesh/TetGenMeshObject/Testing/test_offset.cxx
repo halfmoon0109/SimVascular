@@ -240,8 +240,8 @@ static bool Build(const Interface &iface, const Options &options, Surface &s, Re
   printf("  built: %lld cloud points, %lld tetrahedra (%lld cut), contour %lld -> %lld triangles after %lld collapses; boundary %lld, non-manifold %lld, miswound %lld; %.1f s\n",
       r.numCloudPoints, r.numTetrahedra, r.numTetrahedraCut, r.numContourTriangles, r.numTriangles, r.numCollapsed,
       r.numBoundaryEdges, r.numNonManifoldEdges, r.numMiswoundEdges, r.secondsField + r.secondsDelaunay + r.secondsContour + r.secondsDecimate);
-  printf("  folds: %lld within %.2g degree; the smallest angle between two triangles on an edge %.2f degrees\n",
-      r.numFoldedEdges, svoffset::foldDegrees, r.smallestFoldDegrees);
+  printf("  folds: %lld unfolded by the decimation, %lld left within %.2g degree; the smallest angle between two triangles on an edge %.2f degrees\n",
+      r.numUnfolded, r.numFoldedEdges, svoffset::foldDegrees, r.smallestFoldDegrees);
   Check(r.numFoldedEdges == 0, "no two triangles on an edge lie on each other (TetGen would refuse them)");
   return true;
 }

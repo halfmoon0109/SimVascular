@@ -4984,9 +4984,9 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
         report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numZeroCloudPoints,
         report.numDegenerateContourTriangles, report.numContourPointsOffLevel, options.snapIterations, report.numCollapsed,
         report.numPoints, report.numTriangles, report.secondsDecimate, report.numRefusedForCrossing);
-    fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another, %lld edges whose two triangles lie on each other within %.2g degree (the smallest angle between two triangles on an edge is %.3g degrees)\n",
+    fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another, %lld edges whose two triangles lie on each other within %.2g degree (%lld unfolded by the decimation; the smallest angle between two triangles on an edge is %.3g degrees)\n",
         report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing,
-        report.numFoldedEdges, svoffset::foldDegrees, report.smallestFoldDegrees);
+        report.numFoldedEdges, svoffset::foldDegrees, report.numUnfolded, report.smallestFoldDegrees);
     if (!report.firstFault.empty())
     {
       fprintf(stdout,"  the first fault is %s at (%.5g, %.5g, %.5g)\n", report.firstFault.c_str(),

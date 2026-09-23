@@ -2751,6 +2751,211 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     }
     removeValenceThree();
     removeFlatApexes();
+    // Folds: two triangles on one edge lying on each other within a degree.
+    // The crossing guard does not see them (the two share the edge), the
+    // flips leave a well-shaped pair at a sharp angle alone as a crease, and
+    // the volume mesher refuses them below a tenth of a degree as two facets
+    // intersecting - measured 2026-09-23 on the user's model, a pair of outer
+    // wall triangles (aspect under 70) 0.03 degree apart. The pair is
+    // flipped when both triangles on the other diagonal face the way the
+    // larger of the pair does: the two apexes then lie on the same side of
+    // the edge, and the new pair tiles the larger triangle less the smaller,
+    // with the same outline, no point moved. Otherwise the edge is
+    // collapsed, under every check a collapse has. Otherwise one of the four
+    // points is a spike: on three triangles only, two of them the folded
+    // pair, a tent over its ring with the third triangle's edge (the
+    // diagonal) already there, so that neither the flip nor the collapse
+    // (the link condition) applies. Measured on the interface patch of the
+    // cap 0 branch root (2026-09-22): both folds under a degree away from
+    // the patch's cut were such spikes, the diagonal 0.007 against edges of
+    // 0.1. The valence-three removal above did not take them because it asks
+    // the three old triangles to agree with the new one and a folded
+    // triangle's direction is either way; here the ring triangle is judged
+    // by the triangles across its edges instead, which it must not fold on.
+    {
+      const double unfoldCosine = std::cos(1.0*3.14159265358979323846/180.0);
+      const double spikeCosine = std::cos(10.0*3.14159265358979323846/180.0);
+      auto removeSpike = [&](ll u) -> bool
+      {
+        ll star[3];
+        int n = 0;
+        for (size_t m = 0; m < incident[(size_t)u].size(); m++)
+        {
+          ll t = incident[(size_t)u][m];
+          if (dead[(size_t)t]) continue;
+          if (n == 3) return false;
+          star[n++] = t;
+        }
+        if (n != 3) return false;
+        // the ring r0 -> r1 -> r2, from the triangles (u, r0, r1), (u, r1, r2), (u, r2, r0)
+        ll ring[3] = {-1, -1, -1};
+        ll t0 = star[0];
+        for (int q = 0; q < 3; q++)
+        {
+          if (tris[(size_t)3*t0 + q] == u)
+          {
+            ring[0] = tris[(size_t)3*t0 + (q+1)%3];
+            ring[1] = tris[(size_t)3*t0 + (q+2)%3];
+          }
+        }
+        for (int i = 1; i < 3; i++)
+        {
+          for (int q = 0; q < 3; q++)
+          {
+            ll w = tris[(size_t)3*star[i] + q];
+            if (w != u && w != ring[0] && w != ring[1]) ring[2] = w;
+          }
+        }
+        if (ring[0] < 0 || ring[2] < 0) return false;
+        // not a triangle already there (taking u out would double it)
+        for (size_t m = 0; m < incident[(size_t)ring[0]].size(); m++)
+        {
+          ll t = incident[(size_t)ring[0]][m];
+          if (dead[(size_t)t] || t == star[0] || t == star[1] || t == star[2]) continue;
+          int found = 0;
+          for (int q = 0; q < 3; q++) if (tris[(size_t)3*t + q] == ring[1] || tris[(size_t)3*t + q] == ring[2]) found++;
+          if (found == 2) return false;
+        }
+        double nNew[3];
+        normalOf(ring[0], ring[1], ring[2], nNew);
+        double ln = Norm(nNew);
+        if (!(ln > 0.0) || smallestAngleSine(ring[0], ring[1], ring[2]) < 1.0e-3) return false;
+        // not folded on the triangles across its edges
+        for (int i = 0; i < 3; i++)
+        {
+          ll p = ring[i], q = ring[(i+1)%3];
+          for (size_t m = 0; m < incident[(size_t)p].size(); m++)
+          {
+            ll t = incident[(size_t)p][m];
+            if (dead[(size_t)t] || t == star[0] || t == star[1] || t == star[2]) continue;
+            for (int k = 0; k < 3; k++)
+            {
+              if (tris[(size_t)3*t + k] == q && tris[(size_t)3*t + (k+1)%3] == p)
+              {
+                double nOut[3];
+                normalOf(tris[(size_t)3*t], tris[(size_t)3*t + 1], tris[(size_t)3*t + 2], nOut);
+                double lo = Norm(nOut);
+                if (lo > 0.0 && Dot(nNew, nOut) < -spikeCosine*ln*lo) return false;
+              }
+            }
+          }
+        }
+        if (options.collapseFieldTolerance > 0.0)
+        {
+          double centre[3];
+          for (int k = 0; k < 3; k++)
+          {
+            centre[k] = (pts[(size_t)3*ring[0] + k] + pts[(size_t)3*ring[1] + k] + pts[(size_t)3*ring[2] + k])/3.0;
+          }
+          if (std::abs(field.Evaluate(centre, fraction)) > options.collapseFieldTolerance*thick[(size_t)u]) return false;
+        }
+        if (guardOn)
+        {
+          guardStampValue++;
+          for (int i = 0; i < 3; i++) guardStamp[(size_t)star[i]] = guardStampValue;
+          if (guardCrosses(ring)) { report.numRefusedForCrossing++; return false; }
+          for (int i = 0; i < 3; i++) guardRemove(star[i]);
+        }
+        // star[0] becomes the ring triangle; the other two die
+        for (int k = 0; k < 3; k++) tris[(size_t)3*t0 + k] = ring[k];
+        if (guardOn) guardAdd(t0);
+        dead[(size_t)star[1]] = 1;
+        dead[(size_t)star[2]] = 1;
+        incident[(size_t)ring[2]].push_back(t0);
+        incident[(size_t)u].clear();
+        for (int i = 0; i < 3; i++) version[(size_t)ring[i]]++;
+        version[(size_t)u]++;
+        return true;
+      };
+      for (int pass = 0; pass < 4; pass++)
+      {
+        ll numChanged = 0;
+        for (ll t1 = 0; t1 < nt; t1++)
+        {
+          if (dead[(size_t)t1]) continue;
+          for (int j = 0; j < 3; j++)
+          {
+            if (dead[(size_t)t1]) break;
+            ll a = tris[(size_t)3*t1 + j], b = tris[(size_t)3*t1 + (j+1)%3], c = tris[(size_t)3*t1 + (j+2)%3];
+            // the other triangle on edge a-b
+            ll t2 = -1;
+            for (size_t m = 0; m < incident[(size_t)a].size(); m++)
+            {
+              ll t = incident[(size_t)a][m];
+              if (t == t1 || dead[(size_t)t]) continue;
+              for (int q = 0; q < 3; q++)
+              {
+                if (tris[(size_t)3*t + q] == b && tris[(size_t)3*t + (q+1)%3] == a) t2 = t;
+              }
+            }
+            if (t2 < 0) continue;
+            ll d = -1;
+            for (int q = 0; q < 3; q++)
+            {
+              ll w = tris[(size_t)3*t2 + q];
+              if (w != a && w != b) d = w;
+            }
+            if (d < 0 || d == c) continue;
+            double n1[3], n2[3];
+            normalOf(a, b, c, n1);
+            normalOf(b, a, d, n2);
+            double l1 = Norm(n1), l2 = Norm(n2);
+            if (!(l1 > 0.0 && l2 > 0.0) || Dot(n1, n2) > -unfoldCosine*l1*l2) continue;
+            bool done = false;
+            bool exists = false;
+            for (size_t m = 0; m < incident[(size_t)c].size() && !exists; m++)
+            {
+              ll t = incident[(size_t)c][m];
+              if (dead[(size_t)t]) continue;
+              for (int q = 0; q < 3; q++) if (tris[(size_t)3*t + q] == d) exists = true;
+            }
+            if (!exists)
+            {
+              double m1[3], m2[3];
+              normalOf(c, a, d, m1);
+              normalOf(d, b, c, m2);
+              double k1 = Norm(m1), k2 = Norm(m2);
+              const double *ref = (l1 >= l2) ? n1 : n2;
+              double lr = std::max(l1, l2);
+              bool faces = k1 > 0.0 && k2 > 0.0 && Dot(m1, ref) > 0.5*k1*lr && Dot(m2, ref) > 0.5*k2*lr;
+              ll new1[3] = {c, a, d}, new2[3] = {d, b, c};
+              if (faces && guardOn)
+              {
+                guardStampValue++;
+                guardStamp[(size_t)t1] = guardStampValue;
+                guardStamp[(size_t)t2] = guardStampValue;
+                if (guardCrosses(new1) || guardCrosses(new2))
+                {
+                  report.numRefusedForCrossing++;
+                  faces = false;
+                }
+              }
+              if (faces)
+              {
+                if (guardOn) { guardRemove(t1); guardRemove(t2); }
+                for (int q = 0; q < 3; q++) { tris[(size_t)3*t1 + q] = new1[q]; tris[(size_t)3*t2 + q] = new2[q]; }
+                if (guardOn) { guardAdd(t1); guardAdd(t2); }
+                removeFromIncident(b, t1);
+                incident[(size_t)d].push_back(t1);
+                removeFromIncident(a, t2);
+                incident[(size_t)c].push_back(t2);
+                version[(size_t)a]++; version[(size_t)b]++; version[(size_t)c]++; version[(size_t)d]++;
+                done = true;
+              }
+            }
+            if (!done) done = tryCollapse(a, b) || tryCollapse(b, a);
+            if (!done) done = removeSpike(a) || removeSpike(b) || removeSpike(c) || removeSpike(d);
+            if (done)
+            {
+              report.numUnfolded++;
+              numChanged++;
+              break;   // t1 changed or died; its other edges are seen in the next pass
+            }
+          }
+        }
+        if (numChanged == 0) break;
+      }
+    }
     std::vector<ll> newTris;
     std::vector<ll> newId((size_t)nv, -1);
     std::vector<double> newPts;

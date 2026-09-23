@@ -200,6 +200,7 @@ struct Report
   long long numDegenerateContourTriangles = 0; // left out of the contour: naming a point twice, or emitted twice around points on the level
   long long numCollapsed = 0;            // edges collapsed by the decimation
   long long numRefusedForCrossing = 0;   // decimation operations refused because a triangle they would make passes through a live triangle near it
+  long long numUnfolded = 0;             // edges whose two triangles lay on each other within a degree, flipped, collapsed or taken out with the spike point they stand on by the decimation's last pass
   long long numFoldedEdges = 0;          // of the result: edges whose two triangles still lie on each other within foldDegrees, which the volume mesher refuses
   double smallestFoldDegrees = 180.0;    // of the result: the smallest angle between the two triangles on an edge (180 is flat, 0 is folded)
   long long numPoints = 0;               // of the result
