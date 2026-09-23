@@ -601,6 +601,37 @@ static void TestFoldCount()
   Check(n == 0 && std::abs(smallest - 90.0) < 1e-6, "and none is counted when they stand apart");
 }
 
+// 0b. The decimation's crossing guard: two new triangles of one operation,
+// tested one after the other, are each tested against every triangle near
+// them. With one mark for "leaving" and "already seen", the second test
+// skipped what the first had looked at and missed its crossing.
+static void TestCrossingGuard()
+{
+  printf("test 0b: the crossing guard tests each new triangle of an operation in full\n");
+  // X lies in z = 0; the first new triangle lies above it, the second pierces it
+  std::vector<double> pts = {0,0,0,  1,0,0,  0,1,0,
+                             0,0,0.5,  1,0,0.5,  0,1,0.5,
+                             0.2,0.2,-0.5,  0.4,0.2,0.5,  0.2,0.4,0.5};
+  std::vector<ll> tris = {0,1,2};
+  std::vector<unsigned char> dead(1, 0);
+  svoffset::CrossingGuard guard(pts, tris, dead);
+  guard.Build(10.0);   // one cell holds everything
+  const ll above[3] = {3,4,5}, through[3] = {6,7,8};
+  Check(guard.Crosses(through), "before any operation, a triangle through X is refused");
+  guard.BeginOperation();
+  bool first = guard.Crosses(above);
+  bool second = guard.Crosses(through);
+  printf("  one operation: the triangle above X crosses %d, the one through it %d\n", (int)first, (int)second);
+  Check(!first && second, "the second new triangle is tested against X although the first looked at it");
+  guard.BeginOperation();
+  guard.Leave(0);
+  Check(!guard.Crosses(through), "a triangle the operation replaces is not tested against");
+  guard.BeginOperation();
+  Check(guard.Crosses(through), "and is again in the next operation");
+  dead[0] = 1;
+  Check(!guard.Crosses(through), "a dead triangle is not tested against");
+}
+
 // 5. Layers: offsets at 1/3, 2/3 and 1 of the thickness of a tube, each
 // trimmed at the cap planes, must nest without crossing one another or the
 // interface, each a layer thick from the interface, at one size (the chord
@@ -675,6 +706,7 @@ static void TestLayers()
 int main()
 {
   TestFoldCount();
+  TestCrossingGuard();
   TestTube();
   TestThinTube();
   TestSeptum();

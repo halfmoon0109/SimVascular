@@ -90,6 +90,7 @@
 #define __SV_TETGENMESH_OFFSET_H__
 
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace svoffset
@@ -428,6 +429,59 @@ struct FoldedPair
  */
 long long ListFoldedEdges(const std::vector<double> &points, const std::vector<long long> &triangles,
     double maxDegrees, size_t maxPairs, std::vector<FoldedPair> &pairs, double &smallestDegrees);
+
+/**
+ * @brief The decimation's crossing guard: the live triangles of a surface in
+ * a uniform grid, so that the triangles an operation would make can be
+ * tested against those near them (by svenvelope::TrianglesCross) before it
+ * is made. Points never move during the decimation, but triangles are
+ * re-indexed, so a triangle is removed from its cells before it changes and
+ * added after. The triangles an operation replaces are marked as leaving
+ * and not tested against; which candidates one test has already seen is
+ * kept apart from that, per test, so that several new triangles of one
+ * operation are each tested against every triangle near them (with one mark
+ * for both, the second test skipped whatever the first had looked at -
+ * found in review 2026-09-23).
+ */
+class CrossingGuard
+{
+public:
+  /// The surface the guard watches; the three are read, never written, and
+  /// must outlive the guard. A triangle t is live while dead[t] is zero.
+  CrossingGuard(const std::vector<double> &points, const std::vector<long long> &triangles,
+      const std::vector<unsigned char> &dead);
+
+  /// Indexes every triangle in a grid of the given cell size over the
+  /// points' box (the cell grows until the grid has under 4e8 cells).
+  void Build(double cell);
+
+  void Add(long long t);
+  void Remove(long long t);
+
+  /// Starts an operation: the triangles marked as leaving are forgotten.
+  void BeginOperation();
+
+  /// Marks t as replaced by the current operation: no test is made against it.
+  void Leave(long long t);
+
+  /// Whether the triangle T (point ids) passes through a live triangle near
+  /// it that is not leaving.
+  bool Crosses(const long long T[3]);
+
+private:
+  void Box(const long long *T, int lo[3], int hi[3]) const;
+  long long Index(int i, int j, int k) const;
+
+  const std::vector<double> &points_;
+  const std::vector<long long> &triangles_;
+  const std::vector<unsigned char> &dead_;
+  double origin_[3] = {0.0, 0.0, 0.0};
+  double cell_ = 1.0;
+  int n_[3] = {1, 1, 1};
+  std::unordered_map<long long, std::vector<long long> > cells_;
+  std::vector<long long> leaving_, seen_;   // per triangle: the operation it leaves in, the test that last saw it
+  long long operation_ = 0, test_ = 0;
+};
 
 }  // namespace svoffset
 
