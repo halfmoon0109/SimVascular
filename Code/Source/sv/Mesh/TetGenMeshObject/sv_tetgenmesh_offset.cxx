@@ -1183,7 +1183,7 @@ int OffsetField::Build(const Interface &input, Report &report, std::string &erro
   return 0;
 }
 
-double OffsetField::Evaluate(const double x[3]) const
+double OffsetField::Evaluate(const double x[3], double thicknessScale) const
 {
   const Data &d = *data_;
   d.numEvaluations++;
@@ -1235,7 +1235,7 @@ double OffsetField::Evaluate(const double x[3]) const
               }
             }
             double tq = bary[0]*d.thickness[(size_t)tt[0]] + bary[1]*d.thickness[(size_t)tt[1]] + bary[2]*d.thickness[(size_t)tt[2]];
-            bestTerm = std::min(bestTerm, dist - tq);
+            bestTerm = std::min(bestTerm, dist - thicknessScale*tq);
           }
         }
       }
@@ -1291,7 +1291,7 @@ double OffsetField::Evaluate(const double x[3]) const
   {
     // In the lumen: inside, by the wall there and the depth.
     double tq = bestBary[0]*d.thickness[(size_t)tt[0]] + bestBary[1]*d.thickness[(size_t)tt[1]] + bestBary[2]*d.thickness[(size_t)tt[2]];
-    return -best - tq;
+    return -best - thicknessScale*tq;
   }
   return bestTerm;
 }
@@ -1385,12 +1385,30 @@ long long OffsetField::NumEvaluations() const { return data_->numEvaluations; }
 // BuildOffsetSurface
 //---------------------
 
-int BuildOffsetSurface(const Interface &input, const Options &options,
-    DelaunayFunction delaunay, void *context, Surface &surface, Report &report,
+int BuildOffsetSurfaces(const Interface &input, const Options &options,
+    const std::vector<double> &fractions, DelaunayFunction delaunay, void *context,
+    std::vector<Surface> &surfaces, std::vector<Report> &reports,
     std::string &error, ProgressFunction progress)
 {
-  report = Report();
-  surface = Surface();
+  reports.assign(fractions.size(), Report());
+  surfaces.assign(fractions.size(), Surface());
+  if (fractions.empty())
+  {
+    error = "no fraction of the thickness was asked for";
+    return 1;
+  }
+  for (size_t f = 0; f < fractions.size(); f++)
+  {
+    if (!(fractions[f] > 0.0 && fractions[f] <= 1.0))
+    {
+      error = "a fraction of the thickness must be in (0, 1]";
+      return 1;
+    }
+  }
+  // The field and the cloud are built once; what they report goes into
+  // every level's report.
+  Report base;
+  Report &report = base;
   if (delaunay == nullptr)
   {
     error = "no tetrahedralization was supplied";
@@ -1454,17 +1472,24 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   {
     return std::max(options.farLayer*ft[(size_t)i], options.farSpacing*edgeAt[(size_t)i]);
   };
+  // The value of a cloud point at another fraction of the thickness is
+  // recomputed per level below; a surface point's is -fraction*t without
+  // evaluation, every other point's is evaluated.
   std::vector<double> cloud, value;
-  auto addPoint = [&](const double p[3], double v)
+  std::vector<signed char> cloudIsSurface;
+  std::vector<ll> cloudBase;
+  auto addPoint = [&](const double p[3], double v, bool onSurface, ll basePoint)
   {
     cloud.insert(cloud.end(), p, p + 3);
     value.push_back(v);
+    cloudIsSurface.push_back(onSurface ? 1 : 0);
+    cloudBase.push_back(basePoint);
   };
   for (ll i = 0; i < numFP; i++)
   {
     const double *p = &fp[(size_t)3*i], *n = &fnrm[(size_t)3*i];
     double t = ft[(size_t)i];
-    addPoint(p, -t);
+    addPoint(p, -t, true, i);
     double a[3], b[3], c[3];
     double far = farDistance(i);
     for (int k = 0; k < 3; k++)
@@ -1473,9 +1498,9 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       b[k] = p[k] + options.outerLayer*t*n[k];
       c[k] = p[k] + far*n[k];
     }
-    addPoint(a, -(1.0 - options.innerLayer)*t);
-    addPoint(b, field.Evaluate(b));
-    addPoint(c, field.Evaluate(c));
+    addPoint(a, -(1.0 - options.innerLayer)*t, false, i);
+    addPoint(b, field.Evaluate(b), false, i);
+    addPoint(c, field.Evaluate(c), false, i);
   }
   {
     const std::vector<std::vector<ll> > &rims = field.Rims();
@@ -1504,12 +1529,52 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
           b[k] = p[k] + options.outerLayer*t*outward[k];
           c[k] = p[k] + far*outward[k];
         }
-        addPoint(b, field.Evaluate(b));
-        addPoint(c, field.Evaluate(c));
+        addPoint(b, field.Evaluate(b), false, v);
+        addPoint(c, field.Evaluate(c), false, v);
       }
       base += (ll)loop.size();
     }
   }
+  report.numCloudPoints = (ll)(cloud.size()/3);
+  auto t1 = std::chrono::steady_clock::now();
+  report.secondsField = std::chrono::duration<double>(t1 - t0).count();
+
+  for (size_t level = 0; level < fractions.size(); level++)
+  {
+  const double fraction = fractions[level];
+  Report &report = reports[level];
+  report = base;
+  Surface &surface = surfaces[level];
+  char stage[160];
+  auto sayLevel = [&](const char *what)
+  {
+    if (fractions.size() > 1)
+    {
+      snprintf(stage, sizeof(stage), "%s (surface %zu of %zu, at %.3g of the thickness)", what, level + 1, fractions.size(), fraction);
+      say(stage);
+    }
+    else
+    {
+      say(what);
+    }
+  };
+  // The field on the cloud at this fraction of the thickness.
+  std::vector<double> levelValue;
+  if (fraction == 1.0)
+  {
+    levelValue = value;
+  }
+  else
+  {
+    sayLevel("the field on the cloud at this fraction of the thickness");
+    levelValue.resize(value.size());
+    for (size_t i = 0; i < value.size(); i++)
+    {
+      levelValue[i] = cloudIsSurface[i] ? -fraction*ft[(size_t)cloudBase[i]] : field.Evaluate(&cloud[3*i], fraction);
+    }
+  }
+  {
+  std::vector<double> &value = levelValue;
   // A cloud point can lie on the zero level itself, within rounding: a
   // branch's far layer landing on its parent's offset, say. Marching
   // tetrahedra keyed by edge would then put one contour point per edge on
@@ -1533,11 +1598,9 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     }
     report.numZeroCloudPoints = numZero;
   }
-  report.numCloudPoints = (ll)(cloud.size()/3);
-  auto t1 = std::chrono::steady_clock::now();
-  report.secondsField = std::chrono::duration<double>(t1 - t0).count();
 
-  say("the Delaunay tetrahedralization of the cloud");
+  sayLevel("the Delaunay tetrahedralization of the cloud");
+  auto t1 = std::chrono::steady_clock::now();
   std::vector<ll> tets;
   if (!delaunay(cloud, tets, context, error))
   {
@@ -1565,7 +1628,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   auto t2 = std::chrono::steady_clock::now();
   report.secondsDelaunay = std::chrono::duration<double>(t2 - t1).count();
 
-  say("marching tetrahedra over the cloud");
+  sayLevel("marching tetrahedra over the cloud");
   // Marching tetrahedra: one contour point per tetrahedron edge whose ends
   // have values of opposite sign (a value of zero counts as outside), placed
   // by linear interpolation and then put on the zero level by secant steps
@@ -1642,7 +1705,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       {
         pm[k] = pa[k] + s*(pb[k] - pa[k]);
       }
-      double fm = field.Evaluate(pm);
+      double fm = field.Evaluate(pm, fraction);
       if (std::fabs(fm) <= closeEnough)
       {
         onLevel = true;
@@ -1800,12 +1863,11 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   // The cloud and its tetrahedra are not needed past here, and the surface
   // that follows is large too.
   std::vector<ll>().swap(tets);
-  std::vector<double>().swap(cloud);
-  std::vector<double>().swap(value);
+  std::vector<double>().swap(levelValue);
   std::unordered_map<unsigned long long, ll>().swap(onEdge);
   auto t3 = std::chrono::steady_clock::now();
   report.secondsContour = std::chrono::duration<double>(t3 - t2).count();
-  say("the decimation of the contour to the interface's size");
+  sayLevel("the decimation of the contour to the interface's size");
 
   // Decimation: the contour has a point wherever the zero level crosses a
   // tetrahedron edge, several per interface point. Edges shorter than a
@@ -1818,11 +1880,12 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
   if (options.collapseRatio > 0.0)
   {
     ll nv = (ll)(pts.size()/3), nt = (ll)(tris.size()/3);
-    std::vector<double> target((size_t)nv, field.Reach()), thick((size_t)nv, report.largestThickness);
+    std::vector<double> target((size_t)nv, field.Reach()), thick((size_t)nv, fraction*report.largestThickness);
     for (ll v = 0; v < nv; v++)
     {
       ll rim;
       field.Local(&pts[(size_t)3*v], target[(size_t)v], thick[(size_t)v], rim);
+      thick[(size_t)v] *= fraction;
     }
     std::vector<std::vector<ll> > incident((size_t)nv);
     std::vector<unsigned char> dead((size_t)nt, 0);
@@ -1954,7 +2017,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
             centre[k] = (pts[(size_t)3*a2 + k] + pts[(size_t)3*b2 + k] + pts[(size_t)3*c2 + k])/3.0;
           }
           double thinnest = std::min(thick[(size_t)a2], std::min(thick[(size_t)b2], thick[(size_t)c2]));
-          if (std::abs(field.Evaluate(centre)) > options.collapseFieldTolerance*thinnest) return false;
+          if (std::abs(field.Evaluate(centre, fraction)) > options.collapseFieldTolerance*thinnest) return false;
         }
       }
       dead[(size_t)shared[0]] = 1;
@@ -2222,7 +2285,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
         {
           centre[k] = (pts[(size_t)3*ring[0] + k] + pts[(size_t)3*ring[1] + k] + pts[(size_t)3*ring[2] + k])/3.0;
         }
-        if (options.collapseFieldTolerance > 0.0 && std::abs(field.Evaluate(centre)) > options.collapseFieldTolerance*thick[(size_t)u]) continue;
+        if (options.collapseFieldTolerance > 0.0 && std::abs(field.Evaluate(centre, fraction)) > options.collapseFieldTolerance*thick[(size_t)u]) continue;
         // live[0] becomes the ring triangle; the other two die
         tris[(size_t)3*t0] = ring[0]; tris[(size_t)3*t0 + 1] = ring[1]; tris[(size_t)3*t0 + 2] = ring[2];
         dead[(size_t)live[1]] = 1;
@@ -2359,7 +2422,7 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
               {
                 centre[d] = (pts[(size_t)3*p + d] + pts[(size_t)3*r1 + d] + pts[(size_t)3*r2 + d])/3.0;
               }
-              if (std::abs(field.Evaluate(centre)) > options.collapseFieldTolerance*thick[(size_t)c]) { ok = false; break; }
+              if (std::abs(field.Evaluate(centre, fraction)) > options.collapseFieldTolerance*thick[(size_t)c]) { ok = false; break; }
             }
           }
           if (ok && score > bestScore)
@@ -2492,7 +2555,24 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
       }
     }
   }
+  }  // the level's value
+  }  // each level
+  std::vector<double>().swap(cloud);
+  std::vector<double>().swap(value);
   return 0;
+}
+
+int BuildOffsetSurface(const Interface &input, const Options &options,
+    DelaunayFunction delaunay, void *context, Surface &surface, Report &report,
+    std::string &error, ProgressFunction progress)
+{
+  std::vector<double> fractions(1, 1.0);
+  std::vector<Surface> surfaces;
+  std::vector<Report> reports;
+  int rc = BuildOffsetSurfaces(input, options, fractions, delaunay, context, surfaces, reports, error, progress);
+  surface = surfaces.empty() ? Surface() : surfaces[0];
+  report = reports.empty() ? Report() : reports[0];
+  return rc;
 }
 
 }  // namespace svoffset

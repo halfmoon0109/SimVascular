@@ -233,6 +233,30 @@ int BuildOffsetSurface(const Interface &input, const Options &options,
     std::string &error, ProgressFunction progress = nullptr);
 
 /**
+ * @brief Builds the offset surfaces at several fractions of the wall
+ * thickness at once: the surface at fraction f is the zero level of the
+ * field with the thickness scaled by f (see OffsetField::Evaluate), so that
+ * the surfaces of different fractions are nested. They are marched from
+ * one point cloud and one field, so the marched contours cannot cross each
+ * other either (the marched value falls with the fraction at every cloud
+ * point); each is then decimated on its own. Built for the layered fill of
+ * the wall, whose layer surfaces at 1/N, 2/N, ... of the thickness were
+ * offsets of separately scaled interfaces before, each on its own cloud,
+ * and crossed one another where the walls are thin (measured 2026-09-23 on
+ * the user's 178k model: 17 crossings of the two-thirds surface through the
+ * outer one at a branch root, and the mesher refused the shell).
+ * @param fractions Each in (0, 1]; 1 is the outer surface.
+ * @param surfaces One per fraction, in order.
+ * @param reports One per fraction; the field and cloud figures are the same
+ * in all of them.
+ * @return 0 if every surface was built, 1 if not.
+ */
+int BuildOffsetSurfaces(const Interface &input, const Options &options,
+    const std::vector<double> &fractions, DelaunayFunction delaunay, void *context,
+    std::vector<Surface> &surfaces, std::vector<Report> &reports,
+    std::string &error, ProgressFunction progress = nullptr);
+
+/**
  * @brief The field the surface is the zero level of, for measuring: the
  * signed distance to the interface (with its collars) less the thickness
  * there. Built once and evaluated many times.
@@ -252,8 +276,12 @@ public:
    */
   int Build(const Interface &input, Report &report, std::string &error, double chordTolerance = 0.05);
 
-  /// The value at x; positive outside the wall, negative inside it and in the lumen.
-  double Evaluate(const double x[3]) const;
+  /// The value at x; positive outside the wall, negative inside it and in
+  /// the lumen. With a thickness scale below one, the wall is that fraction
+  /// of its thickness: the zero level is then the layer surface at that
+  /// fraction, and the levels of different fractions never cross (the value
+  /// falls as the fraction rises, at every point).
+  double Evaluate(const double x[3], double thicknessScale = 1.0) const;
 
   /// The interface where x is: the target edge length of the offset surface
   /// there (the interface's own edge, shortened where the curvature of the
@@ -266,6 +294,7 @@ public:
   /// at x, the least distance less the wall, since that is the piece of the
   /// interface x's offset stands on.
   void Local(const double x[3], double &size, double &thickness, long long &rim) const;
+
 
   /// How far from the field's surface a point is surely outside the wall.
   double Reach() const;

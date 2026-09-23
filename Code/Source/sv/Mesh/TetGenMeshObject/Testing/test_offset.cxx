@@ -569,16 +569,21 @@ static void TestLayers()
   interfaceAsSurface.points = iface.points;
   interfaceAsSurface.triangles = iface.triangles;
   bool ok = true;
+  // all three from one field and one cloud, so that they are nested
+  std::vector<double> fractions;
+  for (int k = 1; k <= numLayers; k++) fractions.push_back((double)k/numLayers);
+  std::vector<Surface> built; std::vector<Report> reports; std::string buildError;
+  Options options;
+  int rc = svoffset::BuildOffsetSurfaces(iface, options, fractions, DelaunayWithTetGen, nullptr, built, reports, buildError);
+  Check(rc == 0 && built.size() == (size_t)numLayers, "the layer surfaces are built together");
+  if (rc != 0 || built.size() != (size_t)numLayers) { printf("  FAIL: %s\n", buildError.c_str()); return; }
+  printf("  built together: %lld cloud points, %lld tetrahedra; contours of %lld, %lld and %lld points\n", reports[0].numCloudPoints, reports[0].numTetrahedra, reports[0].numContourPoints, reports[1].numContourPoints, reports[2].numContourPoints);
   for (int k = 1; k <= numLayers && ok; k++)
   {
     double fraction = (double)k/numLayers;
-    Interface scaled = iface;
-    for (size_t i = 0; i < scaled.thickness.size(); i++) scaled.thickness[i] *= fraction;
-    Options options;
-    options.chordTolerance = 0.05/fraction;
-    Surface s; Report r;
-    if (!Build(scaled, options, s, r)) { ok = false; break; }
-    std::vector<svoffset::CapPlane> planes = PlanesFromRims(scaled, s);
+    Surface s = built[(size_t)k - 1]; Report r = reports[(size_t)k - 1];
+    Check(r.numNonManifoldEdges == 0 && r.numMiswoundEdges == 0, "the layer surface is a manifold");
+    std::vector<svoffset::CapPlane> planes = PlanesFromRims(iface, s);
     svoffset::TrimReport trim; std::string err;
     if (svoffset::TrimSurfaceAtCaps(s, planes, 0.1, trim, err) != 0) { printf("  FAIL trim of layer %d: %s\n", k, err.c_str()); numFailed++; ok = false; break; }
     // the layer is k/N of the wall from the interface, away from the ends
