@@ -1415,9 +1415,10 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     return 1;
   }
   if (!(options.innerLayer > 0.0 && options.innerLayer < 1.0) || !(options.outerLayer > 1.0) ||
-      !(options.farLayer > options.outerLayer) || !(options.farSpacing > 0.0))
+      !(options.farLayer > options.outerLayer) || !(options.farSpacing > 0.0) ||
+      !(options.layerJitter >= 0.0 && options.layerJitter < 0.5))
   {
-    error = "the cloud layers must be 0 < inner < 1 < outer < far, with a positive far spacing";
+    error = "the cloud layers must be 0 < inner < 1 < outer < far, with a positive far spacing and a sideways offset under half";
     return 1;
   }
   auto say = [&](const char *stage)
@@ -1485,6 +1486,30 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     cloudIsSurface.push_back(onSurface ? 1 : 0);
     cloudBase.push_back(basePoint);
   };
+  // A layer point leaves its ray sideways by the option's fraction of its
+  // distance out, in one of three directions 120 degrees apart around the
+  // ray, the first chosen by a hash of the ray's point: the four points of
+  // a ray are then the corners of a proper tetrahedron and not a line (see
+  // Options::layerJitter for what a line did to the Delaunay).
+  auto jitter = [&](double x[3], const double n[3], ll i, int third, double distance)
+  {
+    if (!(options.layerJitter > 0.0)) return;
+    int axis = (std::fabs(n[0]) <= std::fabs(n[1]) && std::fabs(n[0]) <= std::fabs(n[2])) ? 0 : ((std::fabs(n[1]) <= std::fabs(n[2])) ? 1 : 2);
+    double e[3] = {0.0, 0.0, 0.0};
+    e[axis] = 1.0;
+    double u[3], w[3];
+    Cross(n, e, u);
+    if (!Normalize(u)) return;
+    Cross(n, u, w);
+    unsigned long long h = (unsigned long long)(i + 1)*11400714819323198485ULL;
+    h ^= h >> 29;
+    double theta = 6.283185307179586*((double)(h & 0xFFFFFFFFULL)/4294967296.0 + third/3.0);
+    double d = options.layerJitter*distance;
+    for (int k = 0; k < 3; k++)
+    {
+      x[k] += d*(std::cos(theta)*u[k] + std::sin(theta)*w[k]);
+    }
+  };
   for (ll i = 0; i < numFP; i++)
   {
     const double *p = &fp[(size_t)3*i], *n = &fnrm[(size_t)3*i];
@@ -1498,7 +1523,12 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       b[k] = p[k] + options.outerLayer*t*n[k];
       c[k] = p[k] + far*n[k];
     }
-    addPoint(a, -(1.0 - options.innerLayer)*t, false, i);
+    jitter(a, n, i, 0, options.innerLayer*t);
+    jitter(b, n, i, 1, options.outerLayer*t);
+    jitter(c, n, i, 2, far);
+    // The inner point's value is put to the field like the others': on the
+    // ray it would be -(1 - innerLayer) t exactly, off it not quite.
+    addPoint(a, field.Evaluate(a), false, i);
     addPoint(b, field.Evaluate(b), false, i);
     addPoint(c, field.Evaluate(c), false, i);
   }
@@ -1529,6 +1559,8 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
           b[k] = p[k] + options.outerLayer*t*outward[k];
           c[k] = p[k] + far*outward[k];
         }
+        jitter(b, outward, v, 1, options.outerLayer*t);
+        jitter(c, outward, v, 2, far);
         addPoint(b, field.Evaluate(b), false, v);
         addPoint(c, field.Evaluate(c), false, v);
       }

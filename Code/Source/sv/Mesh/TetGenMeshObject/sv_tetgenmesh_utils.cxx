@@ -4958,8 +4958,8 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
   const svoffset::Report &shared = reports[0];
   fprintf(stdout,"  thickness %.4g to %.4g; %lld cap rims continued by collars of %lld triangles\n",
       shared.smallestThickness, shared.largestThickness, shared.numRims, shared.numCollarTriangles);
-  fprintf(stdout,"  the field was sampled on %lld points (the interface and its offsets at %.2g, %.2g and %.2g of the thickness, the last no nearer than %.2g edges); %.1f s for the field\n",
-      shared.numCloudPoints, options.innerLayer, options.outerLayer, options.farLayer, options.farSpacing, shared.secondsField);
+  fprintf(stdout,"  the field was sampled on %lld points (the interface and its offsets at %.2g, %.2g and %.2g of the thickness, the last no nearer than %.2g edges, each offset point %.2g of its distance off its ray); %.1f s for the field\n",
+      shared.numCloudPoints, options.innerLayer, options.outerLayer, options.farLayer, options.farSpacing, options.layerJitter, shared.secondsField);
   surfaces.resize(numLevels);
   numUnresolved.resize(numLevels, 0);
   for (size_t f = 0; f < numLevels; f++)

@@ -127,6 +127,17 @@ struct Options
   double outerLayer = 1.5;
   double farLayer = 3.0;
   double farSpacing = 1.5;
+  // The three layer points of one ray are moved off the ray sideways, each
+  // by this fraction of its own distance out, in three directions 120
+  // degrees apart (chosen by a hash of the point, so a run repeats). Four
+  // points on one line are a degenerate input to the Delaunay: TetGen
+  // returned tetrahedra of no volume on them (1e-17 against a median of
+  // 1e-4 on a patch of the user's model), and the level's cut through such
+  // a tetrahedron is a triangle lying in its plane, overlapping its
+  // neighbours' and wound either way; every crossing of the raw contour on
+  // that patch had one of them, and the snap and decimation then folded the
+  // surface there. Zero leaves the points on the ray.
+  double layerJitter = 0.1;
   int snapIterations = 16;      // at most this many secant steps (bisection when the secant leaves the bracket) putting a contour point on the zero level; 0 leaves the linear interpolation
   double snapTolerance = 1.0e-3;     // a contour point is on the level once |field| is within this fraction of the larger of its edge's end values (about the thickness)
   double collapseRatio = 0.8;   // edges shorter than this times the local interface size are collapsed; zero or less leaves the contour as marched
