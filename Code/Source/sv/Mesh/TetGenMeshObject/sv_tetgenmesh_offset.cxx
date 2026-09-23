@@ -550,6 +550,126 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
     np = m;
   }
   nt = (ll)(tris.size()/3);
+
+  // Rim edges much shorter than the surface's own edges are collapsed: the
+  // trim leaves them where the plane cut a triangle a hair from one of its
+  // corners, or where a snapped point landed next to a cut point, and the
+  // shell's annulus, which walks the rim by angle about the cap's centre,
+  // folds a triangle over its neighbour on such a tooth (measured
+  // 2026-09-23 on the user's 178k model with three layers: rim edges of 2
+  // to 8 percent of the mean, and TetGen refused two coplanar annulus
+  // facets on one of them). The collapse takes the edge's end with fewer
+  // triangles onto the other, on the rim, by less than a quarter of an
+  // edge, which is within what the decimation moves anyway; the link
+  // condition of a boundary edge (the two ends share only the third corner
+  // of their one triangle) keeps the surface a manifold.
+  {
+    const double shortFraction = 0.25;
+    std::vector<unsigned char> deadTri((size_t)nt, 0), deadPt((size_t)np, 0);
+    for (int pass = 0; pass < 4; pass++)
+    {
+      std::map<EdgeKey, int> edgeCount;
+      std::vector<std::vector<ll> > incident((size_t)np);
+      for (ll t = 0; t < nt; t++)
+      {
+        if (deadTri[(size_t)t]) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          edgeCount[EdgeKey(tris[(size_t)3*t + j], tris[(size_t)3*t + (j+1)%3])]++;
+          incident[(size_t)tris[(size_t)3*t + j]].push_back(t);
+        }
+      }
+      ll merged = 0;
+      std::vector<unsigned char> touched((size_t)np, 0);
+      for (ll t = 0; t < nt; t++)
+      {
+        if (deadTri[(size_t)t]) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3], c = tris[(size_t)3*t + (j+2)%3];
+          if (deadTri[(size_t)t] || touched[(size_t)a] || touched[(size_t)b] || touched[(size_t)c]) continue;
+          if (edgeCount[EdgeKey(a, b)] != 1) continue;
+          double mean = 0.5*(meanEdge[(size_t)a] + meanEdge[(size_t)b]);
+          if (!(mean > 0.0) || Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]) >= shortFraction*mean) continue;
+          // the end with fewer triangles goes onto the other
+          ll u = a, v = b;
+          if (incident[(size_t)a].size() > incident[(size_t)b].size()) { u = b; v = a; }
+          // the link condition: the neighbours of u and v share only c
+          bool ok = true;
+          for (size_t m = 0; m < incident[(size_t)u].size() && ok; m++)
+          {
+            ll tu = incident[(size_t)u][m];
+            if (deadTri[(size_t)tu] || tu == t) continue;
+            for (int q = 0; q < 3 && ok; q++)
+            {
+              ll w = tris[(size_t)3*tu + q];
+              if (w == u || w == c) continue;
+              for (size_t n = 0; n < incident[(size_t)v].size() && ok; n++)
+              {
+                ll tv = incident[(size_t)v][n];
+                if (deadTri[(size_t)tv] || tv == t) continue;
+                for (int r = 0; r < 3; r++)
+                {
+                  if (tris[(size_t)3*tv + r] == w) { ok = false; break; }
+                }
+              }
+            }
+          }
+          if (!ok) continue;
+          for (size_t m = 0; m < incident[(size_t)u].size(); m++)
+          {
+            ll tu = incident[(size_t)u][m];
+            if (deadTri[(size_t)tu]) continue;
+            if (tu == t) { deadTri[(size_t)tu] = 1; continue; }
+            for (int q = 0; q < 3; q++)
+            {
+              if (tris[(size_t)3*tu + q] == u) tris[(size_t)3*tu + q] = v;
+            }
+            incident[(size_t)v].push_back(tu);
+          }
+          incident[(size_t)u].clear();
+          deadPt[(size_t)u] = 1;
+          touched[(size_t)u] = 1;
+          touched[(size_t)v] = 1;
+          touched[(size_t)c] = 1;
+          merged++;
+          break;   // this triangle is gone
+        }
+      }
+      report.numRimEdgesMerged += merged;
+      if (merged == 0) break;
+    }
+    if (report.numRimEdgesMerged > 0)
+    {
+      std::vector<ll> newId((size_t)np, -1);
+      std::vector<double> cpts;
+      std::vector<ll> cowner;
+      std::vector<double> cedge;
+      std::vector<ll> ctris;
+      for (ll t = 0; t < nt; t++)
+      {
+        if (deadTri[(size_t)t]) continue;
+        for (int j = 0; j < 3; j++)
+        {
+          ll v = tris[(size_t)3*t + j];
+          if (newId[(size_t)v] < 0)
+          {
+            newId[(size_t)v] = (ll)(cpts.size()/3);
+            cpts.insert(cpts.end(), &pts[(size_t)3*v], &pts[(size_t)3*v] + 3);
+            cowner.push_back(owner[(size_t)v]);
+            cedge.push_back(meanEdge[(size_t)v]);
+          }
+          ctris.push_back(newId[(size_t)v]);
+        }
+      }
+      pts.swap(cpts);
+      owner.swap(cowner);
+      meanEdge.swap(cedge);
+      tris.swap(ctris);
+      np = (ll)(pts.size()/3);
+      nt = (ll)(tris.size()/3);
+    }
+  }
   report.numPointsAfter = np;
   report.numTrianglesAfter = nt;
 

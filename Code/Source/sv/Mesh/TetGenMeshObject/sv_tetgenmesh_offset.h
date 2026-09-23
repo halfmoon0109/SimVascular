@@ -311,6 +311,7 @@ struct TrimReport
   long long numDropped = 0;           // triangles left with nothing on the kept side but a point or an edge in the plane, or lying flat in it
   long long numSplit = 0;             // triangles the plane passed through
   long long numRimEdges = 0;
+  long long numRimEdgesMerged = 0;   // rim edges shorter than a quarter of the mean edge, collapsed so the rim has no teeth the annulus stitching would fold on
   double shortestRimEdgeRatio = 0.0;  // shortest rim edge over the mean edge at its ends
   double smallestRimAngleDegrees = 0.0;  // smallest angle between a triangle on a rim and the cap plane, on the annulus side
 };
