@@ -795,7 +795,6 @@ long long ListFoldedEdges(const std::vector<double> &points, const std::vector<l
   struct Use
   {
     ll a, b, t;
-    bool forward;
     bool operator<(const Use &o) const { return (a != o.a) ? (a < o.a) : (b != o.b) ? (b < o.b) : (t < o.t); }
   };
   ll nt = (ll)(triangles.size()/3);
@@ -806,46 +805,72 @@ long long ListFoldedEdges(const std::vector<double> &points, const std::vector<l
     for (int j = 0; j < 3; j++)
     {
       ll p = triangles[(size_t)3*t + j], q = triangles[(size_t)3*t + (j+1)%3];
-      uses.push_back(Use{std::min(p, q), std::max(p, q), t, p < q});
+      uses.push_back(Use{std::min(p, q), std::max(p, q), t});
     }
   }
   std::sort(uses.begin(), uses.end());
-  auto unitNormal = [&](ll t, double n[3]) -> bool
+  // The direction from the edge a-b into the triangle t, in its plane: the
+  // way from the edge to its third corner, less the part along the edge.
+  // Two triangles on one edge meet at the angle between their directions,
+  // 180 degrees when they lie flat out and 0 when they lie on each other,
+  // whichever way either is wound - so the same measure serves an edge on
+  // three triangles, as the rim of a layer surface is in the wall's shell
+  // (the layer and the annulus on either side), where a winding-based angle
+  // has no meaning.
+  auto into = [&](ll t, ll a, ll b, double w[3]) -> bool
   {
     const ll *T = &triangles[(size_t)3*t];
-    double e1[3], e2[3];
-    Sub(&points[(size_t)3*T[1]], &points[(size_t)3*T[0]], e1);
-    Sub(&points[(size_t)3*T[2]], &points[(size_t)3*T[0]], e2);
-    Cross(e1, e2, n);
-    double L = Norm(n);
+    ll r = -1;
+    for (int k = 0; k < 3; k++) if (T[k] != a && T[k] != b) r = T[k];
+    if (r < 0) return false;
+    double e[3], v[3];
+    Sub(&points[(size_t)3*b], &points[(size_t)3*a], e);
+    Sub(&points[(size_t)3*r], &points[(size_t)3*a], v);
+    double ee = Dot(e, e);
+    if (!(ee > 0.0)) return false;
+    double along = Dot(v, e)/ee;
+    for (int k = 0; k < 3; k++) w[k] = v[k] - along*e[k];
+    double L = Norm(w);
     if (!(L > 0.0)) return false;
-    for (int k = 0; k < 3; k++) n[k] /= L;
+    for (int k = 0; k < 3; k++) w[k] /= L;
     return true;
   };
   std::vector<FoldedPair> all;
+  std::vector<double> dirs;
+  std::vector<ll> dirTriangle;
   for (size_t i = 0; i < uses.size(); )
   {
     size_t j = i;
     while (j < uses.size() && uses[j].a == uses[i].a && uses[j].b == uses[i].b) j++;
-    if (j - i == 2 && uses[i].forward != uses[i+1].forward)
+    if (j - i >= 2)
     {
-      double n1[3], n2[3];
-      if (unitNormal(uses[i].t, n1) && unitNormal(uses[i+1].t, n2))
+      dirs.clear();
+      dirTriangle.clear();
+      for (size_t m = i; m < j; m++)
       {
-        // between the faces: 180 when the two lie flat out, 0 when folded
-        double c[3];
-        Cross(n1, n2, c);
-        double degrees = std::atan2(Norm(c), -Dot(n1, n2))*(180.0/3.14159265358979323846);
-        smallestDegrees = std::min(smallestDegrees, degrees);
-        if (degrees < maxDegrees)
+        double w[3];
+        if (!into(uses[m].t, uses[i].a, uses[i].b, w)) continue;
+        dirs.insert(dirs.end(), w, w + 3);
+        dirTriangle.push_back(uses[m].t);
+      }
+      for (size_t p = 0; p < dirTriangle.size(); p++)
+      {
+        for (size_t q = p + 1; q < dirTriangle.size(); q++)
         {
-          FoldedPair f;
-          f.a = uses[i].t;
-          f.b = uses[i+1].t;
-          f.edge[0] = uses[i].a;
-          f.edge[1] = uses[i].b;
-          f.degrees = degrees;
-          all.push_back(f);
+          double c[3];
+          Cross(&dirs[3*p], &dirs[3*q], c);
+          double degrees = std::atan2(Norm(c), Dot(&dirs[3*p], &dirs[3*q]))*(180.0/3.14159265358979323846);
+          smallestDegrees = std::min(smallestDegrees, degrees);
+          if (degrees < maxDegrees)
+          {
+            FoldedPair f;
+            f.a = dirTriangle[p];
+            f.b = dirTriangle[q];
+            f.edge[0] = uses[i].a;
+            f.edge[1] = uses[i].b;
+            f.degrees = degrees;
+            all.push_back(f);
+          }
         }
       }
     }

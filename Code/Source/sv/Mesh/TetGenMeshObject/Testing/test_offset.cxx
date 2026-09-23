@@ -570,10 +570,16 @@ static void TestFoldCount()
   // a-b-c and b-a-d share the edge a-b; d lies over the triangle a-b-c, a
   // hundred-thousandth off its plane: folded. b-a-e lies flat beside a-b-c,
   // and b-a-f stands at a right angle to it.
-  std::vector<double> pts = {0,0,0,  1,0,0,  0.5,1,0,  0.5,0.3,1e-5,  0.5,-1,0,  0.5,0,1};
+  std::vector<double> pts = {0,0,0,  1,0,0,  0.5,1,0,  0.5,0.3,1e-5,  0.5,-1,0,  0.5,0,1,  0.4,0.9,2e-5};
   std::vector<ll> folded = {0,1,2,  1,0,3};
   std::vector<ll> flat = {0,1,2,  1,0,4};
   std::vector<ll> square = {0,1,2,  1,0,5};
+  // an edge on three triangles, as a layer rim is in the shell (the layer
+  // and an annulus on either side): a-b-c flat out against b-a-e, and a
+  // third, a-b-g, lying on a-b-c; and the same edge with the third standing
+  // at a right angle instead
+  std::vector<ll> threeFolded = {0,1,2,  1,0,4,  0,1,6};
+  std::vector<ll> threeOpen = {0,1,2,  1,0,4,  0,1,5};
   std::vector<svoffset::FoldedPair> pairs;
   double smallest = 0.0;
   ll n = svoffset::ListFoldedEdges(pts, folded, svoffset::foldDegrees, 4, pairs, smallest);
@@ -586,6 +592,13 @@ static void TestFoldCount()
   n = svoffset::ListFoldedEdges(pts, square, svoffset::foldDegrees, 4, pairs, smallest);
   printf("  right-angled pair: %lld folded, %.4f degrees\n", n, smallest);
   Check(n == 0 && std::abs(smallest - 90.0) < 1e-6, "a pair at a right angle is not, at 90 degrees");
+  n = svoffset::ListFoldedEdges(pts, threeFolded, svoffset::foldDegrees, 4, pairs, smallest);
+  printf("  edge on three triangles, two of them folded: %lld folded, %.4f degrees\n", n, smallest);
+  Check(n == 1 && pairs.size() == 1 && std::min(pairs[0].a, pairs[0].b) == 0 && std::max(pairs[0].a, pairs[0].b) == 2,
+      "on an edge of three triangles the folded pair is counted, whatever their winding");
+  n = svoffset::ListFoldedEdges(pts, threeOpen, svoffset::foldDegrees, 4, pairs, smallest);
+  printf("  edge on three triangles, none folded: %lld folded, %.4f degrees\n", n, smallest);
+  Check(n == 0 && std::abs(smallest - 90.0) < 1e-6, "and none is counted when they stand apart");
 }
 
 // 5. Layers: offsets at 1/3, 2/3 and 1 of the thickness of a tube, each

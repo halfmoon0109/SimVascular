@@ -408,19 +408,23 @@ struct FoldedPair
 };
 
 /**
- * @brief Lists the edges on exactly two triangles, wound against each other,
- * whose triangles meet at an angle below maxDegrees: folded onto each other.
- * A crossing count does not see them (the two share an edge), and the volume
- * mesher refuses them below its tolerance (foldDegrees) as two facets
- * intersecting - measured 2026-09-23 on the user's model, two outer wall
- * triangles 0.03 degree apart, after every crossing count was zero.
- * Degenerate triangles (no normal) and edges on one or more than two
- * triangles are left to the other counts.
+ * @brief Lists the pairs of triangles on one edge that meet at an angle
+ * below maxDegrees: folded onto each other. A crossing count does not see
+ * them (the two share an edge), and the volume mesher refuses them below its
+ * tolerance (foldDegrees) as two facets intersecting - measured 2026-09-23 on
+ * the user's model, two outer wall triangles 0.03 degree apart, after every
+ * crossing count was zero. The angle is between the two triangles'
+ * half-planes on the edge (180 flat out, 0 folded) and does not depend on
+ * their winding, and every pair on an edge is measured, so an edge on three
+ * triangles - the rim of a layer surface in the wall's shell, shared with
+ * the annulus on either side - is judged like any other (found in review
+ * 2026-09-23: an edge-count of two let a fold there reach the mesher).
+ * Degenerate triangles (the third corner on the edge's line) are left out.
  * @param maxPairs How many pairs to keep, the most folded first; the count
  * returned is of all of them.
- * @param smallestDegrees Set to the smallest angle over every edge on two
- * triangles, folded or not (180 when there is none).
- * @return The number of folded edges.
+ * @param smallestDegrees Set to the smallest angle over every pair on an
+ * edge, folded or not (180 when there is none).
+ * @return The number of folded pairs.
  */
 long long ListFoldedEdges(const std::vector<double> &points, const std::vector<long long> &triangles,
     double maxDegrees, size_t maxPairs, std::vector<FoldedPair> &pairs, double &smallestDegrees);
