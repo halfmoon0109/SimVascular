@@ -150,6 +150,11 @@ struct Options
   // thickness) is decimated against the whole wall, so its caller raises this
   // by the reciprocal of the fraction.
   double chordTolerance = 0.05;
+  // Every decimation operation (collapse, flip, valence-three and flat-apex
+  // removal) is refused when a triangle it would make passes through a live
+  // triangle near it, by the judgement of svenvelope::TrianglesCross. The
+  // contour as marched is free of crossings, so the surface stays so.
+  bool guardCrossings = true;
 };
 
 /**
@@ -194,6 +199,7 @@ struct Report
   long long numContourPointsOffLevel = 0;  // whose last evaluated position was still off the level by more than snapTolerance (the field jumps along the edge, or the steps ran out)
   long long numDegenerateContourTriangles = 0; // left out of the contour: naming a point twice, or emitted twice around points on the level
   long long numCollapsed = 0;            // edges collapsed by the decimation
+  long long numRefusedForCrossing = 0;   // decimation operations refused because a triangle they would make passes through a live triangle near it
   long long numPoints = 0;               // of the result
   long long numTriangles = 0;
   long long numBoundaryEdges = 0;        // of the result; none expected before the caller trims it

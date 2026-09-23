@@ -5465,6 +5465,41 @@ static void VisitCrossingPairs(const std::vector<double> &points,
   }
 }
 
+bool TrianglesCross(const std::vector<double> &points, const ll ta[3], const ll tb[3])
+{
+  // the same triangle, or one sharing two corners: never a crossing
+  int numCommon = 0;
+  for (int i = 0; i < 3; i++) for (int j = 0; j < 3; j++) if (ta[i] == tb[j]) numCommon++;
+  if (numCommon >= 2) return false;
+  const ll *tt[2] = {ta, tb};
+  double n[2][3], box[2][6], extent[2] = {0.0, 0.0};
+  for (int w = 0; w < 2; w++)
+  {
+    const double *p0 = &points[(size_t)3*tt[w][0]], *p1 = &points[(size_t)3*tt[w][1]], *p2 = &points[(size_t)3*tt[w][2]];
+    double e1[3], e2[3];
+    Sub(p1, p0, e1);
+    Sub(p2, p0, e2);
+    Cross(e1, e2, n[w]);
+    double area2 = Norm(n[w]);
+    double longest2 = std::max(Dot(e1, e1), Dot(e2, e2));
+    if (!(area2 > 1.0e-14*longest2)) return false;
+    for (int k = 0; k < 3; k++)
+    {
+      n[w][k] /= area2;
+      box[w][2*k] = std::min(p0[k], std::min(p1[k], p2[k]));
+      box[w][2*k+1] = std::max(p0[k], std::max(p1[k], p2[k]));
+      extent[w] = std::max(extent[w], box[w][2*k+1] - box[w][2*k]);
+    }
+  }
+  if (!BoxesOverlap(box[0], box[1])) return false;
+  CrossingEnd ends[7];
+  int numShared = 0;
+  int found = CrossingEnds(points, ta, n[0], tb, n[1], 1.0e-9, ends, numShared);
+  if (numShared >= 2 || found == 0) return false;
+  CrossingEnd pair[2];
+  return PickCrossing(ends, found, numShared, 1.0e-7*std::min(extent[0], extent[1]), pair);
+}
+
 long long CountCrossingTriangles(const std::vector<double> &points,
     const std::vector<long long> &triangles, std::vector<unsigned char> &crossing,
     double firstAt[3])

@@ -36,6 +36,7 @@
  */
 
 #include "sv_tetgenmesh_offset.h"
+#include "sv_tetgenmesh_envelope.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1967,6 +1968,92 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       Sub(&pts[(size_t)3*c], &pts[(size_t)3*a], e2);
       Cross(e1, e2, n);
     };
+    // The crossing guard: every operation's new triangles are tested against
+    // the live triangles near them, and one that passes through another is
+    // not made. A uniform grid over the contour holds each live triangle in
+    // the cells its box covers; a collapse re-indexes triangles (points never
+    // move), so a triangle leaves its cells before and enters them after.
+    struct GuardGrid
+    {
+      double origin[3];
+      double cell;
+      int n[3];
+      std::unordered_map<ll, std::vector<ll> > cells;
+      ll Index(int i, int j, int k) const { return ((ll)k*n[1] + j)*n[0] + i; }
+      int Bin(double x, int k) const { int b = (int)std::floor((x - origin[k])/cell); return std::min(std::max(b, 0), n[k] - 1); }
+    };
+    GuardGrid guard;
+    const bool guardOn = options.guardCrossings;
+    auto triangleBox = [&](const ll *T, int lo[3], int hi[3])
+    {
+      for (int k = 0; k < 3; k++)
+      {
+        double a = pts[(size_t)3*T[0] + k], b = pts[(size_t)3*T[1] + k], c = pts[(size_t)3*T[2] + k];
+        lo[k] = guard.Bin(std::min(a, std::min(b, c)), k);
+        hi[k] = guard.Bin(std::max(a, std::max(b, c)), k);
+      }
+    };
+    auto guardAdd = [&](ll t)
+    {
+      int lo[3], hi[3];
+      triangleBox(&tris[(size_t)3*t], lo, hi);
+      for (int k = lo[2]; k <= hi[2]; k++) for (int j = lo[1]; j <= hi[1]; j++) for (int i = lo[0]; i <= hi[0]; i++) guard.cells[guard.Index(i, j, k)].push_back(t);
+    };
+    auto guardRemove = [&](ll t)
+    {
+      int lo[3], hi[3];
+      triangleBox(&tris[(size_t)3*t], lo, hi);
+      for (int k = lo[2]; k <= hi[2]; k++) for (int j = lo[1]; j <= hi[1]; j++) for (int i = lo[0]; i <= hi[0]; i++)
+      {
+        std::unordered_map<ll, std::vector<ll> >::iterator it = guard.cells.find(guard.Index(i, j, k));
+        if (it == guard.cells.end()) continue;
+        std::vector<ll> &list = it->second;
+        for (size_t m = 0; m < list.size(); m++) { if (list[m] == t) { list[m] = list.back(); list.pop_back(); break; } }
+      }
+    };
+    std::vector<ll> guardStamp;
+    ll guardStampValue = 0;
+    if (guardOn)
+    {
+      double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300};
+      for (ll v = 0; v < nv; v++) for (int k = 0; k < 3; k++) { lo[k] = std::min(lo[k], pts[(size_t)3*v + k]); hi[k] = std::max(hi[k], pts[(size_t)3*v + k]); }
+      double meanTarget = 0.0;
+      for (ll v = 0; v < nv; v++) meanTarget += target[(size_t)v];
+      meanTarget = (nv > 0) ? meanTarget/(double)nv : 1.0;
+      guard.cell = std::max(2.0*meanTarget, 1.0e-12);
+      for (;;)
+      {
+        double count = 1.0;
+        for (int k = 0; k < 3; k++) { guard.n[k] = std::max(1, (int)std::ceil((hi[k] - lo[k])/guard.cell) + 1); count *= guard.n[k]; }
+        if (count < 4.0e8) break;
+        guard.cell *= 2.0;
+      }
+      for (int k = 0; k < 3; k++) guard.origin[k] = lo[k];
+      guard.cells.reserve((size_t)nt/4 + 1);
+      for (ll t = 0; t < nt; t++) guardAdd(t);
+      guardStamp.assign((size_t)nt, 0);
+    }
+    // Whether the triangle T (its corners' current positions) passes through
+    // a live triangle near it other than those stamped as leaving.
+    auto guardCrosses = [&](const ll *T) -> bool
+    {
+      int lo[3], hi[3];
+      triangleBox(T, lo, hi);
+      for (int k = lo[2]; k <= hi[2]; k++) for (int j = lo[1]; j <= hi[1]; j++) for (int i = lo[0]; i <= hi[0]; i++)
+      {
+        std::unordered_map<ll, std::vector<ll> >::iterator it = guard.cells.find(guard.Index(i, j, k));
+        if (it == guard.cells.end()) continue;
+        const std::vector<ll> &list = it->second;
+        for (size_t m = 0; m < list.size(); m++)
+        {
+          ll c = list[m];
+          if (dead[(size_t)c] || guardStamp[(size_t)c] == guardStampValue) continue;
+          guardStamp[(size_t)c] = guardStampValue;
+          if (svenvelope::TrianglesCross(pts, T, &tris[(size_t)3*c])) return true;
+        }
+      }
+      return false;
+    };
     const int ringMax = 64;
     ll ringU[64], ringV[64], shared[2];
     auto tryCollapse = [&](ll u, ll v) -> bool
@@ -2052,16 +2139,40 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
           if (std::abs(field.Evaluate(centre, fraction)) > options.collapseFieldTolerance*thinnest) return false;
         }
       }
+      if (guardOn)
+      {
+        // the triangles on u leave (the two on the edge die, the rest move)
+        guardStampValue++;
+        for (size_t m = 0; m < incident[(size_t)u].size(); m++) guardStamp[(size_t)incident[(size_t)u][m]] = guardStampValue;
+        ll moved[ringMax][3];
+        int numMoved = 0;
+        for (size_t m = 0; m < incident[(size_t)u].size(); m++)
+        {
+          ll t = incident[(size_t)u][m];
+          if (dead[(size_t)t] || t == shared[0] || t == shared[1]) continue;
+          if (numMoved >= ringMax) return false;
+          for (int j = 0; j < 3; j++) moved[numMoved][j] = (tris[(size_t)3*t + j] == u) ? v : tris[(size_t)3*t + j];
+          numMoved++;
+        }
+        for (int i = 0; i < numMoved; i++)
+        {
+          if (guardCrosses(moved[i])) { report.numRefusedForCrossing++; return false; }
+          for (int j = i + 1; j < numMoved; j++) if (svenvelope::TrianglesCross(pts, moved[i], moved[j])) { report.numRefusedForCrossing++; return false; }
+        }
+      }
       dead[(size_t)shared[0]] = 1;
       dead[(size_t)shared[1]] = 1;
+      if (guardOn) { guardRemove(shared[0]); guardRemove(shared[1]); }
       for (size_t m = 0; m < incident[(size_t)u].size(); m++)
       {
         ll t = incident[(size_t)u][m];
         if (dead[(size_t)t]) continue;
+        if (guardOn) guardRemove(t);
         for (int j = 0; j < 3; j++)
         {
           if (tris[(size_t)3*t + j] == u) tris[(size_t)3*t + j] = v;
         }
+        if (guardOn) guardAdd(t);
         incident[(size_t)v].push_back(t);
       }
       incident[(size_t)u].clear();
@@ -2205,9 +2316,20 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
           double after = std::min(smallestAngleSine(c, a, d), smallestAngleSine(d, b, c));
           bool shortDiagonal = newDiagonal < options.collapseRatio*std::min(target[(size_t)c], target[(size_t)d]) && before < 0.05;
           if (!(after > 1.05*before) && !shortDiagonal) continue;
+          if (guardOn)
+          {
+            guardStampValue++;
+            guardStamp[(size_t)t1] = guardStampValue;
+            guardStamp[(size_t)t2] = guardStampValue;
+            ll new1[3] = {c, a, d}, new2[3] = {d, b, c};
+            if (guardCrosses(new1) || guardCrosses(new2)) { report.numRefusedForCrossing++; continue; }
+            guardRemove(t1);
+            guardRemove(t2);
+          }
           // do it: t1 = (c, a, d), t2 = (d, b, c)
           tris[(size_t)3*t1] = c; tris[(size_t)3*t1 + 1] = a; tris[(size_t)3*t1 + 2] = d;
           tris[(size_t)3*t2] = d; tris[(size_t)3*t2 + 1] = b; tris[(size_t)3*t2 + 2] = c;
+          if (guardOn) { guardAdd(t1); guardAdd(t2); }
           removeFromIncident(b, t1);
           incident[(size_t)d].push_back(t1);
           removeFromIncident(a, t2);
@@ -2318,8 +2440,16 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
           centre[k] = (pts[(size_t)3*ring[0] + k] + pts[(size_t)3*ring[1] + k] + pts[(size_t)3*ring[2] + k])/3.0;
         }
         if (options.collapseFieldTolerance > 0.0 && std::abs(field.Evaluate(centre, fraction)) > options.collapseFieldTolerance*thick[(size_t)u]) continue;
+        if (guardOn)
+        {
+          guardStampValue++;
+          for (int i = 0; i < 3; i++) guardStamp[(size_t)live[i]] = guardStampValue;
+          if (guardCrosses(ring)) { report.numRefusedForCrossing++; continue; }
+          for (int i = 0; i < 3; i++) guardRemove(live[i]);
+        }
         // live[0] becomes the ring triangle; the other two die
         tris[(size_t)3*t0] = ring[0]; tris[(size_t)3*t0 + 1] = ring[1]; tris[(size_t)3*t0 + 2] = ring[2];
+        if (guardOn) guardAdd(t0);
         dead[(size_t)live[1]] = 1;
         dead[(size_t)live[2]] = 1;
         incident[(size_t)ring[2]].push_back(t0);
@@ -2464,6 +2594,25 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
           }
         }
         if (bestPivot < 0) continue;
+        if (guardOn)
+        {
+          guardStampValue++;
+          for (int i = 0; i < k; i++) guardStamp[(size_t)slots[i]] = guardStampValue;
+          ll pv = ringU[bestPivot];
+          bool crosses = false;
+          for (int i = 0; i < k - 2 && !crosses; i++)
+          {
+            ll fan[3] = {pv, ringU[(bestPivot + 1 + i)%k], ringU[(bestPivot + 2 + i)%k]};
+            if (guardCrosses(fan)) crosses = true;
+            for (int j = i + 1; j < k - 2 && !crosses; j++)
+            {
+              ll other[3] = {pv, ringU[(bestPivot + 1 + j)%k], ringU[(bestPivot + 2 + j)%k]};
+              if (svenvelope::TrianglesCross(pts, fan, other)) crosses = true;
+            }
+          }
+          if (crosses) { report.numRefusedForCrossing++; continue; }
+          for (int i = 0; i < k; i++) guardRemove(slots[i]);
+        }
         // apply: the old triangles leave their corners' lists, the fan takes k-2 of their slots
         for (int i = 0; i < k; i++)
         {
@@ -2476,6 +2625,7 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
           ll t = slots[i];
           ll r1 = ringU[(bestPivot + 1 + i)%k], r2 = ringU[(bestPivot + 2 + i)%k];
           tris[(size_t)3*t] = p; tris[(size_t)3*t + 1] = r1; tris[(size_t)3*t + 2] = r2;
+          if (guardOn) guardAdd(t);
           incident[(size_t)p].push_back(t);
           incident[(size_t)r1].push_back(t);
           incident[(size_t)r2].push_back(t);

@@ -281,6 +281,17 @@ long long ListCrossingPairs(const std::vector<double> &points,
     const std::vector<long long> &triangles, size_t maxPairs,
     std::vector<CrossingPair> &pairs);
 
+/**
+ * @brief Whether two triangles cross, by the judgement of
+ * CountCrossingTriangles: they meet along a segment of some length that is
+ * not a shared edge. A shared corner alone, or an edge of one touching the
+ * other at a point, is not a crossing; a degenerate triangle never crosses.
+ * @param points Three per point.
+ * @param ta Three point ids of the first triangle.
+ * @param tb Three point ids of the second.
+ */
+bool TrianglesCross(const std::vector<double> &points, const long long ta[3], const long long tb[3]);
+
 }
 
 #endif
