@@ -2827,8 +2827,10 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     // flipped when both triangles on the other diagonal face the way the
     // larger of the pair does: the two apexes then lie on the same side of
     // the edge, and the new pair tiles the larger triangle less the smaller,
-    // with the same outline, no point moved. Otherwise the edge is
-    // collapsed, under every check a collapse has. Otherwise one of the four
+    // with the same outline, no point moved. Otherwise, when the two apexes
+    // lie on one spot (a fin, see weldFin), one is welded onto the other.
+    // Otherwise the edge is collapsed, under every check a collapse has.
+    // Otherwise one of the four
     // points is a spike: on three triangles only, two of them the folded
     // pair, a tent over its ring with the third triangle's edge (the
     // diagonal) already there, so that neither the flip nor the collapse
@@ -2934,6 +2936,105 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
         version[(size_t)u]++;
         return true;
       };
+      // A fin: the pair (a, b, c), (b, a, d) folded right back, its two
+      // apexes on one spot - measured 2026-09-24 on the user's model, the
+      // outer wall pair 0.03 degree apart with c and d 4.7e-5 apart on an
+      // edge of 0.086, c on nine triangles and d on four, so no point is a
+      // spike, the flip's pair is degenerate, and collapsing a-b would leave c
+      // and d on one spot unjoined. The two triangles go and d is welded onto
+      // c: the triangles on a-c and a-d then share a-c, those on b-c and b-d
+      // share b-c, and nothing moves further than c from d. The weld is a
+      // collapse of d onto c along an edge that is not there, under the same
+      // checks: a and b the only points next to both (else two triangles
+      // would be doubled), no edge longer than the local size allows, no
+      // triangle turned, the field, the crossing guard.
+      auto weldFin = [&](ll t1, ll t2, ll a, ll b, ll c, ll d) -> bool
+      {
+        double moved = Distance(&pts[(size_t)3*d], &pts[(size_t)3*c]);
+        if (!(moved < 0.1*Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]))) return false;
+        int nc = 0, nd = 0;
+        for (int side = 0; side < 2; side++)
+        {
+          ll v = side ? d : c;
+          ll *ring = side ? ringV : ringU;
+          int &n = side ? nd : nc;
+          for (size_t m = 0; m < incident[(size_t)v].size(); m++)
+          {
+            ll t = incident[(size_t)v][m];
+            if (dead[(size_t)t]) continue;
+            for (int j = 0; j < 3; j++)
+            {
+              ll w = tris[(size_t)3*t + j];
+              if (w == v) continue;
+              bool seen = false;
+              for (int q = 0; q < n; q++) if (ring[q] == w) seen = true;
+              if (!seen) { if (n >= ringMax) return false; ring[n++] = w; }
+            }
+          }
+        }
+        int common = 0;
+        for (int q = 0; q < nc; q++) for (int r = 0; r < nd; r++) if (ringU[q] == ringV[r]) common++;
+        if (common != 2) return false;
+        for (int q = 0; q < nd; q++)
+        {
+          ll w = ringV[q];
+          double L = Distance(&pts[(size_t)3*w], &pts[(size_t)3*c]);
+          double allowed = growFactor*std::min(target[(size_t)w], target[(size_t)c]);
+          if (L > allowed && L > 1.1*Distance(&pts[(size_t)3*w], &pts[(size_t)3*d])) return false;
+        }
+        ll movedTris[ringMax][3];
+        int numMoved = 0;
+        for (size_t m = 0; m < incident[(size_t)d].size(); m++)
+        {
+          ll t = incident[(size_t)d][m];
+          if (dead[(size_t)t] || t == t2) continue;
+          if (numMoved >= ringMax) return false;
+          ll *T = movedTris[numMoved++];
+          for (int j = 0; j < 3; j++) T[j] = (tris[(size_t)3*t + j] == d) ? c : tris[(size_t)3*t + j];
+          double nOld[3], nNew[3];
+          normalOf(tris[(size_t)3*t], tris[(size_t)3*t + 1], tris[(size_t)3*t + 2], nOld);
+          normalOf(T[0], T[1], T[2], nNew);
+          double lo = Norm(nOld), ln = Norm(nNew);
+          if (!(ln > 1.0e-12*lo) || Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) return false;
+          if (options.collapseFieldTolerance > 0.0 && moved > options.collapseFieldTolerance*thick[(size_t)c])
+          {
+            double centre[3];
+            for (int k = 0; k < 3; k++)
+            {
+              centre[k] = (pts[(size_t)3*T[0] + k] + pts[(size_t)3*T[1] + k] + pts[(size_t)3*T[2] + k])/3.0;
+            }
+            double thinnest = std::min(thick[(size_t)T[0]], std::min(thick[(size_t)T[1]], thick[(size_t)T[2]]));
+            if (std::abs(field.Evaluate(centre, fraction)) > options.collapseFieldTolerance*thinnest) return false;
+          }
+        }
+        if (guardOn)
+        {
+          guard.BeginOperation();
+          guard.Leave(t1);
+          for (size_t m = 0; m < incident[(size_t)d].size(); m++) guard.Leave(incident[(size_t)d][m]);
+          for (int i = 0; i < numMoved; i++)
+          {
+            if (guard.Crosses(movedTris[i])) { report.numRefusedForCrossing++; return false; }
+            for (int j = i + 1; j < numMoved; j++) if (svenvelope::TrianglesCross(pts, movedTris[i], movedTris[j])) { report.numRefusedForCrossing++; return false; }
+          }
+          guard.Remove(t1);
+          guard.Remove(t2);
+        }
+        dead[(size_t)t1] = 1;
+        dead[(size_t)t2] = 1;
+        for (size_t m = 0; m < incident[(size_t)d].size(); m++)
+        {
+          ll t = incident[(size_t)d][m];
+          if (dead[(size_t)t]) continue;
+          if (guardOn) guard.Remove(t);
+          for (int j = 0; j < 3; j++) if (tris[(size_t)3*t + j] == d) tris[(size_t)3*t + j] = c;
+          if (guardOn) guard.Add(t);
+          incident[(size_t)c].push_back(t);
+        }
+        incident[(size_t)d].clear();
+        version[(size_t)a]++; version[(size_t)b]++; version[(size_t)c]++; version[(size_t)d]++;
+        return true;
+      };
       for (int pass = 0; pass < 4; pass++)
       {
         ll numChanged = 0;
@@ -3010,6 +3111,7 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
                 done = true;
               }
             }
+            if (!done && !exists) done = weldFin(t1, t2, a, b, c, d) || weldFin(t2, t1, a, b, d, c);
             if (!done) done = tryCollapse(a, b) || tryCollapse(b, a);
             if (!done) done = removeSpike(a) || removeSpike(b) || removeSpike(c) || removeSpike(d);
             if (done)
