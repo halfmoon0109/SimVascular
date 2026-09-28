@@ -1744,6 +1744,90 @@ int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionId,double size)
   return SV_OK;
 }
 
+// ---------------------------------
+// TGenUtils_ReportWallFillQuality
+// ---------------------------------
+/**
+ * @brief The quality of the wall's own tetrahedra, before they are appended
+ * to the fluid mesh whose report they would otherwise disappear into: the
+ * smallest dihedral angle and how many tetrahedra fall under 1, 5 and 10
+ * degrees (the layered fill keeps its layer surfaces as facets, so with thin
+ * layers many must be flat), the places of the worst, then the aspect ratio
+ * report of TGenUtils_ReportMeshQuality.
+ * @param wall The filled wall, tetrahedra only.
+ * @return SV_OK if the quality is computed.
+ */
+int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall)
+{
+  if (wall == nullptr || wall->GetNumberOfCells() == 0)
+  {
+    fprintf(stderr,"Cannot compute the quality of an empty wall mesh\n");
+    return SV_ERROR;
+  }
+  auto angleFilter = vtkSmartPointer<vtkMeshQuality>::New();
+  angleFilter->SetInputData(wall);
+  angleFilter->SetTetQualityMeasureToMinAngle();
+  angleFilter->Update();
+  auto angles = vtkDoubleArray::SafeDownCast(angleFilter->GetOutput()->GetCellData()->GetArray("Quality"));
+  if (angles == nullptr)
+  {
+    fprintf(stderr,"Could not compute the wall mesh's dihedral angles\n");
+    return SV_ERROR;
+  }
+  vtkIdType numTets = 0, numUnder1 = 0, numUnder5 = 0, numUnder10 = 0;
+  double smallest = 180.0;
+  const int numWorstToReport = 5;
+  std::vector<std::pair<double, vtkIdType> > worst;
+  for (vtkIdType cellId = 0; cellId < wall->GetNumberOfCells(); cellId++)
+  {
+    if (wall->GetCellType(cellId) != VTK_TETRA)
+    {
+      continue;
+    }
+    numTets++;
+    double angle = angles->GetValue(cellId);
+    smallest = std::min(smallest, angle);
+    if (angle < 1.0) numUnder1++;
+    if (angle < 5.0) numUnder5++;
+    if (angle < 10.0) numUnder10++;
+    if ((int)worst.size() < numWorstToReport || angle < worst.back().first)
+    {
+      worst.push_back(std::make_pair(angle, cellId));
+      std::sort(worst.begin(), worst.end());
+      if ((int)worst.size() > numWorstToReport)
+      {
+        worst.pop_back();
+      }
+    }
+  }
+  if (numTets == 0)
+  {
+    fprintf(stderr,"No tetrahedra in the wall mesh to compute the quality of\n");
+    return SV_ERROR;
+  }
+  fprintf(stdout,"Wall mesh quality (the wall's %lld tetrahedra alone, before they join the fluid mesh):\n", (long long)numTets);
+  fprintf(stdout,"  smallest dihedral angle %.3f degrees; under 1 degree: %lld, under 5: %lld (%.2f%%), under 10: %lld (%.2f%%)\n",
+      smallest, (long long)numUnder1, (long long)numUnder5, 100.0*numUnder5/numTets, (long long)numUnder10, 100.0*numUnder10/numTets);
+  for (size_t i = 0; i < worst.size(); i++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    wall->GetCellPoints(worst[i].second, npts, pts);
+    double centroid[3] = {0.0, 0.0, 0.0};
+    for (vtkIdType j = 0; j < npts; j++)
+    {
+      double p[3];
+      wall->GetPoint(pts[j], p);
+      for (int k = 0; k < 3; k++)
+      {
+        centroid[k] += p[k]/npts;
+      }
+    }
+    fprintf(stdout,"  dihedral angle %.3f degrees at (%.4g, %.4g, %.4g)\n", worst[i].first, centroid[0], centroid[1], centroid[2]);
+  }
+  return TGenUtils_ReportMeshQuality(wall);
+}
+
 // -----------------------------
 // TGenUtils_ReportMeshQuality
 // -----------------------------

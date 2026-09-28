@@ -126,6 +126,9 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionI
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh);
 
+/// The wall fill's own quality: the smallest dihedral angles and their places, then the aspect ratio report.
+SV_EXPORT_TETGEN_MESH int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothPointArray(vtkPolyData *surface,
     vtkDoubleArray *array,
     int iterations);

@@ -3259,6 +3259,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
   fprintf(stdout,"  wall filled with %lld tetrahedra on %lld nodes\n",
       (long long)wallmesh_->GetNumberOfCells(), (long long)wallmesh_->GetNumberOfPoints());
+  // Its quality on its own: once appended to the fluid mesh it is a quarter
+  // of the elements and its flat layer tetrahedra vanish into that report.
+  TGenUtils_ReportWallFillQuality(wallmesh_);
 
   // The wedge extrusion hands downstream a mesh holding both the volume cells
   // and the surface cells that bound them, tagged with 'CellEntityIds' and
