@@ -3082,6 +3082,10 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   const int outerSurfaceCellId = 2;
   const int sidewallCellEntityId = 9999;
   const int layerCellEntityBase = 100;   // 100 + k: the k-th layer surface inside the wall
+  // A layer role lies between the base and the side wall's value: the side
+  // wall is 9999, above the base, and was counted and dropped as a layer
+  // surface until the run of 2026-09-28 came back with no side wall faces.
+  auto isLayerRole = [&](int role) { return role >= layerCellEntityBase && role != sidewallCellEntityId; };
   const vtkIdType numInner = surface->GetNumberOfPoints();
   vtkIdType numShellInner = 0, numShellOuter = 0, numShellSide = 0, numShellLayer = 0;
   std::vector<int> shellRole((size_t)shell->GetNumberOfCells(), sidewallCellEntityId);
@@ -3117,7 +3121,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     shellRole[(size_t)cellId] = role;
     if (role == innerSurfaceCellId) numShellInner++;
     else if (role == outerSurfaceCellId) numShellOuter++;
-    else if (role >= layerCellEntityBase) numShellLayer++;
+    else if (isLayerRole(role)) numShellLayer++;
     else numShellSide++;
     if (cellId < shellInMesh->numberoffacets)
     {
@@ -3449,8 +3453,8 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       }
 
       // A face of a layer surface lies inside the wall: it is no boundary
-      // and is not inserted.
-      if (role >= layerCellEntityBase)
+      // and is not inserted. A side wall face (9999) is a boundary and stays.
+      if (isLayerRole(role))
       {
         numLayerFaces++;
         continue;
