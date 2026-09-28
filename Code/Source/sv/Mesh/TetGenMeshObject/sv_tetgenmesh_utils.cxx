@@ -1754,10 +1754,23 @@ int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionId,double size)
  * degrees (the layered fill keeps its layer surfaces as facets, so with thin
  * layers many must be flat), the places of the worst, then the aspect ratio
  * report of TGenUtils_ReportMeshQuality.
- * @param wall The filled wall, tetrahedra only.
+ *
+ * The wall's points come in bands - the shell's interface points first, then
+ * each layer surface's, then the outer surface's, then the points TetGen
+ * added inside - so the band of each corner says where a flat tetrahedron
+ * sits: between two neighbouring surfaces (the layer spacing against the
+ * facet triangle size), with all four corners on one surface (a boundary
+ * sliver the mesher cannot move under -Y), or on points of its own. The
+ * tetrahedra under 10 degrees are written to wall_fill_poor.vtu with their
+ * angle and bands, to be looked at where they are.
+ * @param wall The filled wall, tetrahedra only, its points in the shell's order.
+ * @param bandEnds One past the last point of each band, in order; points past
+ * the last end are the mesher's own.
+ * @param bandNames A name per band.
  * @return SV_OK if the quality is computed.
  */
-int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall)
+int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector<vtkIdType> &bandEnds,
+    const std::vector<std::string> &bandNames)
 {
   if (wall == nullptr || wall->GetNumberOfCells() == 0)
   {
@@ -1774,10 +1787,51 @@ int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall)
     fprintf(stderr,"Could not compute the wall mesh's dihedral angles\n");
     return SV_ERROR;
   }
+  const int numBands = (int)bandEnds.size();
+  auto bandOf = [&](vtkIdType pointId) -> int
+  {
+    for (int b = 0; b < numBands; b++)
+    {
+      if (pointId < bandEnds[(size_t)b]) return b;
+    }
+    return numBands;   // a point the mesher added
+  };
+  auto nameOf = [&](int band) -> std::string
+  {
+    if (band < numBands && band < (int)bandNames.size()) return bandNames[(size_t)band];
+    return band < numBands ? std::string("band ") + std::to_string(band) : std::string("the mesher's own");
+  };
+  // The pattern of a tetrahedron: the distinct bands of its corners, in order.
+  auto patternOf = [&](vtkIdType cellId, int &low, int &high, int &numDistinct) -> std::string
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    wall->GetCellPoints(cellId, npts, pts);
+    bool seen[64] = {false};
+    low = numBands; high = -1; numDistinct = 0;
+    for (vtkIdType j = 0; j < npts; j++)
+    {
+      int b = bandOf(pts[j]);
+      if (b < 64 && !seen[b]) { seen[b] = true; numDistinct++; }
+      low = std::min(low, b);
+      high = std::max(high, b);
+    }
+    std::string pattern;
+    for (int b = 0; b <= numBands && b < 64; b++)
+    {
+      if (!seen[b]) continue;
+      if (!pattern.empty()) pattern += " + ";
+      pattern += nameOf(b);
+    }
+    if (numDistinct == 1) pattern += " only";
+    return pattern;
+  };
   vtkIdType numTets = 0, numUnder1 = 0, numUnder5 = 0, numUnder10 = 0;
   double smallest = 180.0;
   const int numWorstToReport = 5;
   std::vector<std::pair<double, vtkIdType> > worst;
+  std::map<std::string, vtkIdType> under10ByPattern;
+  std::vector<vtkIdType> poorCells;
   for (vtkIdType cellId = 0; cellId < wall->GetNumberOfCells(); cellId++)
   {
     if (wall->GetCellType(cellId) != VTK_TETRA)
@@ -1789,7 +1843,13 @@ int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall)
     smallest = std::min(smallest, angle);
     if (angle < 1.0) numUnder1++;
     if (angle < 5.0) numUnder5++;
-    if (angle < 10.0) numUnder10++;
+    if (angle < 10.0)
+    {
+      numUnder10++;
+      int low, high, numDistinct;
+      under10ByPattern[patternOf(cellId, low, high, numDistinct)]++;
+      poorCells.push_back(cellId);
+    }
     if ((int)worst.size() < numWorstToReport || angle < worst.back().first)
     {
       worst.push_back(std::make_pair(angle, cellId));
@@ -1823,7 +1883,60 @@ int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall)
         centroid[k] += p[k]/npts;
       }
     }
-    fprintf(stdout,"  dihedral angle %.3f degrees at (%.4g, %.4g, %.4g)\n", worst[i].first, centroid[0], centroid[1], centroid[2]);
+    int low, high, numDistinct;
+    std::string pattern = patternOf(worst[i].second, low, high, numDistinct);
+    fprintf(stdout,"  dihedral angle %.3f degrees at (%.4g, %.4g, %.4g), corners on %s\n", worst[i].first, centroid[0], centroid[1], centroid[2], pattern.c_str());
+  }
+  if (numUnder10 > 0)
+  {
+    // the patterns of the tetrahedra under 10 degrees, most common first
+    std::vector<std::pair<vtkIdType, std::string> > ranked;
+    for (std::map<std::string, vtkIdType>::const_iterator it = under10ByPattern.begin(); it != under10ByPattern.end(); ++it)
+    {
+      ranked.push_back(std::make_pair(it->second, it->first));
+    }
+    std::sort(ranked.begin(), ranked.end());
+    fprintf(stdout,"  the tetrahedra under 10 degrees, by where their corners lie (a pair of neighbouring surfaces is the layer spacing against the facet size; one surface only is a boundary sliver the mesher cannot move under -Y):\n");
+    int shown = 0;
+    for (size_t i = ranked.size(); i > 0 && shown < 10; i--, shown++)
+    {
+      fprintf(stdout,"    %lld (%.1f%%) on %s\n", (long long)ranked[i-1].first, 100.0*ranked[i-1].first/numUnder10, ranked[i-1].second.c_str());
+    }
+    // and the tetrahedra themselves, to be looked at where they are
+    auto poor = vtkSmartPointer<vtkUnstructuredGrid>::New();
+    poor->SetPoints(wall->GetPoints());
+    poor->Allocate((vtkIdType)poorCells.size());
+    auto poorAngle = vtkSmartPointer<vtkDoubleArray>::New();
+    poorAngle->SetName("MinDihedralDegrees");
+    auto poorLow = vtkSmartPointer<vtkIntArray>::New();
+    poorLow->SetName("LowestBand");
+    auto poorHigh = vtkSmartPointer<vtkIntArray>::New();
+    poorHigh->SetName("HighestBand");
+    auto poorDistinct = vtkSmartPointer<vtkIntArray>::New();
+    poorDistinct->SetName("NumBands");
+    for (size_t i = 0; i < poorCells.size(); i++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      wall->GetCellPoints(poorCells[i], npts, pts);
+      poor->InsertNextCell(VTK_TETRA, npts, pts);
+      int low, high, numDistinct;
+      patternOf(poorCells[i], low, high, numDistinct);
+      poorAngle->InsertNextValue(angles->GetValue(poorCells[i]));
+      poorLow->InsertNextValue(low);
+      poorHigh->InsertNextValue(high);
+      poorDistinct->InsertNextValue(numDistinct);
+    }
+    poor->GetCellData()->AddArray(poorAngle);
+    poor->GetCellData()->AddArray(poorLow);
+    poor->GetCellData()->AddArray(poorHigh);
+    poor->GetCellData()->AddArray(poorDistinct);
+    char poorName[] = "wall_fill_poor.vtu";
+    if (TGenUtils_WriteVTU(poorName, poor) == SV_OK)
+    {
+      fprintf(stdout,"  wrote %s: the %lld tetrahedra under 10 degrees with their angle and the bands of their corners (0 the interface, then the layers in order, then the outer surface, then the mesher's own points)\n",
+          poorName, (long long)numUnder10);
+    }
   }
   return TGenUtils_ReportMeshQuality(wall);
 }

@@ -3261,7 +3261,23 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       (long long)wallmesh_->GetNumberOfCells(), (long long)wallmesh_->GetNumberOfPoints());
   // Its quality on its own: once appended to the fluid mesh it is a quarter
   // of the elements and its flat layer tetrahedra vanish into that report.
-  TGenUtils_ReportWallFillQuality(wallmesh_);
+  // The wall's points keep the shell's order - the interface, each layer
+  // surface, the outer surface - with the mesher's own after them, so the
+  // band of a corner says which surfaces a flat tetrahedron lies between.
+  {
+    std::vector<vtkIdType> bandEnds;
+    std::vector<std::string> bandNames;
+    bandEnds.push_back(numInner);
+    bandNames.push_back("the interface");
+    for (size_t k = 0; k < levelPointers.size(); k++)
+    {
+      bandEnds.push_back(bandEnds.back() + levelPointers[k]->GetNumberOfPoints());
+      bandNames.push_back(std::string("layer ") + std::to_string(k + 1) + " of " + std::to_string(numLayers));
+    }
+    bandEnds.push_back(bandEnds.back() + offsetOuter->GetNumberOfPoints());
+    bandNames.push_back("the outer surface");
+    TGenUtils_ReportWallFillQuality(wallmesh_, bandEnds, bandNames);
+  }
 
   // The wedge extrusion hands downstream a mesh holding both the volume cells
   // and the surface cells that bound them, tagged with 'CellEntityIds' and

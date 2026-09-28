@@ -60,6 +60,7 @@
 
 #include <utility>
 #include <vector>
+#include <string>
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_Init();
 //int cvTetGenMeshObjectUtils_Logon(char *filename);
@@ -126,8 +127,9 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionI
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh);
 
-/// The wall fill's own quality: the smallest dihedral angles and their places, then the aspect ratio report.
-SV_EXPORT_TETGEN_MESH int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall);
+/// The wall fill's own quality: the smallest dihedral angles, their places and the point bands (interface, layers, outer, the mesher's own) their corners lie in, the tetrahedra under 10 degrees to wall_fill_poor.vtu, then the aspect ratio report.
+SV_EXPORT_TETGEN_MESH int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector<vtkIdType> &bandEnds,
+    const std::vector<std::string> &bandNames);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothPointArray(vtkPolyData *surface,
     vtkDoubleArray *array,
