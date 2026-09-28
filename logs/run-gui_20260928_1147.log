@@ -1,29 +1,25 @@
 Reading plugin paths SV_PLUGIN_PATH environment variable...
 
 
-[Mon Sep 28 04:10:44 2026 
-2.156] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
-[2.159] OpenCASCADE module loaded.
+[Mon Sep 28 11:47:22 2026 
+2.195] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
+[2.200] OpenCASCADE module loaded.
 sv4guiDataManagerPluginActivator::start()
 sv4guiMeshingPluginActivator::start()
-[2.496] BlueBerry Workbench ready
-Expand
-!7.068! WARNING: QPainter::end: Painter ended with 2 saved states
-!7.068! WARNING: QPainter::end: Painter ended with 2 saved states
-!7.068! WARNING: QPainter::end: Painter ended with 2 saved states
-!7.769! WARNING: QPainter::end: Painter ended with 2 saved states
-!7.769! WARNING: QPainter::end: Painter ended with 2 saved states
-!7.769! WARNING: QPainter::end: Painter ended with 2 saved states
-!7.835! WARNING: QPainter::end: Painter ended with 2 saved states
-!7.835! WARNING: QPainter::end: Painter ended with 2 saved states
-!7.835! WARNING: QPainter::end: Painter ended with 2 saved states
+[2.542] BlueBerry Workbench ready
 Expand
 Expand
 Expand
 Expand
-!36.885! WARNING: QPainter::end: Painter ended with 2 saved states
-!36.885! WARNING: QPainter::end: Painter ended with 2 saved states
-!36.885! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.500! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.500! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.500! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.545! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.545! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.545! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.613! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.613! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.613! WARNING: QPainter::end: Painter ended with 2 saved states
 Getting sizing function Surface
 Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
   Number of triangles: 4218044
@@ -46,7 +42,7 @@ Remeshing surface with MMG...
 
   -- MESH QUALITY   4218044
      BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
-  -- PHASE 1 COMPLETED.     3.098s
+  -- PHASE 1 COMPLETED.     2.987s
 
   -- PHASE 2 : ISOTROPIC MESHING
         78112 splitted,  1499785 collapsed,    78452 swapped, 5 iter.
@@ -54,7 +50,7 @@ Remeshing surface with MMG...
   -- GRADATION : 1.300000
          1065 splitted,       28 collapsed,       64 swapped, 3 iter.
         90659 splitted,   356083 collapsed,    26568 swapped,  9421952 moved, 2 iter. 
-  -- PHASE 2 COMPLETED.     24.414s
+  -- PHASE 2 COMPLETED.     23.532s
 
   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
    END OF MODULE MMGS: IMB-LJLL 
@@ -68,7 +64,7 @@ Remeshing surface with MMG...
      NUMBER OF TRIANGLES    896556
      NUMBER OF EDGES          2430   RIDGES      2430
 
-   MMGSLIB: ELAPSED TIME  27.630s
+   MMGSLIB: ELAPSED TIME  26.634s
 Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
   Number of triangles: 888201
   Min / Avg / Max: 1.000 / 1.213 / 8.421
@@ -129,10 +125,10 @@ Wall outer surface and its 2 layer surface(s) as offsets of the interface at 0.3
   offset surface: marching tetrahedra over the cloud (surface 3 of 3, at 1 of the thickness)
   offset surface: the decimation of the contour to the interface's size (surface 3 of 3, at 1 of the thickness)
   thickness 0.1 to 1.2; 14 cap rims continued by collars of 1390 triangles
-  the field was sampled on 1781882 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges, each offset point 0.1 of its distance off its ray); 11.3 s for the field
+  the field was sampled on 1781882 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges, each offset point 0.1 of its distance off its ray); 10.8 s for the field
   wrote wall_layer_1_of_3_offset.vtp in /work
   surface 1 of 3, at 0.333 of the thickness (layer_1_of_3):
-  12731290 tetrahedra over the cloud, 3212441 of them cut by the level (8.2 s); the contour had 2316833 points and 4633678 triangles (16.2 s; 0 cloud points on the level itself, 0 triangles of no area left out, 39 points still off the level after 16 steps); 1720750 edges collapsed onto the level to the interface's own size, leaving 596083 points and 1192178 triangles (154.8 s; 0 operations refused because a triangle they would make passes through a neighbour)
+  12731290 tetrahedra over the cloud, 3212441 of them cut by the level (8.0 s); the contour had 2316833 points and 4633678 triangles (16.3 s; 0 cloud points on the level itself, 0 triangles of no area left out, 39 points still off the level after 16 steps); 1720750 edges collapsed onto the level to the interface's own size, leaving 596083 points and 1192178 triangles (153.8 s; 0 operations refused because a triangle they would make passes through a neighbour)
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation; the smallest angle between two triangles on an edge is 1.41 degrees)
   wrote wall_layer_2_of_3_offset.vtp in /work
   surface 2 of 3, at 0.667 of the thickness (layer_2_of_3):
@@ -140,9 +136,9 @@ Wall outer surface and its 2 layer surface(s) as offsets of the interface at 0.3
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation; the smallest angle between two triangles on an edge is 1.14 degrees)
   wrote wall_outer_offset.vtp in /work
   surface 3 of 3, at 1 of the thickness (outer):
-  12731290 tetrahedra over the cloud, 3101780 of them cut by the level (7.8 s); the contour had 2207072 points and 4414176 triangles (16.6 s; 0 cloud points on the level itself, 0 triangles of no area left out, 70 points still off the level after 16 steps); 1496998 edges collapsed onto the level to the interface's own size, leaving 710073 points and 1420178 triangles (153.3 s; 1 operations refused because a triangle they would make passes through a neighbour)
+  12731290 tetrahedra over the cloud, 3101780 of them cut by the level (7.9 s); the contour had 2207072 points and 4414176 triangles (16.8 s; 0 cloud points on the level itself, 0 triangles of no area left out, 70 points still off the level after 16 steps); 1496998 edges collapsed onto the level to the interface's own size, leaving 710073 points and 1420178 triangles (153.0 s; 1 operations refused because a triangle they would make passes through a neighbour)
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (1 unfolded by the decimation; the smallest angle between two triangles on an edge is 0.855 degrees)
-  30962697 field evaluations in all; 577.2 s for the 3 surface(s)
+  30962697 field evaluations in all; 575.4 s for the 3 surface(s)
   trimming at the caps by the ownership the offset surface carries
     cap at (-7.3418, -29.886, 73.207): 125 points past its plane came off, 28 moved onto it
     cap at (6.8102, -35.173, 74.946): 125 points past its plane came off, 29 moved onto it
@@ -293,19 +289,19 @@ Filling the wall with TetGen tetrahedra: shell surface has 2309569 points and 46
   3 layers: the fill's quality bounds are loosened to radius-edge 2 and dihedral 5 degrees
   TetGen wall fill started...
 Delaunizing vertices...
-Delaunay seconds:  8.1634
+Delaunay seconds:  8.11713
 Creating surface mesh ...
-Surface mesh seconds:  4.98737
+Surface mesh seconds:  4.57272
 Recovering boundaries...
-Boundary recovery seconds:  18.8323
+Boundary recovery seconds:  19.2832
 Removing exterior tetrahedra ...
-Exterior tets removal seconds:  3.39217
+Exterior tets removal seconds:  3.39592
 Recovering Delaunayness...
-Delaunay recovery seconds:  6.10669
+Delaunay recovery seconds:  5.88258
 Refining mesh...
-Refinement seconds:  5.50998
+Refinement seconds:  5.36104
 Optimizing mesh...
-Optimization seconds:  2.95951
+Optimization seconds:  2.85852
 
 Writing nodes.
 Writing elements.
@@ -313,8 +309,8 @@ Writing faces.
 Writing edges.
 Writing neighbors.
 
-Output seconds:  2.09061
-Total running seconds:  52.1347
+Output seconds:  2.03101
+Total running seconds:  51.5797
 
 Statistics:
 
@@ -334,11 +330,23 @@ Statistics:
   wall filled with 11171884 tetrahedra on 2311170 nodes
 Wall mesh quality (the wall's 11171884 tetrahedra alone, before they join the fluid mesh):
   smallest dihedral angle 0.493 degrees; under 1 degree: 21, under 5: 5597 (0.05%), under 10: 138613 (1.24%)
-  dihedral angle 0.493 degrees at (27.87, -16.83, -61.32)
-  dihedral angle 0.503 degrees at (13.38, -36.08, 75.81)
-  dihedral angle 0.552 degrees at (13.25, -0.09068, 63.58)
-  dihedral angle 0.588 degrees at (30.52, -34.88, -75.82)
-  dihedral angle 0.591 degrees at (30.57, -34.81, -75.82)
+  dihedral angle 0.493 degrees at (27.87, -16.83, -61.32), corners on layer 2 of 3 only
+  dihedral angle 0.503 degrees at (13.38, -36.08, 75.81), corners on the outer surface only
+  dihedral angle 0.552 degrees at (13.25, -0.09068, 63.58), corners on the interface + layer 1 of 3
+  dihedral angle 0.588 degrees at (30.52, -34.88, -75.82), corners on the interface + layer 1 of 3
+  dihedral angle 0.591 degrees at (30.57, -34.81, -75.82), corners on the interface + layer 1 of 3
+  the tetrahedra under 10 degrees, by where their corners lie (a pair of neighbouring surfaces is the layer spacing against the facet size; one surface only is a boundary sliver the mesher cannot move under -Y):
+    76263 (55.0%) on layer 1 of 3 + layer 2 of 3
+    45860 (33.1%) on layer 2 of 3 + the outer surface
+    14081 (10.2%) on the interface + layer 1 of 3
+    765 (0.6%) on layer 2 of 3 only
+    580 (0.4%) on layer 1 of 3 only
+    355 (0.3%) on layer 2 of 3 + the mesher's own
+    201 (0.1%) on the outer surface only
+    159 (0.1%) on layer 1 of 3 + the mesher's own
+    132 (0.1%) on layer 1 of 3 + layer 2 of 3 + the mesher's own
+    116 (0.1%) on layer 2 of 3 + the outer surface + the mesher's own
+  wrote wall_fill_poor.vtu: the 138613 tetrahedra under 10 degrees with their angle and the bands of their corners (0 the interface, then the layers in order, then the outer surface, then the mesher's own points)
 Mesh quality (aspect ratio, 1.0 is an equilateral tetrahedron):
   Number of elements: 11171884
   Min / Avg / Max: 1.023 / 2.038 / 456.708
@@ -368,19 +376,19 @@ Converting to TetGen...
 Adding mesh sizing metric...
 TetGen Meshing Started...
 Delaunizing vertices...
-Delaunay seconds:  1.45384
+Delaunay seconds:  1.41286
 Creating surface mesh ...
-Surface mesh seconds:  0.633736
+Surface mesh seconds:  0.611446
 Recovering boundaries...
-Boundary recovery seconds:  2.3892
+Boundary recovery seconds:  2.45328
 Removing exterior tetrahedra ...
-Exterior tets removal seconds:  0.874999
+Exterior tets removal seconds:  0.890631
 Recovering Delaunayness...
-Delaunay recovery seconds:  0.500567
+Delaunay recovery seconds:  0.505345
 Refining mesh...
-Refinement seconds:  108.359
+Refinement seconds:  109.763
 Optimizing mesh...
-Optimization seconds:  6.32827
+Optimization seconds:  6.49837
 
 Writing nodes.
 Writing elements.
@@ -389,8 +397,8 @@ Writing edges.
 Writing metrics.
 Writing neighbors.
 
-Output seconds:  2.36481
-Total running seconds:  122.91
+Output seconds:  2.34463
+Total running seconds:  124.484
 
 Statistics:
 
@@ -431,16 +439,3 @@ Min / Avg / Max: 1.000 / 1.918 / 456.708
 Aspect Ratio > 3 (distorted): 4201162 (10.60%)
 Aspect Ratio > 10 (poor): 6591 (0.02%)
 Assessment: ACCEPTABLE (some distorted elements)
-Number of Nodes: 6650276
-Number of Elems: 39634287
-Number of Edges: 4806306
-Number of Faces: 3204204
-
-Mesh Quality (Aspect Ratio):
-Min / Avg / Max: 1.000 / 1.918 / 456.708
-Aspect Ratio > 3 (distorted): 4201162 (10.60%)
-Aspect Ratio > 10 (poor): 6591 (0.02%)
-Assessment: ACCEPTABLE (some distorted elements)
-[1737.818] Closing workbench...
-!1738.591! WARNING: Empty filename passed to function
-[1738.654] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
