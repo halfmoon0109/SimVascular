@@ -431,3 +431,13 @@ Min / Avg / Max: 1.000 / 1.918 / 456.708
 Aspect Ratio > 3 (distorted): 4201162 (10.60%)
 Aspect Ratio > 10 (poor): 6591 (0.02%)
 Assessment: ACCEPTABLE (some distorted elements)
+Number of Nodes: 6650276
+Number of Elems: 39634287
+Number of Edges: 4806306
+Number of Faces: 3204204
+
+Mesh Quality (Aspect Ratio):
+Min / Avg / Max: 1.000 / 1.918 / 456.708
+Aspect Ratio > 3 (distorted): 4201162 (10.60%)
+Aspect Ratio > 10 (poor): 6591 (0.02%)
+Assessment: ACCEPTABLE (some distorted elements)
