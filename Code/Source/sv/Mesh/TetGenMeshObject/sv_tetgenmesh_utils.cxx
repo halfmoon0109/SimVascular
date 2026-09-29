@@ -5546,7 +5546,7 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
     // when a zone boundary loop found no piece chain of its own (the piece
     // too narrow there; two rings around the loop), or when a piece has a
     // hole (the prisms owning or passing through it, with a ring).
-    const int erosionRings = 1, earPasses = 2, wideningRings = 2, maxWidenings = 5;
+    const int erosionRings = 1, earPasses = 2, wideningRings = 2, maxWidenings = 10;
     for (int attempt = 0; ; attempt++)
     {
       hybrid.prisms = svoffset::PrismMesh();
@@ -5560,38 +5560,64 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       const bool built = svoffset::BuildJunctionShell(hybrid.inner, field, hybrid.structured, hybrid.prisms, levelSurfaces, fractions,
             erosionRings, earPasses, hybrid.shell, error) == 0;
       hybrid.secondsShell += seconds();
-      if (built && (hybrid.shell.numCrossingTriangles == 0 || hybrid.shell.crossingStructuredTriangles.empty()))
+      if (built && hybrid.shell.numCrossingTriangles == 0 && hybrid.shell.numFoldedEdges == 0)
       {
         break;
       }
-      const bool byShellCrossing = built;
-      const bool byLoop = !built && !hybrid.shell.failedLoopPoints.empty();
-      const bool byHole = !built && !byLoop && !hybrid.shell.failedTriangles.empty();
-      if ((!byShellCrossing && !byLoop && !byHole) || attempt >= maxWidenings)
+      // A built shell with triangles passing through one another or lying
+      // on each other: the prisms whose layer surface passes through a
+      // piece go to the junction zone with a ring, and the loops whose
+      // strips are at fault get two rings around them - a strip hops
+      // between the two sides of a piece too narrow for it (measured
+      // 2026-09-29, run-gui_20260929_1015: two vessels 0.1 thick against
+      // each other, 1,618 crossing triangles, strip edges of 0.9 on loops
+      // of edges 0.09). A loop without a chain widens its region; a piece
+      // with a chain no loop takes gives the prisms owning or passing
+      // through it to the junction zone.
+      std::vector<long long> seedPoints, seedTriangles;
+      int rings = 1;
+      if (built)
+      {
+        seedTriangles = hybrid.shell.crossingStructuredTriangles;
+        for (size_t z = 0; z < hybrid.shell.zips.size(); z++)
+        {
+          const svoffset::ZipReport &zip = hybrid.shell.zips[z];
+          if (zip.crossingTriangles > 0 || zip.foldedEdges > 0) seedPoints.insert(seedPoints.end(), zip.loop.begin(), zip.loop.end());
+        }
+        rings = wideningRings;
+      }
+      else if (!hybrid.shell.failedLoopPoints.empty())
+      {
+        seedPoints = hybrid.shell.failedLoopPoints;
+        rings = wideningRings;
+      }
+      else if (!hybrid.shell.failedTriangles.empty())
+      {
+        seedTriangles = hybrid.shell.failedTriangles;
+        rings = 1;
+      }
+      if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= maxWidenings)
       {
         if (built)
         {
-          // the shell's crossings are counted and judged by the caller
+          // the shell's faults are counted and judged by the caller
           break;
         }
         reason = "the junction shell could not be built: " + error;
         return SV_ERROR;
       }
-      const std::vector<long long> none;
-      const long long widened = byLoop
-          ? svoffset::WidenJunctionZone(hybrid.inner, hybrid.shell.failedLoopPoints, none, wideningRings, hybrid.structured)
-          : svoffset::WidenJunctionZone(hybrid.inner, none, byHole ? hybrid.shell.failedTriangles : hybrid.shell.crossingStructuredTriangles, 1, hybrid.structured);
+      const long long widened = svoffset::WidenJunctionZone(hybrid.inner, seedPoints, seedTriangles, rings, hybrid.structured);
       hybrid.numWidenings++;
       hybrid.numTrianglesWidened += widened;
       if (built)
       {
-        fprintf(stdout,"  junction shell attempt %d: %lld of its triangles pass through another where the layer surfaces of %zu prisms pass through a piece; those prisms' triangles and a ring around them go to the junction zone (%lld more triangles) and the shell is built again\n",
-            attempt + 1, (long long)hybrid.shell.numCrossingTriangles, hybrid.shell.crossingStructuredTriangles.size(), widened);
+        fprintf(stdout,"  junction shell attempt %d: %lld of its triangles pass through another and %lld of its edges are folded; the junction zone is widened at %zu prisms whose layer surface passes through a piece and by %d rings around the %zu points of the loops whose strips are at fault (%lld more triangles), and the shell is built again\n",
+            attempt + 1, (long long)hybrid.shell.numCrossingTriangles, (long long)hybrid.shell.numFoldedEdges, seedTriangles.size(), rings, seedPoints.size(), widened);
       }
       else
       {
         fprintf(stdout,"  junction shell attempt %d: %s; the junction zone is widened %s (%lld more triangles) and the shell built again\n",
-            attempt + 1, error.c_str(), byLoop ? "by two rings around that loop" : "at the prisms owning or passing through the piece there, with a ring around them",
+            attempt + 1, error.c_str(), !seedPoints.empty() ? "by two rings around that loop" : "at the prisms owning or passing through the piece there, with a ring around them",
             widened);
       }
       fflush(stdout);

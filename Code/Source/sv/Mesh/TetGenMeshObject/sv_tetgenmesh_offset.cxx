@@ -3658,8 +3658,9 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
     const std::vector<double> &guardPoints, const std::vector<long long> &guardTriangles, int earPasses,
     Surface &piece, ZonePieceReport &report, std::string &error, std::vector<long long> *crossingGuards,
     std::vector<long long> *holeOwners, const std::vector<long long> *layerTetrahedra,
-    const std::vector<double> *loopSegments, double erosionDistance)
+    const std::vector<double> *loopSegments, double erosionDistance, std::vector<long long> *overPrismTetrahedra)
 {
+  if (overPrismTetrahedra != nullptr) overPrismTetrahedra->clear();
   if (crossingGuards != nullptr) crossingGuards->clear();
   if (holeOwners != nullptr) holeOwners->clear();
   report = ZonePieceReport();
@@ -3730,8 +3731,9 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
         grid[c].push_back(t);
       }
     }
-    auto inside = [&](const double *x) -> bool
+    auto inside = [&](const double *x, ll &held) -> bool
     {
+      held = -1;
       std::map<std::array<ll, 3>, std::vector<ll> >::const_iterator at = grid.find(cellOf(x));
       if (at == grid.end()) return false;
       for (size_t m = 0; m < at->second.size(); m++)
@@ -3753,7 +3755,7 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
           const double sd = Dot(n, ad), sx = Dot(n, ax);
           if (sd*sx < 0.0) in = false;
         }
-        if (in) return true;
+        if (in) { held = t; return true; }
       }
       return false;
     };
@@ -3773,13 +3775,19 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
       field.Local(c, size, thickness, rim);
       const double lower = 0.05*thickness/len;
       bool over = false;
+      ll held = -1;
       for (int j = 0; j < 4 && !over; j++)
       {
         const double *x = (j < 3) ? &level.points[(size_t)3*tt[j]] : c;
         double y[3] = {x[0] - lower*n[0], x[1] - lower*n[1], x[2] - lower*n[2]};
-        if (inside(y)) over = true;
+        if (inside(y, held)) over = true;
       }
-      if (over) { keep[(size_t)t] = 0; report.numOverPrisms++; }
+      if (over)
+      {
+        keep[(size_t)t] = 0;
+        report.numOverPrisms++;
+        if (overPrismTetrahedra != nullptr) overPrismTetrahedra->push_back(held);
+      }
     }
   }
   // The boundary of the kept set, kept up to date as triangles go: how
@@ -4272,6 +4280,42 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
       }
     }
   }
+  // a structured island the widening cut off (fewer than the
+  // classification's smallest island, 50 triangles) joins the junction
+  // zone: its lifted boundary would be a zone loop with a piece chain to
+  // find, and a chain no loop takes was measured around one (2026-09-29,
+  // the 178k model, 34 points)
+  {
+    const ll minIsland = 50;
+    std::vector<ll> label((size_t)nt, -1);
+    std::vector<ll> stack;
+    for (ll seed = 0; seed < nt; seed++)
+    {
+      if (label[(size_t)seed] >= 0 || !structured[(size_t)seed]) continue;
+      std::vector<ll> island;
+      label[(size_t)seed] = seed;
+      stack.push_back(seed);
+      while (!stack.empty())
+      {
+        const ll t = stack.back();
+        stack.pop_back();
+        island.push_back(t);
+        for (int j = 0; j < 3; j++)
+        {
+          const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+          for (size_t q = 0; q < around.size(); q++)
+          {
+            const ll u = around[q];
+            if (label[(size_t)u] >= 0 || !structured[(size_t)u]) continue;
+            label[(size_t)u] = seed;
+            stack.push_back(u);
+          }
+        }
+      }
+      if ((ll)island.size() >= minIsland) continue;
+      for (size_t m = 0; m < island.size(); m++) { structured[(size_t)island[m]] = 0; numWidened++; }
+    }
+  }
   // two regions the widening made touch at a point
   ll numPinches = 0, numPinched = 0;
   OpenPinches(input, incident, structured, numPinches, numPinched);
@@ -4552,7 +4596,7 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
   for (int k = 1; k <= numLayers; k++)
   {
     Surface piece;
-    std::vector<ll> crossingGuards, holeOwners;
+    std::vector<ll> crossingGuards, holeOwners, overPrismTets;
     // the lifted zone boundary edges at this level, for the erosion by distance
     std::vector<double> loopSegments;
     for (size_t e = 0; e + 1 < prisms.zoneBoundaryEdges.size(); e += 2)
@@ -4573,9 +4617,20 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       }
     }
     if (TrimSurfaceToZone(levels[(size_t)k - 1], fractions[(size_t)k - 1], field, nt, structured, rimStructured, erosionRings,
-          prisms.points, prisms.layerTriangles[(size_t)k - 1], earPasses, piece, out.pieces[(size_t)k - 1], error, &crossingGuards, &holeOwners, &layerTets, &loopSegments, erosionDistance) != 0)
+          prisms.points, prisms.layerTriangles[(size_t)k - 1], earPasses, piece, out.pieces[(size_t)k - 1], error, &crossingGuards, &holeOwners, &layerTets, &loopSegments, erosionDistance, &overPrismTets) != 0)
     {
       return 1;
+    }
+    // the structured triangles whose prisms held a dropped triangle's point: the layer's tetrahedra are three per structured triangle, in order
+    if (layerTets.size() == 12*structuredIds.size())
+    {
+      for (size_t m = 0; m < overPrismTets.size(); m++)
+      {
+        const ll g = overPrismTets[m];
+        if (g >= 0 && (size_t)(g/3) < structuredIds.size()) out.overPrismStructuredTriangles.push_back(structuredIds[(size_t)(g/3)]);
+      }
+      std::sort(out.overPrismStructuredTriangles.begin(), out.overPrismStructuredTriangles.end());
+      out.overPrismStructuredTriangles.erase(std::unique(out.overPrismStructuredTriangles.begin(), out.overPrismStructuredTriangles.end()), out.overPrismStructuredTriangles.end());
     }
     out.holeOwnerTriangles.insert(out.holeOwnerTriangles.end(), holeOwners.begin(), holeOwners.end());
     std::sort(out.holeOwnerTriangles.begin(), out.holeOwnerTriangles.end());
@@ -4709,6 +4764,7 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       // chain lies on a level at most one thickness above them)
       std::vector<ll> candidates(out.crossingStructuredTriangles);
       candidates.insert(candidates.end(), out.holeOwnerTriangles.begin(), out.holeOwnerTriangles.end());
+      candidates.insert(candidates.end(), out.overPrismStructuredTriangles.begin(), out.overPrismStructuredTriangles.end());
       for (size_t m = 0; m < candidates.size(); m++)
       {
         const ll t = candidates[m];
@@ -4738,6 +4794,7 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       zip.loopPoints = (ll)A.size();
       zip.chainPoints = (ll)B.size();
       zip.meanDistance = meanDistance[a][(size_t)chainOfLoop[a]];
+      zip.loop = loops[a];
       for (size_t m = 0; m < A.size(); m++) for (int j = 0; j < 3; j++) zip.centre[j] += out.points[(size_t)3*A[m] + j]/(double)A.size();
       if (ZipChains(out.points, A, B, true, strip, error, &zip.agreement) != 0)
       {
@@ -4758,17 +4815,32 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
     }
   }
   // the shell against itself: how many of its triangles pass through
-  // another, and how many of each strip's
+  // another or lie on each other across an edge, and how many of each
+  // strip's (the strip's triangles are consecutive from where it started)
   {
     std::vector<unsigned char> crossing;
     double at[3];
     out.numCrossingTriangles = svenvelope::CountCrossingTriangles(out.points, out.triangles, crossing, at);
+    std::vector<FoldedPair> folded;
+    double smallestFold = 180.0;
+    out.numFoldedEdges = ListFoldedEdges(out.points, out.triangles, foldDegrees, (size_t)1 << 20, folded, smallestFold);
+    std::vector<ll> foldedOf(out.triangles.size()/3, 0);
+    for (size_t f = 0; f < folded.size(); f++)
+    {
+      if (folded[f].a >= 0 && (size_t)folded[f].a < foldedOf.size()) foldedOf[(size_t)folded[f].a]++;
+      if (folded[f].b >= 0 && (size_t)folded[f].b < foldedOf.size()) foldedOf[(size_t)folded[f].b]++;
+    }
     for (size_t z = 0; z < out.zips.size(); z++)
     {
       const ll first = -out.zips[z].crossingTriangles;
-      ll n = 0;
-      for (ll i = first; i < first + out.zips[z].stripTriangles && (size_t)i < crossing.size(); i++) if (crossing[(size_t)i]) n++;
+      ll n = 0, nf = 0;
+      for (ll i = first; i < first + out.zips[z].stripTriangles && (size_t)i < crossing.size(); i++)
+      {
+        if (crossing[(size_t)i]) n++;
+        nf += foldedOf[(size_t)i];
+      }
       out.zips[z].crossingTriangles = n;
+      out.zips[z].foldedEdges = nf;
     }
   }
   // 4. compact the points to those used
