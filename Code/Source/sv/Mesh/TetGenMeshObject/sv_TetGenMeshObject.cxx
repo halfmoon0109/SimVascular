@@ -2841,6 +2841,23 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // thin (measured 2026-09-23 on the user's 178k model: the two-thirds
   // surface through the outer one at a branch root, 17 crossings, and the
   // mesher refused the shell).
+  // A step in the thickness between faces - a thin branch on a thick parent
+  // - is not a crease of the union like any other after all. The parent's
+  // offset stands around the branch root as a collar, rounded around the
+  // ostium ring with the parent's thickness, and the branch's offset is a
+  // tube barely wider than the branch, so the collar's top meets the tube at
+  // a grazing angle and the crease between them wanders with every triangle
+  // of both: a jagged ridge of long thin triangles at every junction (the
+  // user's picture of 2026-09-29). Ramping the thin side up toward the thick
+  // side at the gradation slope makes the branch's offset a cone that leaves
+  // the collar at a proper angle, and the crease a clean curve. The thick
+  // side is never lowered (that was the gradation limit's failing here, see
+  // above), and the layer fractions follow the ramped thickness.
+  if (TGenUtils_RaiseThicknessTowardNeighbours(surface, thicknessArray, gWallThicknessMaxSlope, "requested wall thickness") != SV_OK)
+  {
+    fprintf(stderr,"Problem ramping the wall thickness toward thicker neighbours\n");
+    return SV_ERROR;
+  }
   const int numLayers = std::max(1, meshoptions_.numwallsublayers);
   std::vector<double> fractions;
   for (int k = 1; k <= numLayers; k++)

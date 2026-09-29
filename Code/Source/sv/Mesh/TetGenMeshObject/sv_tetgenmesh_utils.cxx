@@ -3040,6 +3040,161 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
   return SV_OK;
 }
 
+// -------------------------------------
+// TGenUtils_RaiseThicknessTowardNeighbours
+// -------------------------------------
+/**
+ * @brief Raises the thickness of a point that stands too far below a
+ * neighbour: no point may be thinner than a neighbour's thickness less the
+ * slope times the edge length. The mirror image of
+ * TGenUtils_LimitThicknessGradation, which only ever lowers; this only ever
+ * raises, so the thick side of a step keeps what it asked for and the thin
+ * side ramps up to meet it.
+ *
+ * Why the offset fill wants it: where a thin branch (0.1) leaves a thick
+ * parent (0.5), the parent's offset stands around the branch root as a
+ * collar of the parent's thickness, rounded around the ostium ring, and the
+ * branch's own offset is a tube only 0.1 wider than the branch. The collar's
+ * rounded top meets that tube at a grazing angle, so the union's crease
+ * between them is ill-conditioned: it wanders with every triangle of both
+ * surfaces and comes out as a jagged ridge of long thin triangles (the
+ * user's picture of 2026-09-29). With the branch ramped up to the parent's
+ * thickness at the root and down at this slope, the branch's offset is a
+ * cone that leaves the collar at a proper angle, and the crease is a clean
+ * curve where the cone comes out of the collar.
+ * @param surface The surface the thickness lives on.
+ * @param array One thickness per point; changed in place.
+ * @param maxSlope The largest fall per unit distance allowed; zero or less does nothing.
+ * @param label Names the field in the log.
+ * @return SV_OK if the pass ran.
+ */
+int TGenUtils_RaiseThicknessTowardNeighbours(vtkPolyData *surface, vtkDoubleArray *array,
+    double maxSlope, const char *label)
+{
+  if (maxSlope <= 0.0)
+  {
+    return SV_OK;
+  }
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot raise the thickness toward its neighbours without a surface and an array\n");
+    return SV_ERROR;
+  }
+  if (label == nullptr)
+  {
+    label = "wall thickness";
+  }
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The thickness array must have one component and one tuple per surface point\n");
+    return SV_ERROR;
+  }
+  surface->BuildLinks();
+  std::vector<std::vector<std::pair<vtkIdType,double> > > neighbors(numPts);
+  auto cellIds = vtkSmartPointer<vtkIdList>::New();
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double p[3];
+    surface->GetPoint(ptId, p);
+    auto& ptNeighbors = neighbors[ptId];
+    surface->GetPointCells(ptId, cellIds);
+    for (vtkIdType i = 0; i < cellIds->GetNumberOfIds(); i++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(cellIds->GetId(i), npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        if (pts[j] == ptId)
+        {
+          continue;
+        }
+        bool seen = false;
+        for (auto& existing : ptNeighbors)
+        {
+          if (existing.first == pts[j])
+          {
+            seen = true;
+            break;
+          }
+        }
+        if (seen)
+        {
+          continue;
+        }
+        double q[3];
+        surface->GetPoint(pts[j], q);
+        double offset[3] = {q[0]-p[0], q[1]-p[1], q[2]-p[2]};
+        ptNeighbors.push_back(std::make_pair(pts[j], std::sqrt(offset[0]*offset[0] + offset[1]*offset[1] + offset[2]*offset[2])));
+      }
+    }
+  }
+  std::vector<double> original(numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    original[ptId] = array->GetValue(ptId);
+  }
+  // A point just raised can leave its own neighbours too far below it, so
+  // raised points are revisited; every point starts queued.
+  std::deque<vtkIdType> queue;
+  std::vector<char> queued(numPts, 1);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    queue.push_back(ptId);
+  }
+  const double relativeTolerance = 1.0e-9;
+  while (!queue.empty())
+  {
+    vtkIdType ptId = queue.front();
+    queue.pop_front();
+    queued[ptId] = 0;
+    double thickness = array->GetValue(ptId);
+    for (auto& neighbor : neighbors[ptId])
+    {
+      double floor = thickness - maxSlope*neighbor.second;
+      double neighborThickness = array->GetValue(neighbor.first);
+      if (neighborThickness >= floor - relativeTolerance*std::fabs(floor))
+      {
+        continue;
+      }
+      array->SetValue(neighbor.first, floor);
+      if (!queued[neighbor.first])
+      {
+        queued[neighbor.first] = 1;
+        queue.push_back(neighbor.first);
+      }
+    }
+  }
+  int numRaised = 0;
+  double maxRaise = 0.0;
+  vtkIdType maxRaiseId = -1;
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    double raise = array->GetValue(ptId) - original[ptId];
+    if (raise <= 0.0)
+    {
+      continue;
+    }
+    numRaised++;
+    if (raise > maxRaise)
+    {
+      maxRaise = raise;
+      maxRaiseId = ptId;
+    }
+  }
+  fprintf(stdout,"Thickness ramp toward thicker neighbours (fall of at most %g per unit distance) [%s]: raised %d of %lld points; largest raise %.5g",
+      maxSlope, label, numRaised, (long long)numPts, maxRaise);
+  if (maxRaiseId >= 0)
+  {
+    double p[3];
+    surface->GetPoint(maxRaiseId, p);
+    fprintf(stdout," at (%.5g, %.5g, %.5g) (%.5g -> %.5g)", p[0], p[1], p[2], original[maxRaiseId], array->GetValue(maxRaiseId));
+  }
+  fprintf(stdout,"\n");
+  return SV_OK;
+}
+
 // ------------------------------------
 // TGenUtils_LimitThicknessGradation
 // ------------------------------------

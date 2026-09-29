@@ -180,6 +180,10 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyDat
     int inward,
     const char *label);
 
+/// Raises every point that stands more than maxSlope times the edge length below a neighbour, up to that floor: the thin side of a step ramps up to the thick side, which keeps what it asked for.
+SV_EXPORT_TETGEN_MESH int TGenUtils_RaiseThicknessTowardNeighbours(vtkPolyData *surface, vtkDoubleArray *array,
+    double maxSlope, const char *label);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_LimitThicknessGradation(vtkPolyData *surface,
     vtkDoubleArray *array,
     double maxSlope,
