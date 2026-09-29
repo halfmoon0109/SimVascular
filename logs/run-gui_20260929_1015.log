@@ -504,3 +504,6 @@ Assessment: ACCEPTABLE (some distorted elements)
 !1841.779! WARNING: QPainter::end: Painter ended with 2 saved states
 !1841.828! WARNING: QPainter::end: Painter ended with 2 saved states
 !1841.884! WARNING: QPainter::end: Painter ended with 2 saved states
+[1844.958] Closing workbench...
+!1845.653! WARNING: Empty filename passed to function
+[1845.712] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
