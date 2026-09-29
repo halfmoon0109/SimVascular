@@ -9,6 +9,10 @@
 # vtp(wall_*_crossings*.vtp)도 같이 복사한다: 웹 세션이 VTK 없이 읽어 교차를
 # 국소 재현하는 데 쓴다. 지난 실행의 파일이 그대로 남아 있을 수 있으니, 교차가
 # 없는 실행 뒤에 남은 것은 로그의 날짜와 맞지 않는 옛 파일이다.
+# 벽 인터페이스(법선·두께·ModelFaceID가 붙은 wall_offset_diagnostics.vtp, 오프셋
+# 직전에 메셔가 남김)도 복사한다: 웹 세션이 재빌드 없이 오프셋 면부터 혼합 벽까지
+# 재현하는 입력이다. 실행마다 같은 내용으로 다시 써지므로 모델이나 두께가 바뀔
+# 때만 커밋에 잡힌다(압축 바이너리, 수십 MB; GitHub 한도 100 MB).
 
 $ErrorActionPreference = "Stop"
 
@@ -25,6 +29,7 @@ if (-not (Test-Path $SourceLogs)) {
 New-Item -ItemType Directory -Force -Path $DestLogs | Out-Null
 Copy-Item -Path (Join-Path $SourceLogs "*.log") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
 Copy-Item -Path (Join-Path $WorkRoot "wall_*_crossings*.vtp") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
+Copy-Item -Path (Join-Path $WorkRoot "wall_offset_diagnostics.vtp") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
 
 Push-Location $RepoRoot
 try {

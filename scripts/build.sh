@@ -21,6 +21,9 @@ fi
 
 mkdir -p "$DEST_LOGS"
 cp -f "$SOURCE_LOGS"/*.log "$DEST_LOGS"/ 2>/dev/null || true
+# build.ps1과 같이: 교차 진단 vtp와 벽 인터페이스(wall_offset_diagnostics.vtp)도 담는다
+cp -f "$WORK_ROOT"/wall_*_crossings*.vtp "$DEST_LOGS"/ 2>/dev/null || true
+cp -f "$WORK_ROOT"/wall_offset_diagnostics.vtp "$DEST_LOGS"/ 2>/dev/null || true
 
 cd "$REPO_ROOT"
 git add logs
