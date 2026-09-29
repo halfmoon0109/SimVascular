@@ -552,6 +552,12 @@ struct ZonePieceReport
  * crotch), and two rows ate the whole band there (measured 2026-09-29 on
  * the 178k model, a branch 0.38 thick on a parent 0.85 thick); the
  * distance follows the loop's own edge instead.
+ * @param overPrismTetrahedra Set, if given, per triangle dropped for
+ * hanging over the prism zone to the index (into layerTetrahedra) of the
+ * tetrahedron that held its point: a patch of them inside a junction
+ * region's piece is a hole where a structured triangle's prisms stand in
+ * the way (a branch root passing through its parent's prisms beyond the
+ * margin), and those prisms' triangles have to go to the junction zone.
  * @param layerTetrahedra The prism tetrahedra of this layer (four ids into
  * guardPoints each): a kept triangle whose corners or centre, lowered by
  * a twentieth of the thickness, lie inside one hangs over the prism zone
@@ -566,7 +572,7 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
     Surface &piece, ZonePieceReport &report, std::string &error,
     std::vector<long long> *crossingGuards = nullptr, std::vector<long long> *holeOwners = nullptr,
     const std::vector<long long> *layerTetrahedra = nullptr, const std::vector<double> *loopSegments = nullptr,
-    double erosionDistance = 1.0);
+    double erosionDistance = 1.0, std::vector<long long> *overPrismTetrahedra = nullptr);
 
 /**
  * @brief The boundary of a triangle set as chains of point ids, each in the
@@ -613,6 +619,8 @@ struct ZipReport
   double agreement = 0.0;               // of the two chains' directions (ZipChains), positive when they run the same way
   long long stripTriangles = 0;
   long long crossingTriangles = 0;      // of the strip's, passing through another shell triangle
+  long long foldedEdges = 0;            // edges of the strip's triangles whose two triangles lie on each other
+  std::vector<long long> loop;          // the zone boundary loop's interface points, for WidenJunctionZone when the strip is at fault
 };
 
 struct JunctionShell
@@ -626,12 +634,14 @@ struct JunctionShell
   long long numCappedChains = 0;         // short boundary chains of the pieces that no zone loop takes (a tunnel's mouth where two walls nearly touch, or a hole left by the trim), closed with a fan of triangles each
   long long numCapTriangles = 0;
   long long numCrossingTriangles = 0;    // shell triangles passing through another (svenvelope::CountCrossingTriangles over the whole shell)
+  long long numFoldedEdges = 0;          // shell edges whose two triangles lie on each other within foldDegrees (ListFoldedEdges over the whole shell)
   long long numZipperTriangles = 0;
   long long numJunctionTriangles = 0;    // interface triangles of the zone
   long long numJunctionOnRims = 0;       // of them, on a cap rim: not handled yet, the build refuses them
   std::vector<long long> failedLoopPoints;   // when the build fails for a zone boundary loop without a piece chain: the loop's interface points, for WidenJunctionZone
   std::vector<long long> crossingStructuredTriangles;   // structured interface triangles whose layer surface passed through a piece at some level (the piece's triangles there were dropped, which can leave a hole in it)
   std::vector<long long> holeOwnerTriangles;   // structured interface triangles owning a triangle of a hole in a piece (a dropped patch enclosed by kept ones) at some level
+  std::vector<long long> overPrismStructuredTriangles;   // structured interface triangles whose prisms held a point of a piece triangle dropped for hanging over the prism zone, at some level
   std::vector<long long> failedTriangles;    // when the build fails for a piece chain no loop takes (a hole): the structured triangles owning or passing through the piece near it, for WidenJunctionZone
 };
 

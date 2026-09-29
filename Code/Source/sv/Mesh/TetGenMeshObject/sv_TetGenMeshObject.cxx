@@ -3164,8 +3164,8 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
           {
             if (zips[z].crossingTriangles > 0) numStripsCrossing++;
           }
-          fprintf(stdout,"    %zu zipper strips, %lld with triangles passing through another shell triangle (the core counts %lld crossing triangles in the shell)\n",
-              zips.size(), numStripsCrossing, (long long)junction.numCrossingTriangles);
+          fprintf(stdout,"    %zu zipper strips, %lld with triangles passing through another shell triangle (the core counts %lld crossing triangles and %lld folded edges in the shell)\n",
+              zips.size(), numStripsCrossing, (long long)junction.numCrossingTriangles, (long long)junction.numFoldedEdges);
           for (size_t z = 0; z < zips.size() && z < 5 && zips[z].crossingTriangles > 0; z++)
           {
             fprintf(stdout,"      layer %d: a loop of %lld points around (%.4g, %.4g, %.4g) zipped to a chain of %lld (%.3g apart on average, direction agreement %.3g): %lld of its %lld strip triangles cross\n",

@@ -427,15 +427,23 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
     pm = PrismMesh(); shell = JunctionShell();
     if (BuildPrismLayers(iface, structured, numLayers, pm, err) != 0) { printf("  FAIL prisms: %s\n", err.c_str()); numFailed++; return; }
     const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err) == 0;
-    // a shell whose triangles pass through one another where a prism's layer surface passes through a piece gives those prisms' triangles to the junction zone (as the glue does);
+    // as the glue does: a built shell with triangles passing through one another or folded onto each other widens the junction zone at the prisms whose layer
+    // surface passes through a piece (a ring) and around the loops whose strips are at fault (two rings: a strip hops between the sides of a piece too narrow for it);
     // a loop without a chain widens its region; a piece with a chain no loop takes (a hole) gives the prisms owning or passing through it to the junction zone
-    if (built && (shell.numCrossingTriangles == 0 || shell.crossingStructuredTriangles.empty())) break;
-    const bool byShellCrossing = built, byLoop = !built && !shell.failedLoopPoints.empty(), byHole = !built && !byLoop && !shell.failedTriangles.empty();
-    if ((!byShellCrossing && !byLoop && !byHole) || attempt >= 5) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
-    ll widened = byLoop ? WidenJunctionZone(iface, shell.failedLoopPoints, std::vector<ll>(), 2, structured)
-                        : WidenJunctionZone(iface, std::vector<ll>(), byHole ? shell.failedTriangles : shell.crossingStructuredTriangles, 1, structured);
-    if (built) printf("  attempt %d: the shell has %lld crossing triangles where %zu prisms' layers pass through a piece; the junction zone widened by %lld triangles at them\n", attempt + 1, shell.numCrossingTriangles, shell.crossingStructuredTriangles.size(), widened);
-    else printf("  attempt %d: %s; the junction zone widened by %lld triangles %s\n", attempt + 1, err.c_str(), widened, byLoop ? "around that loop" : "at the prisms owning or passing through the piece there");
+    if (built && shell.numCrossingTriangles == 0 && shell.numFoldedEdges == 0) break;
+    std::vector<ll> seedPoints, seedTriangles; int rings = 1;
+    if (built)
+    {
+      seedTriangles = shell.crossingStructuredTriangles;
+      for (size_t z = 0; z < shell.zips.size(); z++) if (shell.zips[z].crossingTriangles > 0 || shell.zips[z].foldedEdges > 0) seedPoints.insert(seedPoints.end(), shell.zips[z].loop.begin(), shell.zips[z].loop.end());
+      rings = 2;
+    }
+    else if (!shell.failedLoopPoints.empty()) { seedPoints = shell.failedLoopPoints; rings = 2; }
+    else if (!shell.failedTriangles.empty()) { seedTriangles = shell.failedTriangles; rings = 1; }
+    if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= 10) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
+    ll widened = WidenJunctionZone(iface, seedPoints, seedTriangles, rings, structured);
+    if (built) printf("  attempt %d: the shell has %lld crossing triangles and %lld folded edges; the junction zone widened by %lld triangles at %zu prisms and around %zu loop points\n", attempt + 1, shell.numCrossingTriangles, shell.numFoldedEdges, widened, seedTriangles.size(), seedPoints.size());
+    else printf("  attempt %d: %s; the junction zone widened by %lld triangles\n", attempt + 1, err.c_str(), widened);
   }
   ll nb, nn, nm; CountEdges(shell.triangles, nb, nn, nm);
   std::vector<unsigned char> cr; double at[3]; ll crossings = svenvelope::CountCrossingTriangles(shell.points, shell.triangles, cr, at);
