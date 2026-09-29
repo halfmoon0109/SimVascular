@@ -1770,7 +1770,8 @@ int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionId,double size)
  * @return SV_OK if the quality is computed.
  */
 int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector<vtkIdType> &bandEnds,
-    const std::vector<std::string> &bandNames)
+    const std::vector<std::string> &bandNames, vtkIdType numFirstCells, const char *firstName,
+    const char *secondName)
 {
   if (wall == nullptr || wall->GetNumberOfCells() == 0)
   {
@@ -1828,6 +1829,9 @@ int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector
   };
   vtkIdType numTets = 0, numUnder1 = 0, numUnder5 = 0, numUnder10 = 0;
   double smallest = 180.0;
+  // the two groups of cells, when asked for: before numFirstCells and from it on
+  vtkIdType groupTets[2] = {0, 0}, groupUnder5[2] = {0, 0}, groupUnder10[2] = {0, 0};
+  double groupSmallest[2] = {180.0, 180.0};
   const int numWorstToReport = 5;
   std::vector<std::pair<double, vtkIdType> > worst;
   std::map<std::string, vtkIdType> under10ByPattern;
@@ -1843,6 +1847,14 @@ int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector
     smallest = std::min(smallest, angle);
     if (angle < 1.0) numUnder1++;
     if (angle < 5.0) numUnder5++;
+    if (numFirstCells >= 0)
+    {
+      const int g = (cellId < numFirstCells) ? 0 : 1;
+      groupTets[g]++;
+      groupSmallest[g] = std::min(groupSmallest[g], angle);
+      if (angle < 5.0) groupUnder5[g]++;
+      if (angle < 10.0) groupUnder10[g]++;
+    }
     if (angle < 10.0)
     {
       numUnder10++;
@@ -1868,6 +1880,21 @@ int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector
   fprintf(stdout,"Wall mesh quality (the wall's %lld tetrahedra alone, before they join the fluid mesh):\n", (long long)numTets);
   fprintf(stdout,"  smallest dihedral angle %.3f degrees; under 1 degree: %lld, under 5: %lld (%.2f%%), under 10: %lld (%.2f%%)\n",
       smallest, (long long)numUnder1, (long long)numUnder5, 100.0*numUnder5/numTets, (long long)numUnder10, 100.0*numUnder10/numTets);
+  if (numFirstCells >= 0)
+  {
+    const char *names[2] = {firstName ? firstName : "the first group", secondName ? secondName : "the second group"};
+    for (int g = 0; g < 2; g++)
+    {
+      if (groupTets[g] == 0)
+      {
+        fprintf(stdout,"  %s: no tetrahedra\n", names[g]);
+        continue;
+      }
+      fprintf(stdout,"  %s: %lld tetrahedra, smallest dihedral angle %.3f degrees, under 5: %lld (%.2f%%), under 10: %lld (%.2f%%)\n",
+          names[g], (long long)groupTets[g], groupSmallest[g], (long long)groupUnder5[g], 100.0*groupUnder5[g]/groupTets[g],
+          (long long)groupUnder10[g], 100.0*groupUnder10[g]/groupTets[g]);
+    }
+  }
   for (size_t i = 0; i < worst.size(); i++)
   {
     vtkIdType npts;
@@ -5184,32 +5211,22 @@ static void OffsetSurfaceToPolyData(const svoffset::Surface &offset,
   out->GetCellData()->AddArray(crossingArray);
 }
 
-// -------------------------------------
-// TGenUtils_BuildContouredOffsetSurfaces
-// -------------------------------------
-int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray *array,
-    const std::vector<double> &fractions, std::vector<vtkSmartPointer<vtkPolyData> > &surfaces,
-    std::vector<int> &numUnresolved)
+// ---------------------
+// InterfaceFromSurface
+// ---------------------
+/**
+ * @brief The surface with its normals and thickness as the offset core's
+ * interface: the points, their normals and thickness, and the triangles in
+ * the surface's cell order (a cell that is not a triangle is left out).
+ * @return SV_OK if the interface is complete, SV_ERROR otherwise.
+ */
+static int InterfaceFromSurface(vtkPolyData *surface, vtkDoubleArray *array, svoffset::Interface &inner)
 {
-  surfaces.clear();
-  numUnresolved.clear();
+  inner = svoffset::Interface();
   if (surface == nullptr || array == nullptr)
   {
-    fprintf(stderr,"Cannot build the offset surfaces without a surface and a thickness array\n");
+    fprintf(stderr,"Cannot read the interface without a surface and a thickness array\n");
     return SV_ERROR;
-  }
-  if (fractions.empty())
-  {
-    fprintf(stderr,"No fraction of the thickness was asked for an offset surface at\n");
-    return SV_ERROR;
-  }
-  for (size_t f = 0; f < fractions.size(); f++)
-  {
-    if (!(fractions[f] > 0.0 && fractions[f] <= 1.0) || (f > 0 && !(fractions[f] > fractions[f-1])))
-    {
-      fprintf(stderr,"The fractions of the thickness for the offset surfaces must rise within (0, 1]\n");
-      return SV_ERROR;
-    }
   }
   vtkIdType numPts = surface->GetNumberOfPoints();
   if (array->GetNumberOfComponents() != 1 || array->GetNumberOfTuples() != numPts)
@@ -5224,9 +5241,6 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
     fprintf(stderr,"The surface has no 'Normals' point data to offset along\n");
     return SV_ERROR;
   }
-  auto start = std::chrono::steady_clock::now();
-
-  svoffset::Interface inner;
   inner.points.resize((size_t)3*numPts);
   inner.normals.resize((size_t)3*numPts);
   inner.thickness.resize((size_t)numPts);
@@ -5268,6 +5282,43 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
     fprintf(stderr,"The surface has no triangles to offset\n");
     return SV_ERROR;
   }
+  return SV_OK;
+}
+
+// -------------------------------------
+// TGenUtils_BuildContouredOffsetSurfaces
+// -------------------------------------
+int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray *array,
+    const std::vector<double> &fractions, std::vector<vtkSmartPointer<vtkPolyData> > &surfaces,
+    std::vector<int> &numUnresolved)
+{
+  surfaces.clear();
+  numUnresolved.clear();
+  if (surface == nullptr || array == nullptr)
+  {
+    fprintf(stderr,"Cannot build the offset surfaces without a surface and a thickness array\n");
+    return SV_ERROR;
+  }
+  if (fractions.empty())
+  {
+    fprintf(stderr,"No fraction of the thickness was asked for an offset surface at\n");
+    return SV_ERROR;
+  }
+  for (size_t f = 0; f < fractions.size(); f++)
+  {
+    if (!(fractions[f] > 0.0 && fractions[f] <= 1.0) || (f > 0 && !(fractions[f] > fractions[f-1])))
+    {
+      fprintf(stderr,"The fractions of the thickness for the offset surfaces must rise within (0, 1]\n");
+      return SV_ERROR;
+    }
+  }
+  auto start = std::chrono::steady_clock::now();
+  svoffset::Interface inner;
+  if (InterfaceFromSurface(surface, array, inner) != SV_OK)
+  {
+    return SV_ERROR;
+  }
+  const vtkIdType numPts = surface->GetNumberOfPoints();
   const size_t numLevels = fractions.size();
   if (numLevels > 1)
   {
@@ -5376,6 +5427,313 @@ int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surface, vtkDoubleArray *a
   }
   outer->ShallowCopy(surfaces[0]);
   numUnresolved = unresolved[0];
+  return SV_OK;
+}
+
+// ---------------------------
+// TGenUtils_BuildHybridWall
+// ---------------------------
+int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
+    const std::vector<vtkPolyData *> &levels, const std::vector<double> &fractions, int numLayers,
+    TGenUtilsHybridWall &hybrid, std::string &reason)
+{
+  hybrid = TGenUtilsHybridWall();
+  reason.clear();
+  if (numLayers < 1 || levels.size() != (size_t)numLayers || fractions.size() != (size_t)numLayers)
+  {
+    reason = "the hybrid wall needs one trimmed offset surface and one fraction per layer";
+    return SV_ERROR;
+  }
+  for (size_t k = 0; k < levels.size(); k++)
+  {
+    if (levels[k] == nullptr || levels[k]->GetNumberOfPoints() == 0)
+    {
+      reason = "offset surface " + std::to_string(k + 1) + " of " + std::to_string(numLayers) + " is empty";
+      return SV_ERROR;
+    }
+  }
+  if (InterfaceFromSurface(surface, array, hybrid.inner) != SV_OK)
+  {
+    reason = "the interface could not be read";
+    return SV_ERROR;
+  }
+  std::string error;
+  auto start = std::chrono::steady_clock::now();
+  auto seconds = [&]() { double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count(); start = std::chrono::steady_clock::now(); return s; };
+  try
+  {
+    // The field the offset surfaces are levels of, for the classification
+    // and the ownership of the pieces: built again here rather than kept
+    // from the offset build, which is a few seconds against the minutes of
+    // its Delaunay.
+    svoffset::OffsetField field;
+    svoffset::Report fieldReport;
+    if (field.Build(hybrid.inner, fieldReport, error) != 0)
+    {
+      reason = "the distance field could not be built: " + error;
+      return SV_ERROR;
+    }
+    hybrid.secondsField = seconds();
+    svoffset::ZoneOptions zoneOptions;
+    if (svoffset::ClassifyPrismZone(hybrid.inner, field, numLayers, zoneOptions, hybrid.structured, hybrid.zone, error) != 0)
+    {
+      reason = "the prism zone could not be classified: " + error;
+      return SV_ERROR;
+    }
+    hybrid.secondsClassify = seconds();
+    if (hybrid.zone.numStructured == 0)
+    {
+      reason = "no triangle of the interface extrudes cleanly through the wall";
+      return SV_ERROR;
+    }
+    if (hybrid.zone.numStructured == hybrid.zone.numTriangles)
+    {
+      // the whole wall is prisms: nothing for the mesher
+      if (svoffset::BuildPrismLayers(hybrid.inner, hybrid.structured, numLayers, hybrid.prisms, error) != 0)
+      {
+        reason = "the prism layers could not be built: " + error;
+        return SV_ERROR;
+      }
+      hybrid.secondsPrisms = seconds();
+      hybrid.secondsShell = 0.0;
+      return SV_OK;
+    }
+    std::vector<svoffset::Surface> levelSurfaces((size_t)numLayers);
+    for (size_t k = 0; k < levels.size(); k++)
+    {
+      vtkPolyData *level = levels[k];
+      svoffset::Surface &out = levelSurfaces[k];
+      const vtkIdType numPts = level->GetNumberOfPoints();
+      out.points.resize((size_t)3*numPts);
+      for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+      {
+        level->GetPoint(ptId, &out.points[(size_t)3*ptId]);
+      }
+      level->BuildCells();
+      for (vtkIdType cellId = 0; cellId < level->GetNumberOfCells(); cellId++)
+      {
+        vtkIdType npts;
+        const vtkIdType *pts;
+        level->GetCellPoints(cellId, npts, pts);
+        if (npts != 3)
+        {
+          continue;
+        }
+        for (int j = 0; j < 3; j++)
+        {
+          out.triangles.push_back((long long)pts[j]);
+        }
+      }
+      if (out.triangles.empty())
+      {
+        reason = "offset surface " + std::to_string(k + 1) + " of " + std::to_string(numLayers) + " has no triangles";
+        return SV_ERROR;
+      }
+    }
+    // The pieces are peeled back two rows from the prism zone (one left
+    // the pieces' edges over the prism tops and the zipper strips through
+    // them on the synthetic junction) and their boundaries have their ears
+    // taken off in two passes, as the core's test has them. The shell is
+    // built again with a wider junction zone, up to five times, when it
+    // comes back with triangles passing through one another where a
+    // prism's layer surface passes through a piece (those prisms' triangles
+    // and a ring around them go to the junction zone: their tops are not
+    // the wall's surface there, and the piece dropped around them cuts the
+    // band over an annular junction - measured 2026-09-29 on the 178k model
+    // at a branch 0.38 thick on a parent 0.85 thick, 540 crossing pairs),
+    // when a zone boundary loop found no piece chain of its own (the piece
+    // too narrow there; two rings around the loop), or when a piece has a
+    // hole (the prisms owning or passing through it, with a ring).
+    const int erosionRings = 2, earPasses = 2, wideningRings = 2, maxWidenings = 5;
+    for (int attempt = 0; ; attempt++)
+    {
+      hybrid.prisms = svoffset::PrismMesh();
+      hybrid.shell = svoffset::JunctionShell();
+      if (svoffset::BuildPrismLayers(hybrid.inner, hybrid.structured, numLayers, hybrid.prisms, error) != 0)
+      {
+        reason = "the prism layers could not be built: " + error;
+        return SV_ERROR;
+      }
+      hybrid.secondsPrisms += seconds();
+      const bool built = svoffset::BuildJunctionShell(hybrid.inner, field, hybrid.structured, hybrid.prisms, levelSurfaces, fractions,
+            erosionRings, earPasses, hybrid.shell, error) == 0;
+      hybrid.secondsShell += seconds();
+      if (built && (hybrid.shell.numCrossingTriangles == 0 || hybrid.shell.crossingStructuredTriangles.empty()))
+      {
+        break;
+      }
+      const bool byShellCrossing = built;
+      const bool byLoop = !built && !hybrid.shell.failedLoopPoints.empty();
+      const bool byHole = !built && !byLoop && !hybrid.shell.failedTriangles.empty();
+      if ((!byShellCrossing && !byLoop && !byHole) || attempt >= maxWidenings)
+      {
+        if (built)
+        {
+          // the shell's crossings are counted and judged by the caller
+          break;
+        }
+        reason = "the junction shell could not be built: " + error;
+        return SV_ERROR;
+      }
+      const std::vector<long long> none;
+      const long long widened = byLoop
+          ? svoffset::WidenJunctionZone(hybrid.inner, hybrid.shell.failedLoopPoints, none, wideningRings, hybrid.structured)
+          : svoffset::WidenJunctionZone(hybrid.inner, none, byHole ? hybrid.shell.failedTriangles : hybrid.shell.crossingStructuredTriangles, 1, hybrid.structured);
+      hybrid.numWidenings++;
+      hybrid.numTrianglesWidened += widened;
+      if (built)
+      {
+        fprintf(stdout,"  junction shell attempt %d: %lld of its triangles pass through another where the layer surfaces of %zu prisms pass through a piece; those prisms' triangles and a ring around them go to the junction zone (%lld more triangles) and the shell is built again\n",
+            attempt + 1, (long long)hybrid.shell.numCrossingTriangles, hybrid.shell.crossingStructuredTriangles.size(), widened);
+      }
+      else
+      {
+        fprintf(stdout,"  junction shell attempt %d: %s; the junction zone is widened %s (%lld more triangles) and the shell built again\n",
+            attempt + 1, error.c_str(), byLoop ? "by two rings around that loop" : "at the prisms owning or passing through the piece there, with a ring around them",
+            widened);
+      }
+      fflush(stdout);
+    }
+    hybrid.secondsShell += seconds();
+    // the zone as it is after the widenings
+    hybrid.zone.numStructured = 0;
+    for (size_t t = 0; t < hybrid.structured.size(); t++)
+    {
+      if (hybrid.structured[t]) hybrid.zone.numStructured++;
+    }
+  }
+  catch (const std::bad_alloc &)
+  {
+    reason = "out of memory";
+    return SV_ERROR;
+  }
+  catch (const std::exception &e)
+  {
+    reason = e.what();
+    return SV_ERROR;
+  }
+  if (hybrid.shell.triangles.empty() || hybrid.shell.markers.size() != hybrid.shell.triangles.size()/3)
+  {
+    reason = "the junction shell came back empty or without a marker per triangle";
+    return SV_ERROR;
+  }
+  // the shell as the fill reads it
+  hybrid.shellPolyData = vtkSmartPointer<vtkPolyData>::New();
+  {
+    const vtkIdType numPts = (vtkIdType)(hybrid.shell.points.size()/3);
+    auto points = vtkSmartPointer<vtkPoints>::New();
+    points->SetDataTypeToDouble();
+    points->SetNumberOfPoints(numPts);
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      points->SetPoint(ptId, &hybrid.shell.points[(size_t)3*ptId]);
+    }
+    auto cells = vtkSmartPointer<vtkCellArray>::New();
+    auto roles = vtkSmartPointer<vtkIntArray>::New();
+    roles->SetName("ShellRole");
+    roles->SetNumberOfComponents(1);
+    for (size_t i = 0; i + 2 < hybrid.shell.triangles.size(); i += 3)
+    {
+      vtkIdType triangle[3];
+      for (int j = 0; j < 3; j++)
+      {
+        triangle[j] = (vtkIdType)hybrid.shell.triangles[i + j];
+      }
+      cells->InsertNextCell(3, triangle);
+      roles->InsertNextValue(hybrid.shell.markers[i/3]);
+    }
+    hybrid.shellPolyData->SetPoints(points);
+    hybrid.shellPolyData->SetPolys(cells);
+    hybrid.shellPolyData->GetCellData()->AddArray(roles);
+  }
+  return SV_OK;
+}
+
+// ----------------------------
+// TGenUtils_AppendPrismLayers
+// ----------------------------
+int TGenUtils_AppendPrismLayers(vtkUnstructuredGrid *wall, const TGenUtilsHybridWall &hybrid,
+    std::vector<vtkIdType> &prismPointIds, vtkIdType &numPointsAdded)
+{
+  numPointsAdded = 0;
+  prismPointIds.clear();
+  if (wall == nullptr)
+  {
+    fprintf(stderr,"Cannot append the prism layers without a wall mesh\n");
+    return SV_ERROR;
+  }
+  const svoffset::PrismMesh &prisms = hybrid.prisms;
+  const vtkIdType numPrismPts = (vtkIdType)(prisms.points.size()/3);
+  if (numPrismPts == 0 || prisms.tetrahedra.empty())
+  {
+    fprintf(stderr,"There are no prism layers to append\n");
+    return SV_ERROR;
+  }
+  if (wall->GetPoints() == nullptr)
+  {
+    auto points = vtkSmartPointer<vtkPoints>::New();
+    points->SetDataTypeToDouble();
+    wall->SetPoints(points);
+  }
+  if (wall->GetNumberOfCells() == 0)
+  {
+    wall->Allocate((vtkIdType)(prisms.tetrahedra.size()/4));
+  }
+  vtkPoints *points = wall->GetPoints();
+  // The wall's points by position at single precision, as the boundary
+  // tagging matches them: the mesher hands its input points back unmoved,
+  // and the wall holds them at the precision VTK points have.
+  std::map<std::array<float, 3>, vtkIdType> wallPointAt;
+  for (vtkIdType ptId = 0; ptId < points->GetNumberOfPoints(); ptId++)
+  {
+    double p[3];
+    points->GetPoint(ptId, p);
+    std::array<float, 3> key = {(float)p[0], (float)p[1], (float)p[2]};
+    wallPointAt[key] = ptId;
+  }
+  prismPointIds.assign((size_t)numPrismPts, -1);
+  vtkIdType numMissing = 0;
+  for (size_t i = 0; i < hybrid.shell.prismPoint.size(); i++)
+  {
+    const long long p = hybrid.shell.prismPoint[i];
+    if (p < 0 || p >= (long long)numPrismPts)
+    {
+      continue;
+    }
+    const double *x = &hybrid.shell.points[(size_t)3*i];
+    std::array<float, 3> key = {(float)x[0], (float)x[1], (float)x[2]};
+    std::map<std::array<float, 3>, vtkIdType>::const_iterator at = wallPointAt.find(key);
+    if (at == wallPointAt.end())
+    {
+      numMissing++;
+      continue;
+    }
+    prismPointIds[(size_t)p] = at->second;
+  }
+  if (numMissing > 0)
+  {
+    fprintf(stderr,"%lld points the junction shell shares with the prism layers are not in the filled junction zones, so the two cannot be joined\n",
+        (long long)numMissing);
+    return SV_ERROR;
+  }
+  for (vtkIdType p = 0; p < numPrismPts; p++)
+  {
+    if (prismPointIds[(size_t)p] < 0)
+    {
+      prismPointIds[(size_t)p] = points->InsertNextPoint(&prisms.points[(size_t)3*p]);
+      numPointsAdded++;
+    }
+  }
+  for (size_t t = 0; t + 3 < prisms.tetrahedra.size(); t += 4)
+  {
+    vtkIdType corners[4];
+    for (int m = 0; m < 4; m++)
+    {
+      corners[m] = prismPointIds[(size_t)prisms.tetrahedra[t + m]];
+    }
+    wall->InsertNextCell(VTK_TETRA, 4, corners);
+  }
+  points->Modified();
   return SV_OK;
 }
 

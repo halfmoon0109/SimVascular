@@ -57,6 +57,7 @@
 #include "vtkCellArray.h"
 
 #include "simvascular_tetgen.h"
+#include "sv_tetgenmesh_offset.h"
 
 #include <utility>
 #include <vector>
@@ -127,9 +128,10 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionI
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh);
 
-/// The wall fill's own quality: the smallest dihedral angles, their places and the point bands (interface, layers, outer, the mesher's own) their corners lie in, the tetrahedra under 10 degrees to wall_fill_poor.vtu, then the aspect ratio report.
+/// The wall fill's own quality: the smallest dihedral angles, their places and the point bands (interface, layers, outer, the mesher's own) their corners lie in, the tetrahedra under 10 degrees to wall_fill_poor.vtu, then the aspect ratio report. With numFirstCells given, the cells before it and from it on are summed up separately under the two names (the hybrid wall's junction zones and prism layers).
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector<vtkIdType> &bandEnds,
-    const std::vector<std::string> &bandNames);
+    const std::vector<std::string> &bandNames, vtkIdType numFirstCells = -1, const char *firstName = nullptr,
+    const char *secondName = nullptr);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothPointArray(vtkPolyData *surface,
     vtkDoubleArray *array,
@@ -233,6 +235,61 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surf
     vtkDoubleArray *array,
     vtkPolyData *outer,
     int &numUnresolved);
+
+// The hybrid wall (docs/wall-mesh-purpose.md section 8): wherever the
+// interface extrudes cleanly along its normals through the wall, N stacked
+// prisms over each triangle, split into tetrahedra whose faces are aligned
+// with the wall; only the junction zones, where the extrusion is covered,
+// inverted or crossing, are left to the volume mesher, closed by a shell of
+// the zone's interface, the prism zone's walls toward it and the pieces of
+// the layer surfaces and outer surface over it.
+struct TGenUtilsHybridWall
+{
+  svoffset::Interface inner;                 // the surface as the core reads it
+  std::vector<unsigned char> structured;     // per interface triangle: 1 in the prism zone
+  svoffset::ZoneReport zone;
+  svoffset::PrismMesh prisms;
+  svoffset::JunctionShell shell;             // empty when the whole wall is prisms
+  vtkSmartPointer<vtkPolyData> shellPolyData;   // the shell with its 'ShellRole' (1 interface, 2 outer, 100+k layer k, 300+k the prism zone's wall at layer k); null when the shell is empty
+  int numWidenings = 0;                      // how often a loop without a piece chain widened its junction region
+  long long numTrianglesWidened = 0;         // the triangles the widenings gave to the junction zone
+  double secondsField = 0.0, secondsClassify = 0.0, secondsPrisms = 0.0, secondsShell = 0.0;
+};
+
+/**
+ * @brief Builds the hybrid wall's prism layers and junction shell from the
+ * interface and its trimmed offset surfaces.
+ * @param levels The trimmed layer surfaces in order, the outer surface
+ * last; one per fraction.
+ * @param fractions The fractions of the thickness the levels lie at.
+ * @param reason Set to why the hybrid wall cannot be built, when it cannot;
+ * the fill then falls back to the whole shell.
+ * @return SV_OK when the hybrid wall is built, SV_ERROR with reason set
+ * otherwise.
+ */
+SV_EXPORT_TETGEN_MESH int TGenUtils_BuildHybridWall(vtkPolyData *surface,
+    vtkDoubleArray *array,
+    const std::vector<vtkPolyData *> &levels,
+    const std::vector<double> &fractions,
+    int numLayers,
+    TGenUtilsHybridWall &hybrid,
+    std::string &reason);
+
+/**
+ * @brief Appends the prism layers' tetrahedra to the wall mesh the junction
+ * zones were filled into. The prism points the junction shell shares (the
+ * zone's interface points and its walls' layer points) are found in the
+ * wall by position and not added again.
+ * @param wall The filled junction zones, tetrahedra only; its points the
+ * shell's in order and then the mesher's own. May be empty.
+ * @param prismPointIds Set per prism point to its point in the wall.
+ * @param numPointsAdded Set to how many prism points were new to the wall.
+ * @return SV_OK on success.
+ */
+SV_EXPORT_TETGEN_MESH int TGenUtils_AppendPrismLayers(vtkUnstructuredGrid *wall,
+    const TGenUtilsHybridWall &hybrid,
+    std::vector<vtkIdType> &prismPointIds,
+    vtkIdType &numPointsAdded);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,

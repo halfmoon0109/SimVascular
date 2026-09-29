@@ -95,6 +95,13 @@
 // but only after a mesh had been run.
 static const double gWallThicknessMaxSlope = 0.5;
 
+// Whether the wall is built as the hybrid of prism layers and mesher-filled
+// junction zones (docs/wall-mesh-purpose.md section 8) where it can be, or
+// always as one shell for the mesher. The hybrid falls back to the shell on
+// its own wherever it cannot be built, so this is only for comparing the two
+// on the same model.
+static const bool gWallHybrid = true;
+
 // -----------
 // cvTetGenMeshObject for python
 // -----------
@@ -3041,7 +3048,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     return SV_ERROR;
   }
 
-  fprintf(stdout,"Filling the wall with TetGen tetrahedra: shell surface has %lld points and %lld triangles closing %zu vessel ends\n",
+  fprintf(stdout,"Wall shell surface: %lld points and %lld triangles closing %zu vessel ends\n",
       (long long)shell->GetNumberOfPoints(), (long long)shell->GetNumberOfCells(), caps.size());
   // The shell as a whole, before the mesher sees it: every surface in it
   // was checked against itself, but a layer surface can pass through the
@@ -3077,16 +3084,151 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         numDegenerate);
   }
 
-  auto shellInMesh = new tetgenio;
-  auto shellOutMesh = new tetgenio;
-
-  if (TGenUtils_ConvertSurfaceToTetGen(shellInMesh, shell) != SV_OK)
+  // The hybrid wall (docs/wall-mesh-purpose.md section 8). The shell above
+  // is what the mesher filled until now: a wall N tetrahedra thick between
+  // facet surfaces that are not aligned with one another, so that between
+  // any two of them lie slivers wherever a triangle of one stands over an
+  // edge of the other (measured 2026-09-28: 98% of the tetrahedra under 10
+  // degrees between neighbouring surfaces, whatever the layer count and
+  // however the facets were sized). Where the interface extrudes cleanly
+  // through the wall along its normals, the wall is built as N prisms over
+  // each triangle instead, split into tetrahedra whose faces are aligned
+  // with the wall, and the mesher is given only the junction zones, closed
+  // by the prism zone's walls, the zone's own interface and the pieces of
+  // the offset surfaces over it. Whatever stops the hybrid wall from being
+  // built, or the mesher from filling its shell, falls back to the whole
+  // shell, so the wall is never lost to it.
+  TGenUtilsHybridWall hybridWall;
+  bool hybridActive = false;
+  if (gWallHybrid)
   {
-    fprintf(stderr,"Problem converting the wall shell surface to TetGen\n");
+    std::vector<vtkPolyData *> allLevels = levelPointers;
+    allLevels.push_back(offsetOuter.GetPointer());
+    std::string reason;
+    fprintf(stdout,"Hybrid wall: prism layers where the interface extrudes cleanly through the wall, the mesher in the junction zones\n");
+    fflush(stdout);
+    if (TGenUtils_BuildHybridWall(surface, thicknessArray, allLevels, fractions, numLayers, hybridWall, reason) == SV_OK)
+    {
+      hybridActive = true;
+      const svoffset::ZoneReport &zone = hybridWall.zone;
+      const svoffset::PrismMesh &prisms = hybridWall.prisms;
+      fprintf(stdout,"  prism zone: %lld of %lld interface triangles (%.1f%%) extrude cleanly through all %d layer(s); left to the mesher: %lld with a layer point off its level (%lld points covered by another wall), %lld whose top faces the wrong way or is too small, %lld whose tops pass through a neighbour's, %lld within the margin of those, %lld in %lld islands too small to keep; %lld junction region(s); %lld field evaluations (%.1f s for the field, %.1f s to classify)\n",
+          (long long)zone.numStructured, (long long)zone.numTriangles, zone.numTriangles > 0 ? 100.0*zone.numStructured/zone.numTriangles : 0.0, numLayers,
+          (long long)zone.numPointsOffLevel, (long long)zone.numPointsCovered, (long long)zone.numTrianglesInverted, (long long)zone.numTrianglesCrossing,
+          (long long)zone.numTrianglesMargin, (long long)zone.numIslandTriangles, (long long)zone.numIslands, (long long)zone.numJunctionRegions,
+          (long long)zone.numEvaluations, hybridWall.secondsField, hybridWall.secondsClassify);
+      if (hybridWall.numWidenings > 0)
+      {
+        fprintf(stdout,"  the junction zone was widened %d time(s) by %lld triangles where a layer surface's piece was too narrow, leaving %lld of %lld triangles (%.1f%%) to the prisms\n",
+            hybridWall.numWidenings, (long long)hybridWall.numTrianglesWidened, (long long)zone.numStructured, (long long)zone.numTriangles,
+            zone.numTriangles > 0 ? 100.0*zone.numStructured/zone.numTriangles : 0.0);
+      }
+      fprintf(stdout,"  prism layers: %lld tetrahedra on %lld points; %lld tops, %lld side triangles toward the junction zones, %lld at the cap rims (%.1f s)\n",
+          (long long)(prisms.tetrahedra.size()/4), (long long)(prisms.points.size()/3), (long long)(prisms.topTriangles.size()/3),
+          (long long)(prisms.sideTriangles.size()/3), (long long)(prisms.rimTriangles.size()/3), hybridWall.secondsPrisms);
+      if (hybridWall.shellPolyData == nullptr)
+      {
+        fprintf(stdout,"  the whole wall is prisms; nothing is left for the mesher\n");
+      }
+      else
+      {
+        const svoffset::JunctionShell &junction = hybridWall.shell;
+        long long numMarkedInner = 0, numMarkedOuter = 0, numMarkedLayer = 0, numMarkedWall = 0;
+        for (size_t i = 0; i < junction.markers.size(); i++)
+        {
+          const int marker = junction.markers[i];
+          if (marker == 1) numMarkedInner++;
+          else if (marker == 2) numMarkedOuter++;
+          else if (marker >= 300) numMarkedWall++;
+          else if (marker >= 100) numMarkedLayer++;
+        }
+        fprintf(stdout,"  junction shell: %lld points and %lld triangles - %lld of the zones' interface, %lld prism walls, %lld of the layer surfaces' pieces and %lld of the outer surface's, %lld of them zipper strips between a piece and the prism walls' ring, %lld fans closing %lld short chains of the pieces no loop takes (%.1f s)\n",
+            (long long)(junction.points.size()/3), (long long)(junction.triangles.size()/3), numMarkedInner, numMarkedWall, numMarkedLayer, numMarkedOuter,
+            (long long)junction.numZipperTriangles, (long long)junction.numCapTriangles, (long long)junction.numCappedChains, hybridWall.secondsShell);
+        for (size_t k = 0; k < junction.pieces.size(); k++)
+        {
+          const svoffset::ZonePieceReport &piece = junction.pieces[k];
+          fprintf(stdout,"    %s: %lld of %lld triangles kept over the junction zones (%lld owned by the prism zone, %lld eroded from its edge, %lld passing through the prism layers, %lld ears, %lld at %lld pinches, %lld in %lld scraps; %lld in %lld holes), %lld boundary chain(s)\n",
+              (k + 1 == junction.pieces.size()) ? "the outer surface's piece" : (std::string("layer ") + std::to_string(k + 1) + "'s piece").c_str(),
+              (long long)piece.numKept, (long long)piece.numTriangles, (long long)piece.numStructuredOwned, (long long)piece.numEroded,
+              (long long)piece.numCrossing, (long long)piece.numEars, (long long)piece.numPinchTriangles, (long long)piece.numPinches,
+              (long long)piece.numScrapTriangles, (long long)piece.numScraps,
+              (long long)piece.numHoleTriangles, (long long)piece.numHoles, (long long)piece.numChains);
+        }
+        // The strips whose triangles pass through another shell triangle, worst first: a strip that crosses is a loop zipped to a chain that does not run beside it
+        {
+          std::vector<svoffset::ZipReport> zips = junction.zips;
+          std::sort(zips.begin(), zips.end(), [](const svoffset::ZipReport &a, const svoffset::ZipReport &b) { return a.crossingTriangles > b.crossingTriangles; });
+          long long numStripsCrossing = 0;
+          for (size_t z = 0; z < zips.size(); z++)
+          {
+            if (zips[z].crossingTriangles > 0) numStripsCrossing++;
+          }
+          fprintf(stdout,"    %zu zipper strips, %lld with triangles passing through another shell triangle (the core counts %lld crossing triangles in the shell)\n",
+              zips.size(), numStripsCrossing, (long long)junction.numCrossingTriangles);
+          for (size_t z = 0; z < zips.size() && z < 5 && zips[z].crossingTriangles > 0; z++)
+          {
+            fprintf(stdout,"      layer %d: a loop of %lld points around (%.4g, %.4g, %.4g) zipped to a chain of %lld (%.3g apart on average, direction agreement %.3g): %lld of its %lld strip triangles cross\n",
+                zips[z].level, (long long)zips[z].loopPoints, zips[z].centre[0], zips[z].centre[1], zips[z].centre[2], (long long)zips[z].chainPoints,
+                zips[z].meanDistance, zips[z].agreement, (long long)zips[z].crossingTriangles, (long long)zips[z].stripTriangles);
+          }
+        }
+        // The shell as a whole, as the whole wall's shell is checked below:
+        // the rings of the prism walls at the layers are on three facets
+        // (the wall below, the wall above and the layer's strip), which is
+        // the way an internal facet meets a wall and no fault.
+        long long numNonManifold = 0, numMiswound = 0, numCrossing = 0, numFolded = 0;
+        double firstCrossingAt[3], firstFoldAt[3], smallestFoldDegrees = 180.0;
+        if (TGenUtils_CountSurfaceFaults(hybridWall.shellPolyData, numNonManifold, numMiswound, numCrossing, firstCrossingAt,
+              numFolded, smallestFoldDegrees, firstFoldAt) != SV_OK)
+        {
+          return SV_ERROR;
+        }
+        fprintf(stdout,"  the junction shell has %lld edges on three facets (the prism walls' rings at the layers), %lld wound against each other, %lld triangles passing through another, %lld edges whose two triangles lie on each other (the smallest angle between two triangles on an edge is %.3g degrees)\n",
+            numNonManifold, numMiswound, numCrossing, numFolded, smallestFoldDegrees);
+        char junctionShellFile[] = "wall_junction_shell.vtp";
+        TGenUtils_WriteVTP(junctionShellFile, hybridWall.shellPolyData);
+        if (numMiswound > 0 || numCrossing > 0 || numFolded > 0)
+        {
+          fprintf(stdout,"  the junction shell has faults the mesher would refuse (the first crossing at (%.5g, %.5g, %.5g), the first fold at (%.5g, %.5g, %.5g); see wall_junction_shell.vtp); the wall falls back to the whole shell\n",
+              firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2], firstFoldAt[0], firstFoldAt[1], firstFoldAt[2]);
+          if (numCrossing + numFolded > 0)
+          {
+            TGenUtils_DescribeSurfaceCrossings(hybridWall.shellPolyData, surface, thicknessArray, "wall_junction_shell", 12);
+          }
+          hybridActive = false;
+        }
+      }
+    }
+    else
+    {
+      fprintf(stdout,"  the hybrid wall cannot be built here: %s; the wall falls back to the whole shell\n", reason.c_str());
+    }
+    fflush(stdout);
+  }
+
+  // The shell the mesher gets: the junction zones' or the whole wall's. The
+  // hybrid wall with no junction zone gives it an empty one, and nothing to
+  // fill.
+  auto emptyShell = vtkSmartPointer<vtkPolyData>::New();
+  vtkPolyData *fillShell = shell;
+  if (hybridActive)
+  {
+    fillShell = (hybridWall.shellPolyData != nullptr) ? hybridWall.shellPolyData.GetPointer() : emptyShell.GetPointer();
+  }
+
+  tetgenio *shellInMesh = nullptr;
+  tetgenio *shellOutMesh = nullptr;
+  tetgenbehavior *shellBehavior = nullptr;
+  auto discardFill = [&]()
+  {
+    delete shellBehavior;
     delete shellInMesh;
     delete shellOutMesh;
-    return SV_ERROR;
-  }
+    shellBehavior = nullptr;
+    shellInMesh = nullptr;
+    shellOutMesh = nullptr;
+  };
 
   // Each shell triangle's role goes to TetGen as its facet marker, and TetGen
   // hands the marker back on every boundary face of the fill. A triangle whose
@@ -3098,124 +3240,143 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   const int innerSurfaceCellId = 1;
   const int outerSurfaceCellId = 2;
   const int sidewallCellEntityId = 9999;
-  const int layerCellEntityBase = 100;   // 100 + k: the k-th layer surface inside the wall
+  const int layerCellEntityBase = 100;   // 100 + k: the k-th layer surface inside the wall; 300 + k: the prism zone's wall at layer k, inside the hybrid wall
   // A layer role lies between the base and the side wall's value: the side
   // wall is 9999, above the base, and was counted and dropped as a layer
   // surface until the run of 2026-09-28 came back with no side wall faces.
   auto isLayerRole = [&](int role) { return role >= layerCellEntityBase && role != sidewallCellEntityId; };
   const vtkIdType numInner = surface->GetNumberOfPoints();
   vtkIdType numShellInner = 0, numShellOuter = 0, numShellSide = 0, numShellLayer = 0;
-  std::vector<int> shellRole((size_t)shell->GetNumberOfCells(), sidewallCellEntityId);
-  auto shellRoles = vtkIntArray::SafeDownCast(shell->GetCellData()->GetArray("ShellRole"));
-  if (shellRoles != nullptr && shellRoles->GetNumberOfTuples() != shell->GetNumberOfCells())
+  std::vector<int> shellRole;
+
+  // The fill of one shell: its conversion, the roles as facet markers, the
+  // lumen as a hole where that is asked for, and the mesher. A refusal
+  // drops the mesher's objects and returns SV_ERROR, so that the hybrid
+  // wall can fall back to the whole shell.
+  auto fillWithTetGen = [&](vtkPolyData *shellToFill, bool markLumenHole) -> int
   {
-    shellRoles = nullptr;
-  }
-  for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
-  {
-    int role = sidewallCellEntityId;
-    if (shellRoles != nullptr)
+    discardFill();
+    shellInMesh = new tetgenio;
+    shellOutMesh = new tetgenio;
+    if (TGenUtils_ConvertSurfaceToTetGen(shellInMesh, shellToFill) != SV_OK)
     {
-      role = shellRoles->GetValue(cellId);
+      fprintf(stderr,"Problem converting the wall shell surface to TetGen\n");
+      discardFill();
+      return SV_ERROR;
     }
-    else
+    numShellInner = numShellOuter = numShellSide = numShellLayer = 0;
+    shellRole.assign((size_t)shellToFill->GetNumberOfCells(), sidewallCellEntityId);
+    auto shellRoles = vtkIntArray::SafeDownCast(shellToFill->GetCellData()->GetArray("ShellRole"));
+    if (shellRoles != nullptr && shellRoles->GetNumberOfTuples() != shellToFill->GetNumberOfCells())
     {
-      // Without the shell's own roles: by the points, inner ones first.
-      vtkIdType npts;
-      const vtkIdType *pts;
-      shell->GetCellPoints(cellId, npts, pts);
-      int numInnerPts = 0;
-      for (vtkIdType j = 0; j < npts; j++)
+      shellRoles = nullptr;
+    }
+    for (vtkIdType cellId = 0; cellId < shellToFill->GetNumberOfCells(); cellId++)
+    {
+      int role = sidewallCellEntityId;
+      if (shellRoles != nullptr)
       {
-        if (pts[j] < numInner)
-        {
-          numInnerPts++;
-        }
+        role = shellRoles->GetValue(cellId);
       }
-      if (npts == 3 && numInnerPts == 3) role = innerSurfaceCellId;
-      else if (npts == 3 && numInnerPts == 0) role = outerSurfaceCellId;
+      else
+      {
+        // Without the shell's own roles: by the points, inner ones first.
+        vtkIdType npts;
+        const vtkIdType *pts;
+        shellToFill->GetCellPoints(cellId, npts, pts);
+        int numInnerPts = 0;
+        for (vtkIdType j = 0; j < npts; j++)
+        {
+          if (pts[j] < numInner)
+          {
+            numInnerPts++;
+          }
+        }
+        if (npts == 3 && numInnerPts == 3) role = innerSurfaceCellId;
+        else if (npts == 3 && numInnerPts == 0) role = outerSurfaceCellId;
+      }
+      shellRole[(size_t)cellId] = role;
+      if (role == innerSurfaceCellId) numShellInner++;
+      else if (role == outerSurfaceCellId) numShellOuter++;
+      else if (isLayerRole(role)) numShellLayer++;
+      else numShellSide++;
+      if (cellId < shellInMesh->numberoffacets)
+      {
+        shellInMesh->facetmarkerlist[cellId] = role;
+      }
     }
-    shellRole[(size_t)cellId] = role;
-    if (role == innerSurfaceCellId) numShellInner++;
-    else if (role == outerSurfaceCellId) numShellOuter++;
-    else if (isLayerRole(role)) numShellLayer++;
-    else numShellSide++;
-    if (cellId < shellInMesh->numberoffacets)
+    if (numShellLayer > 0)
     {
-      shellInMesh->facetmarkerlist[cellId] = role;
+      fprintf(stdout,"  the shell carries %lld triangles as facets inside the wall (layer surfaces%s)\n", (long long)numShellLayer,
+          hybridActive ? " and the prism zone's walls" : "");
     }
-  }
-  if (numShellLayer > 0)
-  {
-    fprintf(stdout,"  the shell carries %lld layer-surface triangles as facets inside the wall\n", (long long)numShellLayer);
-  }
 
-  // A closed inner surface encloses the lumen as well as the wall, so the
-  // lumen has to be marked as a hole or it would be filled with wall elements.
-  // An inner surface left open at the caps has a rim pair at each end and is
-  // closed by the annulus between them, so it encloses the wall alone and there
-  // is nothing to exclude.
-  if (caps.empty())
-  {
-    double holePoint[3];
-    if (TGenUtils_FindLumenHolePoint(surface, holePoint) != SV_OK)
+    // A closed inner surface encloses the lumen as well as the wall, so the
+    // lumen has to be marked as a hole or it would be filled with wall elements.
+    // An inner surface left open at the caps has a rim pair at each end and is
+    // closed by the annulus between them, so it encloses the wall alone and there
+    // is nothing to exclude. The junction zones' shell encloses the zones
+    // alone, whatever the interface does.
+    if (markLumenHole)
     {
-      fprintf(stderr,"Problem finding a point inside the lumen to exclude it from the wall\n");
-      delete shellInMesh;
-      delete shellOutMesh;
-      return SV_ERROR;
-    }
-    fprintf(stdout,"  the inner surface is closed, so the lumen is marked as a hole at (%.5g, %.5g, %.5g)\n",
-        holePoint[0], holePoint[1], holePoint[2]);
+      double holePoint[3];
+      if (TGenUtils_FindLumenHolePoint(surface, holePoint) != SV_OK)
+      {
+        fprintf(stderr,"Problem finding a point inside the lumen to exclude it from the wall\n");
+        discardFill();
+        return SV_ERROR;
+      }
+      fprintf(stdout,"  the inner surface is closed, so the lumen is marked as a hole at (%.5g, %.5g, %.5g)\n",
+          holePoint[0], holePoint[1], holePoint[2]);
 
-    auto holeList = vtkSmartPointer<vtkPoints>::New();
-    holeList->InsertNextPoint(holePoint);
-    if (TGenUtils_AddHoles(shellInMesh, holeList) != SV_OK)
+      auto holeList = vtkSmartPointer<vtkPoints>::New();
+      holeList->InsertNextPoint(holePoint);
+      if (TGenUtils_AddHoles(shellInMesh, holeList) != SV_OK)
+      {
+        fprintf(stderr,"Problem marking the lumen as a hole in the wall shell\n");
+        discardFill();
+        return SV_ERROR;
+      }
+    }
+
+    shellBehavior = new tetgenbehavior;
+    shellBehavior->plc = 1;
+    // The input facets carry the fluid/wall interface nodes, so no node on them
+    // may be added or moved; without this the interface stops matching the fluid
+    // mesh and the solver refuses the case.
+    shellBehavior->nobisect = 1;
+    // Nor may any input point be dropped or renumbered: the interface nodes
+    // have to come out where they went in, whatever TetGen thinks of a point it
+    // finds unused or doubled.
+    shellBehavior->nojettison = 1;
+    shellBehavior->quality = 1;
+    shellBehavior->minratio = 1.414;
+    shellBehavior->mindihedral = 10.0;
+    if (numLayers > 1)
     {
-      fprintf(stderr,"Problem marking the lumen as a hole in the wall shell\n");
-      delete shellInMesh;
-      delete shellOutMesh;
-      return SV_ERROR;
+      // A layer a fraction of the wall thick, bounded by facets the mesher
+      // may not split whose triangles are the interface's size, holds
+      // tetrahedra flatter than the usual bounds allow, and refinement cannot
+      // mend that from inside the layer. The bounds are loosened so that the
+      // mesher does not spend itself trying.
+      shellBehavior->minratio = 2.0;
+      shellBehavior->mindihedral = 5.0;
+      fprintf(stdout,"  %d layers: the fill's quality bounds are loosened to radius-edge %.3g and dihedral %.3g degrees\n",
+          numLayers, shellBehavior->minratio, shellBehavior->mindihedral);
     }
-  }
+    // The conversion below reads the tetrahedra adjacent to each boundary face,
+    // which TetGen only writes at this level.
+    shellBehavior->neighout = 2;
 
-  auto shellBehavior = new tetgenbehavior;
-  shellBehavior->plc = 1;
-  // The input facets carry the fluid/wall interface nodes, so no node on them
-  // may be added or moved; without this the interface stops matching the fluid
-  // mesh and the solver refuses the case.
-  shellBehavior->nobisect = 1;
-  // Nor may any input point be dropped or renumbered: the interface nodes
-  // have to come out where they went in, whatever TetGen thinks of a point it
-  // finds unused or doubled.
-  shellBehavior->nojettison = 1;
-  shellBehavior->quality = 1;
-  shellBehavior->minratio = 1.414;
-  shellBehavior->mindihedral = 10.0;
-  if (numLayers > 1)
-  {
-    // A layer a fraction of the wall thick, bounded by facets the mesher
-    // may not split whose triangles are the interface's size, holds
-    // tetrahedra flatter than the usual bounds allow, and refinement cannot
-    // mend that from inside the layer. The bounds are loosened so that the
-    // mesher does not spend itself trying.
-    shellBehavior->minratio = 2.0;
-    shellBehavior->mindihedral = 5.0;
-    fprintf(stdout,"  %d layers: the fill's quality bounds are loosened to radius-edge %.3g and dihedral %.3g degrees\n",
-        numLayers, shellBehavior->minratio, shellBehavior->mindihedral);
-  }
-  // The conversion below reads the tetrahedra adjacent to each boundary face,
-  // which TetGen only writes at this level.
-  shellBehavior->neighout = 2;
-
-  fprintf(stdout,"  TetGen wall fill started...\n");
-  try
-  {
-    tetrahedralize(shellBehavior, shellInMesh, shellOutMesh);
-  }
-  catch (int r)
-  {
-    fprintf(stderr,"ERROR: TetGen quit with error code %d while filling the wall. The shell it was\
+    fprintf(stdout,"  TetGen wall fill started...\n");
+    fflush(stdout);
+    try
+    {
+      tetrahedralize(shellBehavior, shellInMesh, shellOutMesh);
+    }
+    catch (int r)
+    {
+      fprintf(stderr,"ERROR: TetGen quit with error code %d while filling the wall. The shell it was\
  given is the inner surface, the outer wall envelope, and the annulus closing the two at each vessel\
  end; TetGen prints the coordinates of the intersection above, so look them up to see which it is in.\
  The envelope was checked against itself for crossings, holes and edges on the wrong number of\
@@ -3224,12 +3385,44 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
  envelope and the inner surface is a piece kept inside another vessel, which its winding number\
  should have dropped - the envelope log's winding counts say what the rays saw. Otherwise the inner\
  surface is self-intersecting and the wall has inherited it - see the interface triangle quality report\n", r);
-    delete shellBehavior;
-    delete shellInMesh;
-    delete shellOutMesh;
-    return SV_ERROR;
+      discardFill();
+      return SV_ERROR;
+    }
+    fprintf(stdout,"  TetGen wall fill finished\n");
+    return SV_OK;
+  };
+
+  if (fillShell->GetNumberOfCells() > 0)
+  {
+    if (hybridActive)
+    {
+      fprintf(stdout,"Filling the junction zones with TetGen tetrahedra: their shell has %lld points and %lld triangles\n",
+          (long long)fillShell->GetNumberOfPoints(), (long long)fillShell->GetNumberOfCells());
+    }
+    else
+    {
+      fprintf(stdout,"Filling the wall with TetGen tetrahedra: shell surface has %lld points and %lld triangles closing %zu vessel ends\n",
+          (long long)fillShell->GetNumberOfPoints(), (long long)fillShell->GetNumberOfCells(), caps.size());
+    }
+    // The lumen is a hole of the whole wall's shell alone, and only when
+    // the interface is closed.
+    if (fillWithTetGen(fillShell, caps.empty() && !hybridActive) != SV_OK)
+    {
+      if (!hybridActive)
+      {
+        return SV_ERROR;
+      }
+      fprintf(stdout,"  the mesher refused the junction zones' shell (see wall_junction_shell.vtp); the wall falls back to the whole shell\n");
+      hybridActive = false;
+      fillShell = shell;
+      fprintf(stdout,"Filling the wall with TetGen tetrahedra: shell surface has %lld points and %lld triangles closing %zu vessel ends\n",
+          (long long)fillShell->GetNumberOfPoints(), (long long)fillShell->GetNumberOfCells(), caps.size());
+      if (fillWithTetGen(fillShell, caps.empty()) != SV_OK)
+      {
+        return SV_ERROR;
+      }
+    }
   }
-  fprintf(stdout,"  TetGen wall fill finished\n");
 
   if (wallmesh_ != nullptr)
   {
@@ -3241,38 +3434,60 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // as 'ModelFaceID' on the surface mesh, and with the fill's point index
   // of each of their points as 'GlobalNodeID' less one.
   auto wallSurfaceMesh = vtkSmartPointer<vtkPolyData>::New();
-  int totRegions = 0;
-  if (TGenUtils_ConvertToVTK(shellOutMesh, wallmesh_, wallSurfaceMesh, &totRegions, 1) != SV_OK)
+  vtkIntArray *boundaryMarkers = nullptr;
+  vtkIntArray *boundaryNodeIds = nullptr;
+  if (shellOutMesh != nullptr)
   {
-    fprintf(stderr,"Problem converting the filled wall mesh from TetGen\n");
-    delete shellBehavior;
-    delete shellInMesh;
-    delete shellOutMesh;
-    return SV_ERROR;
-  }
-  auto boundaryMarkers = vtkIntArray::SafeDownCast(wallSurfaceMesh->GetCellData()->GetArray("ModelFaceID"));
-  auto boundaryNodeIds = vtkIntArray::SafeDownCast(wallSurfaceMesh->GetPointData()->GetArray("GlobalNodeID"));
-  if (boundaryMarkers == nullptr || boundaryNodeIds == nullptr ||
-      boundaryMarkers->GetNumberOfTuples() != wallSurfaceMesh->GetNumberOfCells() ||
-      boundaryNodeIds->GetNumberOfTuples() != wallSurfaceMesh->GetNumberOfPoints())
-  {
-    fprintf(stderr,"The filled wall's boundary came back without its facet markers or node numbers, so the wall boundary cannot be tagged\n");
-    delete shellBehavior;
-    delete shellInMesh;
-    delete shellOutMesh;
-    return SV_ERROR;
+    int totRegions = 0;
+    if (TGenUtils_ConvertToVTK(shellOutMesh, wallmesh_, wallSurfaceMesh, &totRegions, 1) != SV_OK)
+    {
+      fprintf(stderr,"Problem converting the filled wall mesh from TetGen\n");
+      discardFill();
+      return SV_ERROR;
+    }
+    boundaryMarkers = vtkIntArray::SafeDownCast(wallSurfaceMesh->GetCellData()->GetArray("ModelFaceID"));
+    boundaryNodeIds = vtkIntArray::SafeDownCast(wallSurfaceMesh->GetPointData()->GetArray("GlobalNodeID"));
+    if (boundaryMarkers == nullptr || boundaryNodeIds == nullptr ||
+        boundaryMarkers->GetNumberOfTuples() != wallSurfaceMesh->GetNumberOfCells() ||
+        boundaryNodeIds->GetNumberOfTuples() != wallSurfaceMesh->GetNumberOfPoints())
+    {
+      fprintf(stderr,"The filled wall's boundary came back without its facet markers or node numbers, so the wall boundary cannot be tagged\n");
+      discardFill();
+      return SV_ERROR;
+    }
+
+    // The conversion numbers the nodes and elements and gives every element the
+    // region 1, as it does for the fluid core. Those arrays are as long as the
+    // tetrahedra; the shell triangles inserted below would leave them shorter
+    // than the cell list, and the filters that append this mesh copy cell data
+    // by cell index and would read past their end. The wedge extrusion carries
+    // none of them, and the append assigns the wall its region, node and
+    // element numbers itself, so they are dropped here.
+    wallmesh_->GetPointData()->RemoveArray("GlobalNodeID");
+    wallmesh_->GetCellData()->RemoveArray("GlobalElementID");
+    wallmesh_->GetCellData()->RemoveArray("ModelRegionID");
   }
 
-  // The conversion numbers the nodes and elements and gives every element the
-  // region 1, as it does for the fluid core. Those arrays are as long as the
-  // tetrahedra; the shell triangles inserted below would leave them shorter
-  // than the cell list, and the filters that append this mesh copy cell data
-  // by cell index and would read past their end. The wedge extrusion carries
-  // none of them, and the append assigns the wall its region, node and
-  // element numbers itself, so they are dropped here.
-  wallmesh_->GetPointData()->RemoveArray("GlobalNodeID");
-  wallmesh_->GetCellData()->RemoveArray("GlobalElementID");
-  wallmesh_->GetCellData()->RemoveArray("ModelRegionID");
+  // The hybrid wall: the prism layers' tetrahedra join the filled junction
+  // zones on the points the two share (the zones' interface points and the
+  // prism walls' layer points), so the wall is one mesh with the zones'
+  // tetrahedra first.
+  const vtkIdType numZonePoints = wallmesh_->GetNumberOfPoints();
+  const vtkIdType numZoneTets = wallmesh_->GetNumberOfCells();
+  std::vector<vtkIdType> prismPointIds;
+  if (hybridActive)
+  {
+    vtkIdType numPointsAdded = 0;
+    if (TGenUtils_AppendPrismLayers(wallmesh_, hybridWall, prismPointIds, numPointsAdded) != SV_OK)
+    {
+      fprintf(stderr,"Problem joining the prism layers to the filled junction zones\n");
+      discardFill();
+      return SV_ERROR;
+    }
+    fprintf(stdout,"  junction zones filled with %lld tetrahedra on %lld points (%lld the shell's, %lld the mesher's own); %lld prism tetrahedra joined to them on %lld more points\n",
+        (long long)numZoneTets, (long long)numZonePoints, (long long)fillShell->GetNumberOfPoints(), (long long)(numZonePoints - fillShell->GetNumberOfPoints()),
+        (long long)(wallmesh_->GetNumberOfCells() - numZoneTets), (long long)numPointsAdded);
+  }
 
   fprintf(stdout,"  wall filled with %lld tetrahedra on %lld nodes\n",
       (long long)wallmesh_->GetNumberOfCells(), (long long)wallmesh_->GetNumberOfPoints());
@@ -3281,19 +3496,35 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
   // The wall's points keep the shell's order - the interface, each layer
   // surface, the outer surface - with the mesher's own after them, so the
   // band of a corner says which surfaces a flat tetrahedron lies between.
+  // The hybrid wall's points are the junction shell's, the mesher's own and
+  // then the prism layers', and its tetrahedra the zones' and then the
+  // prisms', so the two are summed up apart.
   {
     std::vector<vtkIdType> bandEnds;
     std::vector<std::string> bandNames;
-    bandEnds.push_back(numInner);
-    bandNames.push_back("the interface");
-    for (size_t k = 0; k < levelPointers.size(); k++)
+    if (hybridActive)
     {
-      bandEnds.push_back(bandEnds.back() + levelPointers[k]->GetNumberOfPoints());
-      bandNames.push_back(std::string("layer ") + std::to_string(k + 1) + " of " + std::to_string(numLayers));
+      bandEnds.push_back(fillShell->GetNumberOfPoints());
+      bandNames.push_back("the junction shell");
+      bandEnds.push_back(numZonePoints);
+      bandNames.push_back("the mesher's own");
+      bandEnds.push_back(wallmesh_->GetNumberOfPoints());
+      bandNames.push_back("the prism layers");
+      TGenUtils_ReportWallFillQuality(wallmesh_, bandEnds, bandNames, numZoneTets, "the junction zones", "the prism layers");
     }
-    bandEnds.push_back(bandEnds.back() + offsetOuter->GetNumberOfPoints());
-    bandNames.push_back("the outer surface");
-    TGenUtils_ReportWallFillQuality(wallmesh_, bandEnds, bandNames);
+    else
+    {
+      bandEnds.push_back(numInner);
+      bandNames.push_back("the interface");
+      for (size_t k = 0; k < levelPointers.size(); k++)
+      {
+        bandEnds.push_back(bandEnds.back() + levelPointers[k]->GetNumberOfPoints());
+        bandNames.push_back(std::string("layer ") + std::to_string(k + 1) + " of " + std::to_string(numLayers));
+      }
+      bandEnds.push_back(bandEnds.back() + offsetOuter->GetNumberOfPoints());
+      bandNames.push_back("the outer surface");
+      TGenUtils_ReportWallFillQuality(wallmesh_, bandEnds, bandNames);
+    }
   }
 
   // The wedge extrusion hands downstream a mesh holding both the volume cells
@@ -3380,19 +3611,19 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     // sides are compared at single precision, which is what the VTK points
     // hold.
     std::map<std::array<float, 3>, vtkIdType> shellPointAt;
-    for (vtkIdType pointId = 0; pointId < shell->GetNumberOfPoints(); pointId++)
+    for (vtkIdType pointId = 0; pointId < fillShell->GetNumberOfPoints(); pointId++)
     {
       double p[3];
-      shell->GetPoint(pointId, p);
+      fillShell->GetPoint(pointId, p);
       std::array<float, 3> key = {(float)p[0], (float)p[1], (float)p[2]};
       shellPointAt[key] = pointId;
     }
     std::map<std::array<vtkIdType, 3>, vtkIdType> shellByPoints;
-    for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
+    for (vtkIdType cellId = 0; cellId < fillShell->GetNumberOfCells(); cellId++)
     {
       vtkIdType npts;
       const vtkIdType *pts;
-      shell->GetCellPoints(cellId, npts, pts);
+      fillShell->GetCellPoints(cellId, npts, pts);
       if (npts != 3)
       {
         continue;
@@ -3404,7 +3635,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
     int numInnerCells = 0, numOuterCells = 0, numSideCells = 0, numLayerFaces = 0;
     int numInnerOffShell = 0, numOtherOffShell = 0, numMarkedOtherwise = 0;
-    std::vector<unsigned char> shellSeen((size_t)shell->GetNumberOfCells(), 0);
+    std::vector<unsigned char> shellSeen((size_t)fillShell->GetNumberOfCells(), 0);
 
     for (vtkIdType faceId = 0; faceId < wallSurfaceMesh->GetNumberOfCells(); faceId++)
     {
@@ -3454,7 +3685,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       {
         // The face is a shell triangle: wind it as the shell does.
         const vtkIdType *shellPts;
-        shell->GetCellPoints(onShell->second, npts, shellPts);
+        fillShell->GetCellPoints(onShell->second, npts, shellPts);
         vtkIdType wound[3];
         for (int k = 0; k < 3; k++)
         {
@@ -3549,7 +3780,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     // An interface triangle of the shell that no boundary face came back on
     // was split or moved, and so was one that came back on other points.
     int numInnerMissing = 0;
-    for (vtkIdType cellId = 0; cellId < shell->GetNumberOfCells(); cellId++)
+    for (vtkIdType cellId = 0; cellId < fillShell->GetNumberOfCells(); cellId++)
     {
       if (shellRole[(size_t)cellId] == innerSurfaceCellId && !shellSeen[(size_t)cellId])
       {
@@ -3560,15 +3791,81 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     {
       fprintf(stderr,"The filled wall's boundary does not keep the fluid/wall interface: %d interface faces lie on points that are not an interface triangle's and %d of the %lld interface triangles came back on no face, so the mesher split or moved the interface and the wall would not match the fluid mesh\n",
           numInnerOffShell, numInnerMissing, (long long)numShellInner);
-      delete shellBehavior;
-      delete shellInMesh;
-      delete shellOutMesh;
+      discardFill();
       return SV_ERROR;
     }
     if (numOtherOffShell > 0 || numMarkedOtherwise > 0)
     {
       fprintf(stdout,"  %d outer or side wall boundary faces lie on points that are not a shell triangle's (the mesher split those facets) and %d carry a marker other than their shell triangle's; they are tagged by the shell where it has them and by the marker otherwise\n",
           numOtherOffShell, numMarkedOtherwise);
+    }
+
+    // The prism layers' boundary: their interface triangles, wound toward
+    // the lumen as the shell winds the interface, with the face of the wall
+    // surface under each; their tops as the outer wall; their sides at the
+    // cap rims as side walls, for the downstream pass to give the id of the
+    // cap they close against. Their walls toward the junction zones and
+    // their layer surfaces are inside the wall.
+    int numPrismInner = 0, numPrismOuter = 0, numPrismSide = 0;
+    if (hybridActive)
+    {
+      const svoffset::PrismMesh &prisms = hybridWall.prisms;
+      const std::vector<long long> &interfaceTriangles = hybridWall.inner.triangles;
+      const std::vector<double> &interfacePoints = hybridWall.inner.points;
+      auto insertPrismFace = [&](const long long *corners, bool reversed, int entityId, int modelFaceId)
+      {
+        vtkIdType pts[3];
+        for (int j = 0; j < 3; j++)
+        {
+          pts[j] = prismPointIds[(size_t)corners[reversed ? 2 - j : j]];
+        }
+        wallmesh_->InsertNextCell(VTK_TRIANGLE, 3, pts);
+        cellEntityIds->InsertNextValue(entityId);
+        modelFaceIds->InsertNextValue(modelFaceId);
+      };
+      for (size_t t = 0; t < hybridWall.structured.size() && 3*t + 2 < interfaceTriangles.size(); t++)
+      {
+        if (!hybridWall.structured[t])
+        {
+          continue;
+        }
+        const long long *corners = &interfaceTriangles[3*t];
+        int modelFaceId = outerWallFaceId;
+        if (surfaceFaceIds != nullptr)
+        {
+          double centroid[3] = {0.0, 0.0, 0.0};
+          for (int j = 0; j < 3; j++)
+          {
+            for (int k = 0; k < 3; k++)
+            {
+              centroid[k] += interfacePoints[(size_t)3*corners[j] + k]/3.0;
+            }
+          }
+          double closest[3];
+          vtkIdType closestCell = -1;
+          int subId = 0;
+          double distanceSquared = 0.0;
+          faceLocator->FindClosestPoint(centroid, closest, faceCell, closestCell, subId, distanceSquared);
+          if (closestCell >= 0)
+          {
+            modelFaceId = surfaceFaceIds->GetValue(closestCell);
+          }
+        }
+        insertPrismFace(corners, true, innerSurfaceCellId, modelFaceId);
+        numPrismInner++;
+      }
+      for (size_t i = 0; i + 2 < prisms.topTriangles.size(); i += 3)
+      {
+        insertPrismFace(&prisms.topTriangles[i], false, outerSurfaceCellId, outerWallFaceId);
+        numPrismOuter++;
+      }
+      for (size_t i = 0; i + 2 < prisms.rimTriangles.size(); i += 3)
+      {
+        insertPrismFace(&prisms.rimTriangles[i], false, sidewallCellEntityId, sidewallCellEntityId);
+        numPrismSide++;
+      }
+      fprintf(stdout,"  the prism layers add %d interface, %d outer and %d side wall triangles to the wall boundary; the whole interface is on %d triangles (the surface has %lld)\n",
+          numPrismInner, numPrismOuter, numPrismSide, numInnerCells + numPrismInner, (long long)(interfaceTriangles.size()/3));
     }
 
     wallmesh_->GetCellData()->AddArray(cellEntityIds);
@@ -3579,9 +3876,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         (long long)numShellInner, (long long)numShellOuter, (long long)numShellSide, numLayerFaces, (long long)numShellLayer, outerWallFaceId);
   }
 
-  delete shellBehavior;
-  delete shellInMesh;
-  delete shellOutMesh;
+  discardFill();
 
   return SV_OK;
 }
