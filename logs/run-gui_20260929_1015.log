@@ -496,3 +496,11 @@ Min / Avg / Max: 1.000 / 1.917 / 456.708
 Aspect Ratio > 3 (distorted): 4192058 (10.58%)
 Aspect Ratio > 10 (poor): 5842 (0.01%)
 Assessment: ACCEPTABLE (some distorted elements)
+!1838.757! WARNING: QPainter::end: Painter ended with 2 saved states
+!1838.759! WARNING: QPainter::end: Painter ended with 2 saved states
+!1838.760! WARNING: QPainter::end: Painter ended with 2 saved states
+!1841.779! WARNING: QPainter::end: Painter ended with 2 saved states
+!1841.779! WARNING: QPainter::end: Painter ended with 2 saved states
+!1841.779! WARNING: QPainter::end: Painter ended with 2 saved states
+!1841.828! WARNING: QPainter::end: Painter ended with 2 saved states
+!1841.884! WARNING: QPainter::end: Painter ended with 2 saved states
