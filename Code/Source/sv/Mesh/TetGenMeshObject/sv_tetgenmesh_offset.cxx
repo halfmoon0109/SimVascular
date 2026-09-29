@@ -3445,6 +3445,140 @@ int ClassifyPrismZone(const Interface &input, const OffsetField &field, int numL
   return 0;
 }
 
+//------------------
+// BuildPrismLayers
+//------------------
+int BuildPrismLayers(const Interface &input, const std::vector<unsigned char> &structured, int numLayers,
+    PrismMesh &out, std::string &error)
+{
+  out = PrismMesh();
+  const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
+  if (np == 0 || nt == 0 || input.normals.size() != input.points.size() || input.thickness.size() != (size_t)np || structured.size() != (size_t)nt)
+  {
+    error = "the interface needs points, normals, a thickness per point, triangles and a zone flag per triangle";
+    return 1;
+  }
+  if (numLayers < 1)
+  {
+    error = "at least one layer";
+    return 1;
+  }
+  out.numLayers = numLayers;
+  out.points = input.points;
+  out.layerPoint.assign((size_t)np*(size_t)numLayers, -1);
+  // the layer point of interface point i at layer k (1..N), made when first asked for
+  auto layerPointOf = [&](ll i, int k) -> ll
+  {
+    size_t slot = (size_t)(k - 1)*(size_t)np + (size_t)i;
+    if (out.layerPoint[slot] >= 0) return out.layerPoint[slot];
+    const double *p = &input.points[(size_t)3*i];
+    double n[3] = {input.normals[(size_t)3*i], input.normals[(size_t)3*i + 1], input.normals[(size_t)3*i + 2]};
+    double ln = Norm(n);
+    if (ln > 0.0) for (int m = 0; m < 3; m++) n[m] /= ln;
+    double f = (double)k/(double)numLayers*input.thickness[(size_t)i];
+    ll id = (ll)(out.points.size()/3);
+    for (int m = 0; m < 3; m++) out.points.push_back(p[m] + f*n[m]);
+    out.layerPoint[slot] = id;
+    return id;
+  };
+  auto pointAt = [&](ll i, int k) -> ll { return k == 0 ? i : layerPointOf(i, k); };
+  // a tetrahedron, wound to positive volume
+  auto addTet = [&](ll a, ll b, ll c, ll d, int layer)
+  {
+    double e1[3], e2[3], e3[3], cr[3];
+    Sub(&out.points[(size_t)3*b], &out.points[(size_t)3*a], e1);
+    Sub(&out.points[(size_t)3*c], &out.points[(size_t)3*a], e2);
+    Sub(&out.points[(size_t)3*d], &out.points[(size_t)3*a], e3);
+    Cross(e2, e3, cr);
+    if (Dot(e1, cr) < 0.0) std::swap(c, d);
+    out.tetrahedra.push_back(a); out.tetrahedra.push_back(b); out.tetrahedra.push_back(c); out.tetrahedra.push_back(d);
+    out.tetrahedronLayer.push_back(layer);
+  };
+  // a boundary triangle (u, v, w) wound to face away from the point x behind it
+  auto orientedFace = [&](ll u, ll v, ll w, ll x, std::vector<ll> &into)
+  {
+    double e1[3], e2[3], n[3], d[3];
+    Sub(&out.points[(size_t)3*v], &out.points[(size_t)3*u], e1);
+    Sub(&out.points[(size_t)3*w], &out.points[(size_t)3*u], e2);
+    Cross(e1, e2, n);
+    Sub(&out.points[(size_t)3*x], &out.points[(size_t)3*u], d);
+    if (Dot(n, d) > 0.0) std::swap(v, w);
+    into.push_back(u); into.push_back(v); into.push_back(w);
+  };
+  // the neighbour of each triangle across each edge (-1 on the interface's boundary)
+  std::unordered_map<unsigned long long, ll> edgeOwner;
+  edgeOwner.reserve((size_t)3*nt);
+  auto key = [](ll a, ll b) { return (unsigned long long)a*4294967311ULL + (unsigned long long)b; };
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = input.triangles[(size_t)3*t + j], b = input.triangles[(size_t)3*t + (j + 1)%3];
+      edgeOwner[key(a, b)] = t;   // directed: the triangle that traverses a -> b
+    }
+  }
+  for (ll t = 0; t < nt; t++)
+  {
+    if (!structured[(size_t)t]) continue;
+    const ll *tt = &input.triangles[(size_t)3*t];
+    // rotate so that corner 0 has the smallest interface id
+    int r0 = 0;
+    for (int j = 1; j < 3; j++) if (tt[j] < tt[r0]) r0 = j;
+    ll v0 = tt[r0], v1 = tt[(r0 + 1)%3], v2 = tt[(r0 + 2)%3];
+    for (int k = 1; k <= numLayers; k++)
+    {
+      ll b0 = pointAt(v0, k - 1), b1 = pointAt(v1, k - 1), b2 = pointAt(v2, k - 1);
+      ll t0 = pointAt(v0, k), t1 = pointAt(v1, k), t2 = pointAt(v2, k);
+      // the diagonals: b0-t1, b0-t2, and on the third side from the smaller of v1, v2
+      if (v1 < v2)
+      {
+        addTet(b0, b1, b2, t2, k);
+        addTet(b0, b1, t2, t1, k);
+        addTet(b0, t1, t2, t0, k);
+      }
+      else
+      {
+        addTet(b0, b1, b2, t1, k);
+        addTet(b0, t1, b2, t2, k);
+        addTet(b0, t1, t2, t0, k);
+      }
+      if (k == numLayers)
+      {
+        // the top, facing away from the prism (the base is behind it)
+        orientedFace(t0, t1, t2, b0, out.topTriangles);
+      }
+    }
+    // the sides: on each edge whose neighbour is not structured, or missing
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = tt[j], b = tt[(j + 1)%3], c = tt[(j + 2)%3];
+      std::unordered_map<unsigned long long, ll>::const_iterator it = edgeOwner.find(key(b, a));
+      bool rim = (it == edgeOwner.end());
+      if (!rim && structured[(size_t)it->second]) continue;
+      if (!rim) { out.zoneBoundaryEdges.push_back(a); out.zoneBoundaryEdges.push_back(b); }
+      for (int k = 1; k <= numLayers; k++)
+      {
+        ll a0 = pointAt(a, k - 1), b0 = pointAt(b, k - 1), a1 = pointAt(a, k), b1 = pointAt(b, k);
+        ll behind = pointAt(c, k - 1);
+        std::vector<ll> &into = rim ? out.rimTriangles : out.sideTriangles;
+        // the quad (a0, b0, b1, a1) split by the diagonal from the smaller interface id
+        if (a < b)
+        {
+          orientedFace(a0, b0, b1, behind, into);
+          orientedFace(a0, b1, a1, behind, into);
+        }
+        else
+        {
+          orientedFace(b0, b1, a1, behind, into);
+          orientedFace(b0, a1, a0, behind, into);
+        }
+        if (!rim) { out.sideTriangleLayer.push_back(k); out.sideTriangleLayer.push_back(k); }
+      }
+    }
+  }
+  return 0;
+}
+
 int BuildOffsetSurface(const Interface &input, const Options &options,
     DelaunayFunction delaunay, void *context, Surface &surface, Report &report,
     std::string &error, ProgressFunction progress)

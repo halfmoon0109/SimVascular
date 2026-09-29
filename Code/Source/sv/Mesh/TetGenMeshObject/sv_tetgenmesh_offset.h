@@ -459,6 +459,45 @@ int ClassifyPrismZone(const Interface &input, const OffsetField &field, int numL
     const ZoneOptions &options, std::vector<unsigned char> &structured, ZoneReport &report, std::string &error);
 
 /**
+ * @brief The prism layers over the structured zone, as tetrahedra (section 8
+ * step 2). The points are the interface's, in its order, followed by the
+ * layer points p + (k/N) t n that a structured triangle touches, allocated
+ * as met (layerPoint says which); every other layer point does not exist.
+ * Each prism is three tetrahedra whose side diagonals run from the corner
+ * of the smallest interface id (so neighbouring prisms share their side
+ * triangles and no prism is left with a cyclic set of diagonals), all wound
+ * with positive volume. The boundary faces are wound to face out of the
+ * tetrahedron they belong to.
+ */
+struct PrismMesh
+{
+  int numLayers = 0;
+  std::vector<double> points;                 // three per point
+  std::vector<long long> layerPoint;          // (k-1)*numInterfacePoints + i -> point id of p_i + (k/N) t n, -1 if not made
+  std::vector<long long> tetrahedra;          // four point ids each
+  std::vector<long long> tetrahedronLayer;    // the layer (1..N) each tetrahedron lies in
+  std::vector<long long> topTriangles;        // the outer surface of the zone: three ids, facing out of the wall
+  std::vector<long long> sideTriangles;       // the zone's walls toward the junction zone: three ids, facing the junction zone
+  std::vector<long long> sideTriangleLayer;   // the layer (1..N) of each side triangle
+  std::vector<long long> rimTriangles;        // the zone's walls at the cap rims (the interface's own boundary): three ids, facing out
+  // The zone boundary on the interface, as directed edges (a, b) of
+  // interface point ids in the structured triangle's winding, one entry per
+  // boundary edge: the junction zone lies to the edge's left when the wall
+  // is seen from outside. The zipper lifts them to each layer through
+  // layerPoint.
+  std::vector<long long> zoneBoundaryEdges;
+};
+
+/**
+ * @brief Builds the prism layers over the structured triangles (section 8
+ * step 2): N stacked prisms per triangle, each three tetrahedra.
+ * @param structured One per interface triangle, as ClassifyPrismZone leaves it.
+ * @return 0 on success, 1 with error set otherwise.
+ */
+int BuildPrismLayers(const Interface &input, const std::vector<unsigned char> &structured, int numLayers,
+    PrismMesh &out, std::string &error);
+
+/**
  * @brief The angle below which TetGen refuses two facets on one edge as
  * "nearly self-intersecting" (its -p/# tolerance, 0.1 degree by default).
  */

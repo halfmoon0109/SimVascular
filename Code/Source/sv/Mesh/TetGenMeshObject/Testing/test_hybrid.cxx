@@ -39,6 +39,7 @@
 #include "sv_tetgenmesh_offset.h"
 #include "sv_tetgenmesh_envelope.h"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -191,6 +192,69 @@ static double FarthestJunction(const Interface &iface, const std::vector<unsigne
   return far;
 }
 
+
+static double TetVolume(const std::vector<double> &pts, const ll *q)
+{
+  const double *a = &pts[3*q[0]], *b = &pts[3*q[1]], *c = &pts[3*q[2]], *d = &pts[3*q[3]];
+  double e1[3], e2[3], e3[3];
+  for (int k = 0; k < 3; k++) { e1[k] = b[k]-a[k]; e2[k] = c[k]-a[k]; e3[k] = d[k]-a[k]; }
+  double cr[3] = {e2[1]*e3[2]-e2[2]*e3[1], e2[2]*e3[0]-e2[0]*e3[2], e2[0]*e3[1]-e2[1]*e3[0]};
+  return (e1[0]*cr[0] + e1[1]*cr[1] + e1[2]*cr[2])/6.0;
+}
+
+// The faces of a set of tetrahedra by how many tetrahedra share them; the
+// boundary is the faces on one.
+static void FaceCensus(const std::vector<ll> &tets, std::map<std::array<ll,3>, int> &count)
+{
+  const int faces[4][3] = {{1,2,3},{0,3,2},{0,1,3},{0,2,1}};
+  for (size_t t = 0; t + 3 < tets.size(); t += 4)
+    for (int f = 0; f < 4; f++)
+    {
+      std::array<ll,3> k = {tets[t + faces[f][0]], tets[t + faces[f][1]], tets[t + faces[f][2]]};
+      std::sort(k.begin(), k.end());
+      count[k]++;
+    }
+}
+
+static bool IsBoundaryFace(const std::map<std::array<ll,3>, int> &count, const ll *tri)
+{
+  std::array<ll,3> k = {tri[0], tri[1], tri[2]};
+  std::sort(k.begin(), k.end());
+  std::map<std::array<ll,3>, int>::const_iterator it = count.find(k);
+  return it != count.end() && it->second == 1;
+}
+
+// Prisms over the structured zone, with the checks every zone must pass.
+static void CheckPrisms(const Interface &iface, const std::vector<unsigned char> &structured, int numLayers, PrismMesh &pm)
+{
+  std::string err;
+  if (BuildPrismLayers(iface, structured, numLayers, pm, err) != 0) { printf("  FAIL prisms: %s\n", err.c_str()); numFailed++; return; }
+  ll numStructured = 0; for (size_t t = 0; t < structured.size(); t++) if (structured[t]) numStructured++;
+  ll nTets = (ll)(pm.tetrahedra.size()/4);
+  double volume = 0.0, minVolume = 1e300;
+  for (ll t = 0; t < nTets; t++) { double v = TetVolume(pm.points, &pm.tetrahedra[4*t]); volume += v; minVolume = std::min(minVolume, v); }
+  std::map<std::array<ll,3>, int> count; FaceCensus(pm.tetrahedra, count);
+  ll numBoundary = 0, numOver = 0;
+  for (std::map<std::array<ll,3>, int>::const_iterator it = count.begin(); it != count.end(); ++it) { if (it->second == 1) numBoundary++; if (it->second > 2) numOver++; }
+  ll topsOnBoundary = 0, sidesOnBoundary = 0, rimsOnBoundary = 0;
+  for (size_t i = 0; i + 2 < pm.topTriangles.size(); i += 3) if (IsBoundaryFace(count, &pm.topTriangles[i])) topsOnBoundary++;
+  for (size_t i = 0; i + 2 < pm.sideTriangles.size(); i += 3) if (IsBoundaryFace(count, &pm.sideTriangles[i])) sidesOnBoundary++;
+  for (size_t i = 0; i + 2 < pm.rimTriangles.size(); i += 3) if (IsBoundaryFace(count, &pm.rimTriangles[i])) rimsOnBoundary++;
+  ll nTop = (ll)(pm.topTriangles.size()/3), nSide = (ll)(pm.sideTriangles.size()/3), nRim = (ll)(pm.rimTriangles.size()/3), nEdges = (ll)(pm.zoneBoundaryEdges.size()/2);
+  // the zone boundary edges chain into loops: every point once as a source and once as a target
+  std::map<ll,int> outDeg, inDeg; for (ll e = 0; e < nEdges; e++) { outDeg[pm.zoneBoundaryEdges[2*e]]++; inDeg[pm.zoneBoundaryEdges[2*e+1]]++; }
+  bool loops = true; for (std::map<ll,int>::iterator it = outDeg.begin(); it != outDeg.end(); ++it) if (it->second != 1 || inDeg[it->first] != 1) loops = false;
+  printf("  prisms: %lld tetrahedra over %lld triangles (%lld points), volume %.4f, smallest %.2e; boundary faces %lld = bottom %lld + tops %lld + sides %lld + rim %lld; faces on more than two %lld; zone boundary edges %lld\n",
+      nTets, numStructured, (ll)(pm.points.size()/3), volume, minVolume, numBoundary, numStructured, nTop, nSide, nRim, numOver, nEdges);
+  Check(nTets == 3*numLayers*numStructured, "three tetrahedra per prism, N prisms per triangle");
+  Check(minVolume > 0.0, "every tetrahedron has positive volume");
+  Check(numOver == 0, "no face is shared by more than two tetrahedra");
+  Check(numBoundary == numStructured + nTop + nSide + nRim, "the boundary is the bottom, the tops, the sides and the rim sides");
+  Check(topsOnBoundary == nTop && sidesOnBoundary == nSide && rimsOnBoundary == nRim, "every top, side and rim triangle is a boundary face");
+  Check(nSide == 2*numLayers*nEdges, "two side triangles per layer per zone boundary edge");
+  Check(nEdges == 0 || loops, "the zone boundary edges chain into loops");
+}
+
 int main()
 {
   {
@@ -237,6 +301,26 @@ int main()
       printf("  junction zone %lld triangles, %lld of them not between the axes\n", zone, off);
       Check(zone > 0 && off == 0, "the junction zone is the strips facing the other tube");
       Check(zr.numStructured > 0.5*zr.numTriangles, "most of both tubes is prisms");
+    }
+  }
+  {
+    printf("test 4: prism layers over the whole tube (r 1, wall 0.3, three layers)\n");
+    Interface iface; AddTube(iface, 0.0, 0.0, 1.0, 0.0, 8.0, 32, 32, 0.3);
+    std::vector<unsigned char> structured(iface.triangles.size()/3, 1);
+    PrismMesh pm; CheckPrisms(iface, structured, 3, pm);
+    double volume = 0.0; for (size_t t = 0; t + 3 < pm.tetrahedra.size(); t += 4) volume += TetVolume(pm.points, &pm.tetrahedra[t]);
+    double annulus = M_PI*(1.3*1.3 - 1.0)*8.0;
+    printf("  volume %.4f against the annulus %.4f (%.3f)\n", volume, annulus, volume/annulus);
+    Check(volume > 0.95*annulus && volume < 1.02*annulus, "the prisms fill the annulus between the tube and its offset");
+    Check(pm.sideTriangles.empty() && pm.rimTriangles.size()/3 == (size_t)(2*3*64), "no zone walls, and the rim sides close the two ends");
+  }
+  {
+    printf("test 5: prism layers over the structured zone of the junction, the junction left open toward its tetrahedra\n");
+    Interface iface; MakeJunction(0.5, 0.1, 0.3, 48, 20, iface);
+    std::vector<unsigned char> structured; ZoneReport zr;
+    if (Classify(iface, 3, structured, zr))
+    {
+      PrismMesh pm; CheckPrisms(iface, structured, 3, pm);
     }
   }
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
