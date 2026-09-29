@@ -3894,6 +3894,164 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
   return 0;
 }
 
+//--------------------
+// BuildJunctionShell
+//--------------------
+int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
+    const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
+    int erosionRings, int earPasses, JunctionShell &out, std::string &error)
+{
+  out = JunctionShell();
+  const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
+  const int numLayers = prisms.numLayers;
+  if (numLayers < 1 || levels.size() != (size_t)numLayers || fractions.size() != (size_t)numLayers || structured.size() != (size_t)nt)
+  {
+    error = "the junction shell needs one level surface and fraction per layer of the prism mesh, and a zone flag per interface triangle";
+    return 1;
+  }
+  out.points = prisms.points;
+  out.numPrismPoints = (ll)(prisms.points.size()/3);
+  // 1. the zone's interface triangles, reversed to face out of the wall's volume
+  {
+    std::map<std::pair<ll, ll>, int> edgeCount;
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        ll a = input.triangles[(size_t)3*t + j], b = input.triangles[(size_t)3*t + (j + 1)%3];
+        edgeCount[std::make_pair(std::min(a, b), std::max(a, b))]++;
+      }
+    }
+    for (ll t = 0; t < nt; t++)
+    {
+      if (structured[(size_t)t]) continue;
+      const ll *tt = &input.triangles[(size_t)3*t];
+      out.numJunctionTriangles++;
+      for (int j = 0; j < 3; j++)
+      {
+        if (edgeCount[std::make_pair(std::min(tt[j], tt[(j + 1)%3]), std::max(tt[j], tt[(j + 1)%3]))] == 1) { out.numJunctionOnRims++; break; }
+      }
+      out.triangles.push_back(tt[2]); out.triangles.push_back(tt[1]); out.triangles.push_back(tt[0]);
+      out.markers.push_back(1);
+    }
+    if (out.numJunctionOnRims > 0)
+    {
+      error = "the junction zone touches a cap rim on " + std::to_string(out.numJunctionOnRims) + " triangles; not handled yet";
+      return 1;
+    }
+  }
+  // 2. the prism zone's walls toward the junction zone, reversed: they face
+  // the zone as the prism mesh has them, and the shell faces out of the
+  // zone's volume
+  for (size_t i = 0; i + 2 < prisms.sideTriangles.size(); i += 3)
+  {
+    out.triangles.push_back(prisms.sideTriangles[i]); out.triangles.push_back(prisms.sideTriangles[i + 2]); out.triangles.push_back(prisms.sideTriangles[i + 1]);
+    out.markers.push_back(300 + (int)prisms.sideTriangleLayer[i/3]);
+  }
+  // the rims' zones, for the pieces' collar-owned triangles
+  std::vector<unsigned char> rimStructured(field.Rims().size(), 1);
+  {
+    std::vector<std::vector<ll> > incident((size_t)np);
+    for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) incident[(size_t)input.triangles[(size_t)3*t + j]].push_back(t);
+    const std::vector<std::vector<ll> > &rims = field.Rims();
+    for (size_t r = 0; r < rims.size(); r++)
+      for (size_t m = 0; m < rims[r].size(); m++)
+        for (size_t q = 0; q < incident[(size_t)rims[r][m]].size(); q++)
+          if (!structured[(size_t)incident[(size_t)rims[r][m]][q]]) rimStructured[r] = 0;
+  }
+  // the zone boundary loops on the interface, reversed for the zipper
+  std::vector<std::vector<ll> > loops;
+  {
+    std::map<ll, ll> next;
+    for (size_t e = 0; e + 1 < prisms.zoneBoundaryEdges.size(); e += 2) next[prisms.zoneBoundaryEdges[e]] = prisms.zoneBoundaryEdges[e + 1];
+    std::set<ll> used;
+    for (std::map<ll, ll>::iterator it = next.begin(); it != next.end(); ++it)
+    {
+      if (used.count(it->first)) continue;
+      std::vector<ll> loop;
+      ll cur = it->first;
+      while (!used.count(cur)) { used.insert(cur); loop.push_back(cur); cur = next[cur]; }
+      std::reverse(loop.begin(), loop.end());
+      loops.push_back(loop);
+    }
+  }
+  // 3. every level: the piece and its strips
+  out.pieceBase.assign((size_t)numLayers, 0);
+  out.pieces.assign((size_t)numLayers, ZonePieceReport());
+  for (int k = 1; k <= numLayers; k++)
+  {
+    Surface piece;
+    if (TrimSurfaceToZone(levels[(size_t)k - 1], fractions[(size_t)k - 1], field, nt, structured, rimStructured, erosionRings,
+          prisms.points, prisms.layerTriangles[(size_t)k - 1], earPasses, piece, out.pieces[(size_t)k - 1], error) != 0)
+    {
+      return 1;
+    }
+    const ll base = (ll)(out.points.size()/3);
+    out.pieceBase[(size_t)k - 1] = base;
+    out.points.insert(out.points.end(), piece.points.begin(), piece.points.end());
+    const int marker = (k == numLayers) ? 2 : 100 + k;
+    for (size_t i = 0; i + 2 < piece.triangles.size(); i += 3)
+    {
+      out.triangles.push_back(piece.triangles[i] + base); out.triangles.push_back(piece.triangles[i + 1] + base); out.triangles.push_back(piece.triangles[i + 2] + base);
+      out.markers.push_back(marker);
+    }
+    std::vector<std::vector<ll> > chains;
+    std::vector<unsigned char> closed;
+    BoundaryChains(piece.triangles, chains, closed);
+    std::vector<unsigned char> chainUsed(chains.size(), 0);
+    for (size_t a = 0; a < loops.size(); a++)
+    {
+      std::vector<ll> A;
+      for (size_t m = 0; m < loops[a].size(); m++)
+      {
+        ll id = prisms.layerPoint[(size_t)(k - 1)*(size_t)np + (size_t)loops[a][m]];
+        if (id < 0) { error = "a zone boundary point has no layer point"; return 1; }
+        A.push_back(id);
+      }
+      // the nearest closed chain of the piece, by the sum over A of the distance to the chain
+      size_t bestB = chains.size();
+      double best = std::numeric_limits<double>::max();
+      for (size_t b = 0; b < chains.size(); b++)
+      {
+        if (!closed[b] || chainUsed[b]) continue;
+        double d = 0.0;
+        for (size_t m = 0; m < A.size(); m++)
+        {
+          double dm = std::numeric_limits<double>::max();
+          for (size_t q = 0; q < chains[b].size(); q++) dm = std::min(dm, Distance(&out.points[(size_t)3*A[m]], &piece.points[(size_t)3*chains[b][q]]));
+          d += dm;
+        }
+        if (d < best) { best = d; bestB = b; }
+      }
+      if (bestB == chains.size())
+      {
+        error = "a zone boundary loop at layer " + std::to_string(k) + " found no closed boundary chain of the layer surface's piece to zip to";
+        return 1;
+      }
+      chainUsed[bestB] = 1;
+      std::vector<ll> B;
+      for (size_t q = 0; q < chains[bestB].size(); q++) B.push_back(chains[bestB][q] + base);
+      std::vector<ll> strip;
+      if (ZipChains(out.points, A, B, true, strip, error) != 0) return 1;
+      for (size_t i = 0; i + 2 < strip.size(); i += 3)
+      {
+        out.triangles.push_back(strip[i]); out.triangles.push_back(strip[i + 1]); out.triangles.push_back(strip[i + 2]);
+        out.markers.push_back(marker);
+      }
+      out.numZipperTriangles += (ll)(strip.size()/3);
+    }
+    for (size_t b = 0; b < chains.size(); b++)
+    {
+      if (!chainUsed[b])
+      {
+        error = "the layer " + std::to_string(k) + " surface's piece has a boundary chain of " + std::to_string(chains[b].size()) + " points that no zone loop takes";
+        return 1;
+      }
+    }
+  }
+  return 0;
+}
+
 int BuildOffsetSurface(const Interface &input, const Options &options,
     DelaunayFunction delaunay, void *context, Surface &surface, Report &report,
     std::string &error, ProgressFunction progress)

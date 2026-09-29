@@ -309,6 +309,7 @@ static void CheckLevelPiece(const Interface &iface, const OffsetField &field, co
   Check(crossings == 0, "and has no crossings");
 }
 
+
 // the farthest a junction-zone triangle's centre is from a point
 static double FarthestJunction(const Interface &iface, const std::vector<unsigned char> &structured, const double c[3])
 {
@@ -387,6 +388,96 @@ static void CheckPrisms(const Interface &iface, const std::vector<unsigned char>
   Check(nSide == 2*numLayers*nEdges, "two side triangles per layer per zone boundary edge");
   Check(nEdges == 0 || loops, "the zone boundary edges chain into loops");
 }
+
+// The smallest dihedral angle of a tetrahedron, in degrees.
+static double MinDihedral(const std::vector<double> &pts, const ll *q)
+{
+  const double *P[4]; for (int m = 0; m < 4; m++) P[m] = &pts[3*q[m]];
+  const int faces[4][3] = {{1,2,3},{0,3,2},{0,1,3},{0,2,1}}; double N[4][3];
+  for (int f = 0; f < 4; f++) { double u[3], v[3]; Sub(P[faces[f][1]], P[faces[f][0]], u); Sub(P[faces[f][2]], P[faces[f][0]], v); N[f][0] = u[1]*v[2]-u[2]*v[1]; N[f][1] = u[2]*v[0]-u[0]*v[2]; N[f][2] = u[0]*v[1]-u[1]*v[0]; double l = Norm(N[f]); if (l > 0) for (int k = 0; k < 3; k++) N[f][k] /= l; }
+  double tetMin = 180.0;
+  for (int f = 0; f < 4; f++) for (int g = f+1; g < 4; g++) { double c = std::max(-1.0, std::min(1.0, -Dot(N[f], N[g]))); tetMin = std::min(tetMin, std::acos(c)*180.0/M_PI); }
+  return tetMin;
+}
+
+static void DihedralStats(const std::vector<double> &pts, const std::vector<ll> &tets, const char *label)
+{
+  ll n = (ll)(tets.size()/4), under5 = 0, under10 = 0, under15 = 0; double smallest = 180.0;
+  for (ll t = 0; t < n; t++) { double d = MinDihedral(pts, &tets[4*t]); smallest = std::min(smallest, d); if (d < 5) under5++; if (d < 10) under10++; if (d < 15) under15++; }
+  printf("  %s: %lld tetrahedra, smallest dihedral %.2f degrees, under 5: %lld (%.2f%%), under 10: %lld (%.2f%%), under 15: %lld (%.2f%%)\n", label, n, smallest, under5, n ? 100.0*under5/n : 0.0, under10, n ? 100.0*under10/n : 0.0, under15, n ? 100.0*under15/n : 0.0);
+}
+
+// The junction zone filled and joined to the prism layers: the whole wall as one tetrahedral mesh.
+static void FillHybrid(const Interface &iface, int numLayers)
+{
+  std::vector<double> fractions; for (int k = 1; k <= numLayers; k++) fractions.push_back((double)k/numLayers);
+  std::vector<Surface> surfs; std::vector<Report> reps; std::string err; Options options;
+  if (BuildOffsetSurfaces(iface, options, fractions, Delaunay, nullptr, surfs, reps, err) != 0) { printf("  FAIL build: %s\n", err.c_str()); numFailed++; return; }
+  std::vector<CapPlane> planes = PlanesFromRims(iface, surfs.back());
+  for (size_t k = 0; k < surfs.size(); k++) { TrimReport tr; if (TrimSurfaceAtCaps(surfs[k], planes, 0.1, tr, err) != 0) { printf("  FAIL trim at caps: %s\n", err.c_str()); numFailed++; return; } }
+  OffsetField field; Report fr; field.Build(iface, fr, err);
+  std::vector<unsigned char> structured; ZoneReport zr; ZoneOptions zo;
+  ClassifyPrismZone(iface, field, numLayers, zo, structured, zr, err);
+  PrismMesh pm; if (BuildPrismLayers(iface, structured, numLayers, pm, err) != 0) { printf("  FAIL prisms: %s\n", err.c_str()); numFailed++; return; }
+  JunctionShell shell;
+  if (BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err) != 0) { printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
+  ll nb, nn, nm; CountEdges(shell.triangles, nb, nn, nm);
+  std::vector<unsigned char> cr; double at[3]; ll crossings = svenvelope::CountCrossingTriangles(shell.points, shell.triangles, cr, at);
+  std::map<int, ll> byMarker; for (size_t i = 0; i < shell.markers.size(); i++) byMarker[shell.markers[i]]++;
+  printf("  junction shell: %lld points, %zu triangles (zone interface %lld, zipper %lld); by marker:", (ll)(shell.points.size()/3), shell.triangles.size()/3, shell.numJunctionTriangles, shell.numZipperTriangles);
+  for (std::map<int, ll>::iterator it = byMarker.begin(); it != byMarker.end(); ++it) printf(" %d:%lld", it->first, it->second);
+  printf("; boundary %lld, non-manifold %lld, miswound %lld, crossing %lld\n", nb, nn, nm, crossings);
+  // the rings of the zone walls at the layers inside the wall are on three triangles: the wall below, the wall above and the layer's strip
+  const ll ringEdges = (ll)(numLayers - 1)*(ll)(pm.zoneBoundaryEdges.size()/2);
+  Check(nb == 0 && nn == ringEdges && nm == 0 && crossings == 0, "the junction shell is closed, wound consistently and free of crossings (the layer rings on three triangles apart)");
+  if (nb || nn != ringEdges || nm || crossings) return;
+  // TetGen as the fill flow calls it
+  tetgenio in, out; in.firstnumber = 0; in.numberofpoints = (int)(shell.points.size()/3); in.pointlist = new REAL[shell.points.size()]; for (size_t i = 0; i < shell.points.size(); i++) in.pointlist[i] = shell.points[i];
+  in.numberoffacets = (int)(shell.triangles.size()/3); in.facetlist = new tetgenio::facet[in.numberoffacets]; in.facetmarkerlist = new int[in.numberoffacets]();
+  for (int i = 0; i < in.numberoffacets; i++) { tetgenio::facet *f = &in.facetlist[i]; f->numberofpolygons = 1; f->polygonlist = new tetgenio::polygon[1]; f->numberofholes = 0; f->holelist = nullptr; tetgenio::polygon *pg = &f->polygonlist[0]; pg->numberofvertices = 3; pg->vertexlist = new int[3]; for (int j = 0; j < 3; j++) pg->vertexlist[j] = (int)shell.triangles[3*i+j]; in.facetmarkerlist[i] = shell.markers[i]; }
+  tetgenbehavior b; b.plc = 1; b.nobisect = 1; b.nojettison = 1; b.quality = 1; b.minratio = 1.414; b.mindihedral = 10.0; b.neighout = 2; b.quiet = 1;
+  bool accepted = true;
+  try { tetrahedralize(&b, &in, &out); } catch (int r) { printf("  TetGen error %d\n", r); accepted = false; }
+  Check(accepted, "TetGen fills the junction zone");
+  if (!accepted) return;
+  // the whole wall: the prism tetrahedra and the zone's, over one point array (the zone's Steiner points appended)
+  std::vector<double> pts = shell.points; const ll nIn = in.numberofpoints;
+  for (int i = nIn; i < out.numberofpoints; i++) for (int k = 0; k < 3; k++) pts.push_back(out.pointlist[3*i+k]);
+  std::vector<ll> zoneTets; for (int t = 0; t < out.numberoftetrahedra; t++) for (int m = 0; m < 4; m++) zoneTets.push_back(out.tetrahedronlist[4*t+m]);
+  std::vector<ll> all = pm.tetrahedra; all.insert(all.end(), zoneTets.begin(), zoneTets.end());
+  std::map<std::array<ll,3>, int> count; FaceCensus(all, count);
+  ll numBoundary = 0, numOver = 0; for (std::map<std::array<ll,3>, int>::const_iterator it = count.begin(); it != count.end(); ++it) { if (it->second == 1) numBoundary++; if (it->second > 2) numOver++; }
+  // the boundary of the wall: every interface triangle, the tops, the rim sides, the pieces and strips of the outer level
+  ll interfaceOnBoundary = 0; for (size_t i = 0; i + 2 < iface.triangles.size(); i += 3) if (IsBoundaryFace(count, &iface.triangles[i])) interfaceOnBoundary++;
+  ll topsOnBoundary = 0; for (size_t i = 0; i + 2 < pm.topTriangles.size(); i += 3) if (IsBoundaryFace(count, &pm.topTriangles[i])) topsOnBoundary++;
+  ll rimOnBoundary = 0; for (size_t i = 0; i + 2 < pm.rimTriangles.size(); i += 3) if (IsBoundaryFace(count, &pm.rimTriangles[i])) rimOnBoundary++;
+  ll outerShell = 0, outerOnBoundary = 0, wallsShared = 0, walls = 0, layersInside = 0, layersTotal = 0;
+  for (size_t i = 0; i < shell.markers.size(); i++)
+  {
+    const ll *tri = &shell.triangles[3*i];
+    std::array<ll,3> key = {tri[0], tri[1], tri[2]}; std::sort(key.begin(), key.end());
+    int c = count.count(key) ? count[key] : 0;
+    if (shell.markers[i] == 2) { outerShell++; if (c == 1) outerOnBoundary++; }
+    else if (shell.markers[i] >= 300) { walls++; if (c == 2) wallsShared++; }
+    else if (shell.markers[i] >= 100) { layersTotal++; if (c == 2) layersInside++; }
+  }
+  double volume = 0.0; for (size_t t = 0; t + 3 < all.size(); t += 4) volume += TetVolume(pts, &all[t]);
+  double area = 0.0, expected = 0.0;
+  for (size_t i = 0; i + 2 < iface.triangles.size(); i += 3) { const ll *tt = &iface.triangles[i]; double e1[3], e2[3]; Sub(&iface.points[3*tt[1]], &iface.points[3*tt[0]], e1); Sub(&iface.points[3*tt[2]], &iface.points[3*tt[0]], e2); double crs[3] = {e1[1]*e2[2]-e1[2]*e2[1], e1[2]*e2[0]-e1[0]*e2[2], e1[0]*e2[1]-e1[1]*e2[0]}; double a = 0.5*Norm(crs); area += a; expected += a*(iface.thickness[tt[0]] + iface.thickness[tt[1]] + iface.thickness[tt[2]])/3.0; }
+  printf("  filled: prism %zu + zone %zu = %zu tetrahedra on %lld points (%d Steiner); boundary faces %lld: interface %lld/%zu, tops %lld/%zu, rim sides %lld/%zu, outer pieces and strips %lld/%lld; zone walls shared by two tetrahedra %lld/%lld, layer pieces and strips inside %lld/%lld; faces on more than two %lld; volume %.3f against area times thickness %.3f (%.3f)\n",
+      pm.tetrahedra.size()/4, zoneTets.size()/4, all.size()/4, (ll)(pts.size()/3), out.numberofpoints - (int)nIn, numBoundary, interfaceOnBoundary, iface.triangles.size()/3, topsOnBoundary, pm.topTriangles.size()/3, rimOnBoundary, pm.rimTriangles.size()/3, outerOnBoundary, outerShell, wallsShared, walls, layersInside, layersTotal, numOver, volume, expected, volume/expected);
+  Check(numOver == 0, "no face is shared by more than two tetrahedra");
+  Check(interfaceOnBoundary == (ll)(iface.triangles.size()/3), "every interface triangle is a boundary face of the wall");
+  Check(topsOnBoundary == (ll)(pm.topTriangles.size()/3) && rimOnBoundary == (ll)(pm.rimTriangles.size()/3) && outerOnBoundary == outerShell, "the tops, the rim sides and the outer pieces with their strips are the rest of the boundary");
+  Check(numBoundary == interfaceOnBoundary + topsOnBoundary + rimOnBoundary + outerOnBoundary, "and nothing else is");
+  Check(wallsShared == walls, "every zone wall triangle is shared by a prism tetrahedron and a zone tetrahedron");
+  Check(layersInside == layersTotal, "every layer piece and strip triangle lies inside the wall between two tetrahedra");
+  Check(volume > 1.0*expected && volume < 1.4*expected, "the wall's volume is the interface's area times the thickness, allowing for the curvature");
+  DihedralStats(pts, pm.tetrahedra, "prism layers");
+  DihedralStats(pts, zoneTets, "junction zone");
+  DihedralStats(pts, all, "whole wall");
+}
+
 
 int main()
 {
@@ -472,6 +563,16 @@ int main()
       PrismMesh pm; BuildPrismLayers(iface, structured, 3, pm, err);
       for (int k = 1; k <= 3; k++) CheckLevelPiece(iface, field, surfs[(size_t)k-1], fractions[(size_t)k-1], k, structured, pm);
     }
+  }
+  {
+    printf("test 7: the whole wall of the junction as prism layers plus the junction zone's tetrahedra, three layers\n");
+    Interface iface; MakeJunction(0.5, 0.1, 0.3, 48, 20, iface);
+    FillHybrid(iface, 3);
+  }
+  {
+    printf("test 8: the same with one layer\n");
+    Interface iface; MakeJunction(0.5, 0.1, 0.3, 48, 20, iface);
+    FillHybrid(iface, 1);
   }
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;

@@ -560,6 +560,39 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
     const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error);
 
 /**
+ * @brief The closed surface around the junction zone's volume (section 8
+ * step 4), for the volume mesher: the zone's interface triangles reversed,
+ * the prism zone's walls toward it, and at every layer the layer surface's
+ * piece over the zone zipped to the prism zone's layer ring. The points are
+ * the prism mesh's (the interface and its layer points, in its order)
+ * followed by the pieces' at each level.
+ */
+struct JunctionShell
+{
+  std::vector<double> points;
+  std::vector<long long> triangles;
+  std::vector<int> markers;              // per triangle: 1 the interface, 2 the outer surface, 100+k the layer k surface, 300+k the prism zone's wall at layer k
+  long long numPrismPoints = 0;          // the prism mesh's points come first
+  std::vector<long long> pieceBase;      // [k-1]: where level k's piece points start
+  std::vector<ZonePieceReport> pieces;   // [k-1]
+  long long numZipperTriangles = 0;
+  long long numJunctionTriangles = 0;    // interface triangles of the zone
+  long long numJunctionOnRims = 0;       // of them, on a cap rim: not handled yet, the build refuses them
+};
+
+/**
+ * @brief Assembles the junction shell (section 8 step 4). The level surfaces
+ * come in the order of the layers (the last is the outer surface), already
+ * trimmed at the caps; each is trimmed to the zone (TrimSurfaceToZone) and
+ * zipped to the prism zone's ring at its layer. A junction zone touching a
+ * cap rim is refused for now.
+ * @return 0 on success, 1 with error set otherwise.
+ */
+int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
+    const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
+    int erosionRings, int earPasses, JunctionShell &out, std::string &error);
+
+/**
  * @brief The angle below which TetGen refuses two facets on one edge as
  * "nearly self-intersecting" (its -p/# tolerance, 0.1 degree by default).
  */
