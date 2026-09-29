@@ -3230,6 +3230,71 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
   return 0;
 }
 
+//-------------
+// OpenPinches
+//-------------
+// A pinch: a point whose junction triangles form more than one fan around
+// it, so that the zone boundary passes through it twice (two junction
+// regions touching at a point, or one region folded back on itself). The
+// boundary cannot be traced as loops through such a point (measured
+// 2026-09-29 on the 178k model: two pinches, and the loops through them
+// came apart into fragments of one point), so the point's structured
+// triangles are given to the junction zone, which joins the fans; repeated
+// until no pinch is left. Called by the classification and by the zone's
+// widening, which can make two regions touch.
+static void OpenPinches(const Interface &input, const std::vector<std::vector<ll> > &incident,
+    std::vector<unsigned char> &structured, ll &numPinches, ll &numTrianglesPinched)
+{
+  const ll np = (ll)(input.points.size()/3);
+  for (;;)
+  {
+    ll numPinchedNow = 0;
+    for (ll p = 0; p < np; p++)
+    {
+      const std::vector<ll> &around = incident[(size_t)p];
+      ll numStructuredAround = 0;
+      std::vector<ll> junctionAround;
+      for (size_t m = 0; m < around.size(); m++)
+      {
+        if (structured[(size_t)around[m]]) numStructuredAround++;
+        else junctionAround.push_back(around[m]);
+      }
+      if (numStructuredAround == 0 || junctionAround.size() < 2) continue;
+      // the fans: two junction triangles are in one fan if they share an
+      // edge through p; the fans are found by joining across those edges
+      std::map<ll, ll> firstAt;   // other end of an edge through p -> the first junction triangle on it
+      std::vector<ll> parent(junctionAround.size());
+      for (size_t m = 0; m < parent.size(); m++) parent[m] = (ll)m;
+      std::function<ll(ll)> root = [&](ll a) -> ll { while (parent[(size_t)a] != a) { parent[(size_t)a] = parent[(size_t)parent[(size_t)a]]; a = parent[(size_t)a]; } return a; };
+      for (size_t m = 0; m < junctionAround.size(); m++)
+      {
+        const ll *tt = &input.triangles[(size_t)3*junctionAround[m]];
+        for (int j = 0; j < 3; j++)
+        {
+          if (tt[j] == p) continue;
+          std::map<ll, ll>::iterator at = firstAt.find(tt[j]);
+          if (at == firstAt.end()) firstAt[tt[j]] = (ll)m;
+          else parent[(size_t)root((ll)m)] = root(at->second);
+        }
+      }
+      ll numFans = 0;
+      for (size_t m = 0; m < parent.size(); m++) if (root((ll)m) == (ll)m) numFans++;
+      if (numFans < 2) continue;
+      for (size_t m = 0; m < around.size(); m++)
+      {
+        if (structured[(size_t)around[m]])
+        {
+          structured[(size_t)around[m]] = 0;
+          numTrianglesPinched++;
+        }
+      }
+      numPinchedNow++;
+    }
+    numPinches += numPinchedNow;
+    if (numPinchedNow == 0) break;
+  }
+}
+
 //-------------------
 // ClassifyPrismZone
 //-------------------
@@ -3413,6 +3478,9 @@ int ClassifyPrismZone(const Interface &input, const OffsetField &field, int numL
     {
       if (giveUp[(size_t)label[(size_t)t]]) structured[(size_t)t] = 0;
     }
+    // The pinches opened (below): the boundary cannot be traced as loops
+    // through a point it passes twice.
+    OpenPinches(input, incident, structured, report.numPinches, report.numTrianglesPinched);
     // the junction pieces, after the islands joined them (adjacent pieces merge)
     std::vector<ll> label2((size_t)nt, -1);
     for (ll seed = 0; seed < nt; seed++)
@@ -3588,8 +3656,11 @@ int BuildPrismLayers(const Interface &input, const std::vector<unsigned char> &s
 int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &field, long long numInterfaceTriangles,
     const std::vector<unsigned char> &structured, const std::vector<unsigned char> &rimStructured, int erosionRings,
     const std::vector<double> &guardPoints, const std::vector<long long> &guardTriangles, int earPasses,
-    Surface &piece, ZonePieceReport &report, std::string &error)
+    Surface &piece, ZonePieceReport &report, std::string &error, std::vector<long long> *crossingGuards,
+    std::vector<long long> *holeOwners)
 {
+  if (crossingGuards != nullptr) crossingGuards->clear();
+  if (holeOwners != nullptr) holeOwners->clear();
   report = ZonePieceReport();
   piece = Surface();
   const ll nt = (ll)(level.triangles.size()/3), np = (ll)(level.points.size()/3);
@@ -3600,12 +3671,14 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
   }
   // 1. by ownership
   std::vector<unsigned char> keep((size_t)nt, 0);
+  std::vector<ll> ownerOf((size_t)nt, -1);
   for (ll t = 0; t < nt; t++)
   {
     const ll *tt = &level.triangles[(size_t)3*t];
     double c[3];
     for (int k = 0; k < 3; k++) c[k] = (level.points[(size_t)3*tt[0] + k] + level.points[(size_t)3*tt[1] + k] + level.points[(size_t)3*tt[2] + k])/3.0;
     ll owner = field.Owner(c, fraction);
+    ownerOf[(size_t)t] = owner;
     bool ownerStructured;
     if (owner < 0)
     {
@@ -3625,29 +3698,187 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
     if (ownerStructured) report.numStructuredOwned++;
     else keep[(size_t)t] = 1;
   }
-  // 2. erosion: the rings of kept triangles around a dropped one go too
-  std::vector<std::vector<ll> > incident((size_t)np);
+  // The boundary of the kept set, kept up to date as triangles go: how
+  // many kept triangles each edge has, and how many boundary edges each
+  // point is on. A triangle may only go where that leaves the boundary
+  // as it was in kind: a triangle with no boundary edge would open a
+  // hole; one with one boundary edge whose opposite point is itself on
+  // the boundary is a neck, and taking it cuts the piece in two or joins
+  // two of its boundary chains into one (measured 2026-09-29 on the 178k
+  // model: the piece over the annular junction of a thin branch on a
+  // thick parent, two triangles wide, was cut into a C by the ring
+  // erosion, and its one chain ran round both loops, so neither loop had
+  // a chain of its own); one with two boundary edges is an ear and goes
+  // freely; one with three is on its own and goes.
+  std::map<std::pair<ll, ll>, int> edgeCount;
+  std::vector<int> boundaryDegree((size_t)np, 0);
+  auto edgeKey = [](ll a, ll b) { return std::make_pair(std::min(a, b), std::max(a, b)); };
   for (ll t = 0; t < nt; t++)
   {
-    for (int j = 0; j < 3; j++) incident[(size_t)level.triangles[(size_t)3*t + j]].push_back(t);
+    if (!keep[(size_t)t]) continue;
+    for (int j = 0; j < 3; j++) edgeCount[edgeKey(level.triangles[(size_t)3*t + j], level.triangles[(size_t)3*t + (j + 1)%3])]++;
   }
-  for (int ring = 0; ring < erosionRings; ring++)
+  for (std::map<std::pair<ll, ll>, int>::const_iterator it = edgeCount.begin(); it != edgeCount.end(); ++it)
   {
-    std::vector<unsigned char> before = keep;
-    for (ll t = 0; t < nt; t++)
+    if (it->second == 1) { boundaryDegree[(size_t)it->first.first]++; boundaryDegree[(size_t)it->first.second]++; }
+  }
+  // how many boundary edges a kept triangle has, and its point opposite the one boundary edge
+  auto boundaryEdges = [&](ll t, ll &opposite) -> int
+  {
+    int n = 0;
+    opposite = -1;
+    for (int j = 0; j < 3; j++)
     {
-      if (before[(size_t)t]) continue;
+      ll a = level.triangles[(size_t)3*t + j], b = level.triangles[(size_t)3*t + (j + 1)%3];
+      if (edgeCount[edgeKey(a, b)] == 1) { n++; opposite = level.triangles[(size_t)3*t + (j + 2)%3]; }
+    }
+    return n;
+  };
+  // The triangles on each edge and around each point of the level, for
+  // the holes: a patch of dropped triangles enclosed by kept ones (the
+  // ownership at the edge of the zone is ragged, and an island of
+  // structured-owned triangles a row or two inside the piece is common).
+  // The erosion may open such a patch to the boundary - a triangle whose
+  // opposite point is on the patch's boundary is not a neck of the piece
+  // but the last wall of a hole, and taking it merges the hole into the
+  // boundary as the ring erosion did - so the patches are found first and
+  // flagged, and a patch is unflagged once it is open.
+  std::map<std::pair<ll, ll>, std::vector<ll> > trianglesOnEdge;
+  std::vector<std::vector<ll> > aroundPoint((size_t)np);
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      trianglesOnEdge[edgeKey(level.triangles[(size_t)3*t + j], level.triangles[(size_t)3*t + (j + 1)%3])].push_back(t);
+      aroundPoint[(size_t)level.triangles[(size_t)3*t + j]].push_back(t);
+    }
+  }
+  // A hole is a connected patch of dropped triangles (across edges) that
+  // does not reach the level's own boundary and is small: a larger one is
+  // the level over a structured island inside the junction zone, which
+  // has a zone loop of its own (islands under 50 triangles were given to
+  // the zone by the classification). Labelled as components in one pass:
+  // a flood per seed with a limit left its aborted floods' triangles as
+  // walls for the next, and reported junction-owned patches beside the
+  // eroded band as holes (measured 2026-09-29 on the 178k model: 262
+  // "holes" at the first level, and the erosion, told they were holes,
+  // opened the piece at them).
+  const ll maxHoleTriangles = 24;
+  auto findHoles = [&](std::vector<unsigned char> &holePatch, std::vector<std::vector<ll> > *patches) -> ll
+  {
+    holePatch.assign((size_t)nt, 0);
+    std::vector<ll> component((size_t)nt, -1);
+    ll numHoles = 0;
+    for (ll seed = 0; seed < nt; seed++)
+    {
+      if (keep[(size_t)seed] || component[(size_t)seed] >= 0) continue;
+      std::vector<ll> patch, stack;
+      stack.push_back(seed);
+      component[(size_t)seed] = seed;
+      bool open = false;
+      while (!stack.empty())
+      {
+        const ll t = stack.back();
+        stack.pop_back();
+        patch.push_back(t);
+        for (int j = 0; j < 3; j++)
+        {
+          const std::vector<ll> &on = trianglesOnEdge[edgeKey(level.triangles[(size_t)3*t + j], level.triangles[(size_t)3*t + (j + 1)%3])];
+          if (on.size() < 2) open = true;   // the level's own boundary
+          for (size_t m = 0; m < on.size(); m++)
+          {
+            const ll u = on[m];
+            if (u == t || keep[(size_t)u] || component[(size_t)u] >= 0) continue;
+            component[(size_t)u] = seed;
+            stack.push_back(u);
+          }
+        }
+      }
+      if (open || (ll)patch.size() > maxHoleTriangles) continue;
+      numHoles++;
+      for (size_t m = 0; m < patch.size(); m++) holePatch[(size_t)patch[m]] = 1;
+      if (patches != nullptr) patches->push_back(patch);
+    }
+    return numHoles;
+  };
+  std::vector<unsigned char> holePatch;
+  findHoles(holePatch, nullptr);
+  // a dropped hole triangle around the point, if any
+  auto holeAt = [&](ll v) -> ll
+  {
+    const std::vector<ll> &around = aroundPoint[(size_t)v];
+    for (size_t m = 0; m < around.size(); m++) if (!keep[(size_t)around[m]] && holePatch[(size_t)around[m]]) return around[m];
+    return -1;
+  };
+  // a hole opened to the boundary is a hole no more
+  auto openHole = [&](ll t)
+  {
+    std::vector<ll> stack(1, t);
+    holePatch[(size_t)t] = 0;
+    while (!stack.empty())
+    {
+      const ll u = stack.back();
+      stack.pop_back();
       for (int j = 0; j < 3; j++)
       {
-        const std::vector<ll> &around = incident[(size_t)level.triangles[(size_t)3*t + j]];
-        for (size_t m = 0; m < around.size(); m++)
+        const std::vector<ll> &on = trianglesOnEdge[edgeKey(level.triangles[(size_t)3*u + j], level.triangles[(size_t)3*u + (j + 1)%3])];
+        for (size_t m = 0; m < on.size(); m++)
         {
-          if (keep[(size_t)around[m]]) { keep[(size_t)around[m]] = 0; report.numEroded++; }
+          const ll w = on[m];
+          if (w != u && !keep[(size_t)w] && holePatch[(size_t)w]) { holePatch[(size_t)w] = 0; stack.push_back(w); }
         }
+      }
+    }
+  };
+  auto mayGo = [&](ll t, ll &holeOpened) -> bool
+  {
+    ll opposite;
+    holeOpened = -1;
+    int n = boundaryEdges(t, opposite);
+    if (n == 0) return false;
+    if (n == 1)
+    {
+      if (boundaryDegree[(size_t)opposite] == 0) return true;
+      holeOpened = holeAt(opposite);
+      return holeOpened >= 0;
+    }
+    return true;
+  };
+  auto drop = [&](ll t)
+  {
+    keep[(size_t)t] = 0;
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = level.triangles[(size_t)3*t + j], b = level.triangles[(size_t)3*t + (j + 1)%3];
+      int &c = edgeCount[edgeKey(a, b)];
+      if (c == 2) { boundaryDegree[(size_t)a]++; boundaryDegree[(size_t)b]++; }
+      else if (c == 1) { boundaryDegree[(size_t)a]--; boundaryDegree[(size_t)b]--; }
+      c--;
+    }
+  };
+  // 2. erosion: the rows of kept triangles along the boundary go, one row
+  // per ring, each triangle on its own where it may
+  for (int ring = 0; ring < erosionRings; ring++)
+  {
+    std::vector<ll> row;
+    for (ll t = 0; t < nt; t++)
+    {
+      ll opposite;
+      if (keep[(size_t)t] && boundaryEdges(t, opposite) > 0) row.push_back(t);
+    }
+    for (size_t m = 0; m < row.size(); m++)
+    {
+      ll holeOpened;
+      if (keep[(size_t)row[m]] && mayGo(row[m], holeOpened))
+      {
+        drop(row[m]);
+        report.numEroded++;
+        if (holeOpened >= 0) openHole(holeOpened);
       }
     }
   }
   // 3. whatever passes through the prism zone's surface at this level
+  std::vector<unsigned char> droppedForCrossing((size_t)nt, 0);
   if (!guardTriangles.empty())
   {
     for (int pass = 0; pass < 4; pass++)
@@ -3670,7 +3901,15 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
       for (size_t m = 0; m < which.size(); m++)
       {
         size_t c = (size_t)numGuard + m;
-        if (c < crossing.size() && crossing[c]) { keep[(size_t)which[m]] = 0; dropped++; }
+        // a crossing triangle has to go whatever it does to the boundary
+        if (c < crossing.size() && crossing[c]) { drop(which[m]); droppedForCrossing[(size_t)which[m]] = 1; dropped++; }
+      }
+      if (crossingGuards != nullptr)
+      {
+        for (ll g = 0; g < numGuard && (size_t)g < crossing.size(); g++)
+        {
+          if (crossing[(size_t)g]) crossingGuards->push_back(g);
+        }
       }
       report.numCrossing += dropped;
       if (numCrossing == 0 || dropped == 0) break;
@@ -3680,30 +3919,120 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
   // shares is a notch in the boundary
   for (int pass = 0; pass < earPasses; pass++)
   {
-    std::map<std::pair<ll, ll>, int> edgeCount;
-    for (ll t = 0; t < nt; t++)
-    {
-      if (!keep[(size_t)t]) continue;
-      for (int j = 0; j < 3; j++)
-      {
-        ll a = level.triangles[(size_t)3*t + j], b = level.triangles[(size_t)3*t + (j + 1)%3];
-        edgeCount[std::make_pair(std::min(a, b), std::max(a, b))]++;
-      }
-    }
     ll dropped = 0;
     for (ll t = 0; t < nt; t++)
     {
-      if (!keep[(size_t)t]) continue;
-      int onBoundary = 0;
-      for (int j = 0; j < 3; j++)
-      {
-        ll a = level.triangles[(size_t)3*t + j], b = level.triangles[(size_t)3*t + (j + 1)%3];
-        if (edgeCount[std::make_pair(std::min(a, b), std::max(a, b))] == 1) onBoundary++;
-      }
-      if (onBoundary >= 2) { keep[(size_t)t] = 0; dropped++; }
+      ll opposite;
+      if (keep[(size_t)t] && boundaryEdges(t, opposite) >= 2) { drop(t); dropped++; }
     }
     report.numEars += dropped;
     if (dropped == 0) break;
+  }
+  // 5. pinches: a point with more than one fan of kept triangles around it
+  // is one the piece's boundary passes twice, and the boundary cannot be
+  // followed as chains through it (a chain of six points closed on itself
+  // at such a point was reported as one no zone loop takes, 2026-09-29,
+  // the 178k model); all but the largest fan go
+  for (;;)
+  {
+    ll numPinchedNow = 0;
+    for (ll p = 0; p < np; p++)
+    {
+      const std::vector<ll> &around = aroundPoint[(size_t)p];
+      std::vector<ll> kept;
+      for (size_t m = 0; m < around.size(); m++) if (keep[(size_t)around[m]]) kept.push_back(around[m]);
+      if (kept.size() < 2) continue;
+      std::map<ll, ll> firstAt;
+      std::vector<ll> parent(kept.size());
+      for (size_t m = 0; m < parent.size(); m++) parent[m] = (ll)m;
+      std::function<ll(ll)> root = [&](ll a) -> ll { while (parent[(size_t)a] != a) { parent[(size_t)a] = parent[(size_t)parent[(size_t)a]]; a = parent[(size_t)a]; } return a; };
+      for (size_t m = 0; m < kept.size(); m++)
+      {
+        const ll *tt = &level.triangles[(size_t)3*kept[m]];
+        for (int j = 0; j < 3; j++)
+        {
+          if (tt[j] == p) continue;
+          std::map<ll, ll>::iterator at = firstAt.find(tt[j]);
+          if (at == firstAt.end()) firstAt[tt[j]] = (ll)m;
+          else parent[(size_t)root((ll)m)] = root(at->second);
+        }
+      }
+      std::map<ll, ll> fanSize;
+      for (size_t m = 0; m < kept.size(); m++) fanSize[root((ll)m)]++;
+      if (fanSize.size() < 2) continue;
+      ll largest = -1, largestSize = 0;
+      for (std::map<ll, ll>::iterator it = fanSize.begin(); it != fanSize.end(); ++it) if (it->second > largestSize) { largestSize = it->second; largest = it->first; }
+      for (size_t m = 0; m < kept.size(); m++)
+      {
+        if (root((ll)m) == largest) continue;
+        drop(kept[m]);
+        report.numPinchTriangles++;
+      }
+      numPinchedNow++;
+    }
+    report.numPinches += numPinchedNow;
+    if (numPinchedNow == 0) break;
+  }
+  // 6. scraps: a kept component of fewer than a dozen triangles (a few
+  // junction-owned triangles cut off by the ownership and the erosion; a
+  // strip of three, or a fan whose middle triangles the erosion keeps as
+  // necks) has a boundary chain no zone loop is zipped to, and would be
+  // reported as a chain no loop takes (measured 2026-09-29 on the 178k
+  // model: chains of five and six points at a junction of two vessels
+  // 0.1 thick, walking along the vessel as the zone was widened for them)
+  {
+    const ll minComponent = 12;
+    std::vector<ll> component((size_t)nt, -1);
+    for (ll seed = 0; seed < nt; seed++)
+    {
+      if (!keep[(size_t)seed] || component[(size_t)seed] >= 0) continue;
+      std::vector<ll> patch, stack;
+      stack.push_back(seed);
+      component[(size_t)seed] = seed;
+      while (!stack.empty())
+      {
+        const ll t = stack.back();
+        stack.pop_back();
+        patch.push_back(t);
+        for (int j = 0; j < 3; j++)
+        {
+          const std::vector<ll> &on = trianglesOnEdge[edgeKey(level.triangles[(size_t)3*t + j], level.triangles[(size_t)3*t + (j + 1)%3])];
+          for (size_t m = 0; m < on.size(); m++)
+          {
+            const ll u = on[m];
+            if (u == t || !keep[(size_t)u] || component[(size_t)u] >= 0) continue;
+            component[(size_t)u] = seed;
+            stack.push_back(u);
+          }
+        }
+      }
+      if ((ll)patch.size() >= minComponent) continue;
+      for (size_t m = 0; m < patch.size(); m++) drop(patch[m]);
+      report.numScraps++;
+      report.numScrapTriangles += (ll)patch.size();
+    }
+  }
+  // 7. the holes left (the ownership's islands deeper inside the piece
+  // than the erosion reaches, and what the crossing check dropped inside
+  // it; measured 2026-09-29 on the 178k model, a hole of five points in
+  // the layer 2 piece over a junction of two vessels 0.1 thick) would
+  // leave the shell open. Restoring a patch puts it back over or through
+  // the prism layers (tried: 126 crossings on the synthetic junction), so
+  // instead the structured triangles that own it are reported, for the
+  // junction zone to take them and the shell to be built again.
+  {
+    std::vector<std::vector<ll> > patches;
+    report.numHoles = findHoles(holePatch, &patches);
+    for (size_t p = 0; p < patches.size(); p++)
+    {
+      report.numHoleTriangles += (ll)patches[p].size();
+      if (holeOwners == nullptr) continue;
+      for (size_t m = 0; m < patches[p].size(); m++)
+      {
+        const ll owner = ownerOf[(size_t)patches[p][m]];
+        if (owner >= 0 && owner < numInterfaceTriangles && structured[(size_t)owner]) holeOwners->push_back(owner);
+      }
+    }
   }
   // the piece, its points compacted
   std::vector<ll> newId((size_t)np, -1);
@@ -3729,6 +4058,66 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
   BoundaryChains(piece.triangles, chains, closed);
   report.numChains = (ll)chains.size();
   return 0;
+}
+
+//-------------------
+// WidenJunctionZone
+//-------------------
+long long WidenJunctionZone(const Interface &input, const std::vector<long long> &seedPoints,
+    const std::vector<long long> &seedTriangles, int rings, std::vector<unsigned char> &structured)
+{
+  const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
+  if (structured.size() != (size_t)nt) return 0;
+  std::vector<std::vector<ll> > incident((size_t)np);
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++) incident[(size_t)input.triangles[(size_t)3*t + j]].push_back(t);
+  }
+  ll numWidened = 0;
+  // the seeds: a seed triangle joins the junction zone; the junction
+  // triangles at a seed point are the seeds there (the loop's own region)
+  std::vector<unsigned char> seed((size_t)nt, 0);
+  for (size_t m = 0; m < seedTriangles.size(); m++)
+  {
+    const ll t = seedTriangles[m];
+    if (t < 0 || t >= nt) continue;
+    if (structured[(size_t)t]) { structured[(size_t)t] = 0; numWidened++; }
+    seed[(size_t)t] = 1;
+  }
+  for (size_t m = 0; m < seedPoints.size(); m++)
+  {
+    const ll p = seedPoints[m];
+    if (p < 0 || p >= np) continue;
+    for (size_t q = 0; q < incident[(size_t)p].size(); q++)
+    {
+      const ll t = incident[(size_t)p][q];
+      if (!structured[(size_t)t]) seed[(size_t)t] = 1;
+    }
+  }
+  // grown by the rings from the seeds alone (growing their whole regions
+  // widened 5,551 triangles at 158 seeds on the 178k model)
+  for (int ring = 0; ring < rings; ring++)
+  {
+    std::vector<unsigned char> before = seed;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (!before[(size_t)t]) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+        for (size_t q = 0; q < around.size(); q++)
+        {
+          const ll u = around[q];
+          if (structured[(size_t)u]) { structured[(size_t)u] = 0; seed[(size_t)u] = 1; numWidened++; }
+        }
+      }
+    }
+  }
+  // two regions the widening made touch at a point
+  ll numPinches = 0, numPinched = 0;
+  OpenPinches(input, incident, structured, numPinches, numPinched);
+  numWidened += numPinched;
+  return numWidened;
 }
 
 //----------------
@@ -3822,8 +4211,10 @@ void BoundaryChains(const std::vector<long long> &triangles, std::vector<std::ve
 // ZipChains
 //-----------
 int ZipChains(const std::vector<double> &points, const std::vector<long long> &chainA,
-    const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error)
+    const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error,
+    double *agreementOut)
 {
+  if (agreementOut != nullptr) *agreementOut = 0.0;
   const size_t nA = chainA.size(), nB = chainB.size();
   if (nA < 2 || nB < 2)
   {
@@ -3866,6 +4257,7 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
       Sub(at(B(nearest + 1)), at(B(nearest)), db);
       agreement += Dot(da, db);
     }
+    if (agreementOut != nullptr) *agreementOut = agreement;
     if (agreement < 0.0)
     {
       error = "the two chains to zip run against each other";
@@ -3909,8 +4301,10 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
     error = "the junction shell needs one level surface and fraction per layer of the prism mesh, and a zone flag per interface triangle";
     return 1;
   }
+  // The shell is built over the prism mesh's points followed by the pieces',
+  // and compacted at the end.
   out.points = prisms.points;
-  out.numPrismPoints = (ll)(prisms.points.size()/3);
+  const ll numPrismPoints = (ll)(prisms.points.size()/3);
   // 1. the zone's interface triangles, reversed to face out of the wall's volume
   {
     std::map<std::pair<ll, ll>, int> edgeCount;
@@ -3963,7 +4357,16 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
   std::vector<std::vector<ll> > loops;
   {
     std::map<ll, ll> next;
-    for (size_t e = 0; e + 1 < prisms.zoneBoundaryEdges.size(); e += 2) next[prisms.zoneBoundaryEdges[e]] = prisms.zoneBoundaryEdges[e + 1];
+    for (size_t e = 0; e + 1 < prisms.zoneBoundaryEdges.size(); e += 2)
+    {
+      const ll a = prisms.zoneBoundaryEdges[e];
+      if (next.count(a))
+      {
+        error = "the prism zone's boundary passes twice through the point at (" + std::to_string(input.points[(size_t)3*a]) + ", " + std::to_string(input.points[(size_t)3*a + 1]) + ", " + std::to_string(input.points[(size_t)3*a + 2]) + "), a pinch the classification should have opened";
+        return 1;
+      }
+      next[a] = prisms.zoneBoundaryEdges[e + 1];
+    }
     std::set<ll> used;
     for (std::map<ll, ll>::iterator it = next.begin(); it != next.end(); ++it)
     {
@@ -3971,23 +4374,43 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       std::vector<ll> loop;
       ll cur = it->first;
       while (!used.count(cur)) { used.insert(cur); loop.push_back(cur); cur = next[cur]; }
+      if (cur != it->first || loop.size() < 3)
+      {
+        error = "the prism zone's boundary does not close into a loop at (" + std::to_string(input.points[(size_t)3*cur]) + ", " + std::to_string(input.points[(size_t)3*cur + 1]) + ", " + std::to_string(input.points[(size_t)3*cur + 2]) + ")";
+        return 1;
+      }
       std::reverse(loop.begin(), loop.end());
       loops.push_back(loop);
     }
   }
   // 3. every level: the piece and its strips
-  out.pieceBase.assign((size_t)numLayers, 0);
   out.pieces.assign((size_t)numLayers, ZonePieceReport());
+  std::vector<ll> structuredIds;
+  for (ll t = 0; t < nt; t++) if (structured[(size_t)t]) structuredIds.push_back(t);
   for (int k = 1; k <= numLayers; k++)
   {
     Surface piece;
+    std::vector<ll> crossingGuards, holeOwners;
     if (TrimSurfaceToZone(levels[(size_t)k - 1], fractions[(size_t)k - 1], field, nt, structured, rimStructured, erosionRings,
-          prisms.points, prisms.layerTriangles[(size_t)k - 1], earPasses, piece, out.pieces[(size_t)k - 1], error) != 0)
+          prisms.points, prisms.layerTriangles[(size_t)k - 1], earPasses, piece, out.pieces[(size_t)k - 1], error, &crossingGuards, &holeOwners) != 0)
     {
       return 1;
     }
+    out.holeOwnerTriangles.insert(out.holeOwnerTriangles.end(), holeOwners.begin(), holeOwners.end());
+    std::sort(out.holeOwnerTriangles.begin(), out.holeOwnerTriangles.end());
+    out.holeOwnerTriangles.erase(std::unique(out.holeOwnerTriangles.begin(), out.holeOwnerTriangles.end()), out.holeOwnerTriangles.end());
+    // the structured triangles whose layer surface the piece passed through: the layer's triangles are one per structured triangle, in order
+    if (prisms.layerTriangles[(size_t)k - 1].size() == 3*structuredIds.size())
+    {
+      for (size_t m = 0; m < crossingGuards.size(); m++)
+      {
+        const ll g = crossingGuards[m];
+        if (g >= 0 && (size_t)g < structuredIds.size()) out.crossingStructuredTriangles.push_back(structuredIds[(size_t)g]);
+      }
+      std::sort(out.crossingStructuredTriangles.begin(), out.crossingStructuredTriangles.end());
+      out.crossingStructuredTriangles.erase(std::unique(out.crossingStructuredTriangles.begin(), out.crossingStructuredTriangles.end()), out.crossingStructuredTriangles.end());
+    }
     const ll base = (ll)(out.points.size()/3);
-    out.pieceBase[(size_t)k - 1] = base;
     out.points.insert(out.points.end(), piece.points.begin(), piece.points.end());
     const int marker = (k == numLayers) ? 2 : 100 + k;
     for (size_t i = 0; i + 2 < piece.triangles.size(); i += 3)
@@ -3998,56 +4421,194 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
     std::vector<std::vector<ll> > chains;
     std::vector<unsigned char> closed;
     BoundaryChains(piece.triangles, chains, closed);
-    std::vector<unsigned char> chainUsed(chains.size(), 0);
+    // The loops lifted to the layer, and each one's mean edge, the scale
+    // its chain has to be found within.
+    std::vector<std::vector<ll> > lifted(loops.size());
+    std::vector<double> loopEdge(loops.size(), 0.0);
     for (size_t a = 0; a < loops.size(); a++)
     {
-      std::vector<ll> A;
       for (size_t m = 0; m < loops[a].size(); m++)
       {
         ll id = prisms.layerPoint[(size_t)(k - 1)*(size_t)np + (size_t)loops[a][m]];
         if (id < 0) { error = "a zone boundary point has no layer point"; return 1; }
-        A.push_back(id);
+        lifted[a].push_back(id);
       }
-      // the nearest closed chain of the piece, by the sum over A of the distance to the chain
-      size_t bestB = chains.size();
-      double best = std::numeric_limits<double>::max();
+      for (size_t m = 0; m < lifted[a].size(); m++)
+        loopEdge[a] += Distance(&out.points[(size_t)3*lifted[a][m]], &out.points[(size_t)3*lifted[a][(m + 1)%lifted[a].size()]])/(double)lifted[a].size();
+    }
+    // Each loop's chain is the piece's boundary a ring or two away from
+    // it (the ownership boundary lifted, less the erosion and the ears), so
+    // the pairs are taken nearest first over all loops and chains, by the
+    // mean over the loop of the distance to the chain, and a loop whose
+    // nearest chain is farther than a few of its edges has none: pairing
+    // each loop in turn with whatever chain was nearest gave a loop whose
+    // chain was missing another loop's chain, twenty edges away and
+    // running the other way (the 178k model, 2026-09-29).
+    std::vector<std::vector<double> > meanDistance(loops.size(), std::vector<double>(chains.size(), std::numeric_limits<double>::max()));
+    for (size_t a = 0; a < loops.size(); a++)
+    {
       for (size_t b = 0; b < chains.size(); b++)
       {
-        if (!closed[b] || chainUsed[b]) continue;
+        if (!closed[b]) continue;
         double d = 0.0;
-        for (size_t m = 0; m < A.size(); m++)
+        for (size_t m = 0; m < lifted[a].size(); m++)
         {
           double dm = std::numeric_limits<double>::max();
-          for (size_t q = 0; q < chains[b].size(); q++) dm = std::min(dm, Distance(&out.points[(size_t)3*A[m]], &piece.points[(size_t)3*chains[b][q]]));
+          for (size_t q = 0; q < chains[b].size(); q++) dm = std::min(dm, Distance(&out.points[(size_t)3*lifted[a][m]], &piece.points[(size_t)3*chains[b][q]]));
           d += dm;
         }
-        if (d < best) { best = d; bestB = b; }
+        meanDistance[a][b] = d/(double)lifted[a].size();
       }
-      if (bestB == chains.size())
+    }
+    const double reach = 2.0*erosionRings + 4.0;   // in loop edges
+    std::vector<ll> chainOfLoop(loops.size(), -1);
+    std::vector<unsigned char> chainUsed(chains.size(), 0);
+    for (;;)
+    {
+      size_t bestA = loops.size(), bestB = chains.size();
+      double best = std::numeric_limits<double>::max();
+      for (size_t a = 0; a < loops.size(); a++)
       {
-        error = "a zone boundary loop at layer " + std::to_string(k) + " found no closed boundary chain of the layer surface's piece to zip to";
+        if (chainOfLoop[a] >= 0) continue;
+        for (size_t b = 0; b < chains.size(); b++)
+        {
+          if (chainUsed[b] || !closed[b]) continue;
+          if (meanDistance[a][b] < best) { best = meanDistance[a][b]; bestA = a; bestB = b; }
+        }
+      }
+      if (bestA == loops.size() || best > reach*loopEdge[bestA]) break;
+      chainOfLoop[bestA] = (ll)bestB;
+      chainUsed[bestB] = 1;
+    }
+    for (size_t a = 0; a < loops.size(); a++)
+    {
+      if (chainOfLoop[a] >= 0) continue;
+      double c[3] = {0.0, 0.0, 0.0};
+      for (size_t m = 0; m < lifted[a].size(); m++) for (int j = 0; j < 3; j++) c[j] += out.points[(size_t)3*lifted[a][m] + j]/(double)lifted[a].size();
+      double nearest = std::numeric_limits<double>::max();
+      for (size_t b = 0; b < chains.size(); b++) nearest = std::min(nearest, meanDistance[a][b]);
+      error = "a zone boundary loop of " + std::to_string(lifted[a].size()) + " points around (" + std::to_string(c[0]) + ", " + std::to_string(c[1]) + ", " + std::to_string(c[2]) + ") at layer " + std::to_string(k) + " has no boundary chain of the layer surface's piece within " + std::to_string(reach*loopEdge[a]) + " (the nearest one is " + std::to_string(nearest) + " away on average)";
+      out.failedLoopPoints = loops[a];
+      return 1;
+    }
+    for (size_t b = 0; b < chains.size(); b++)
+    {
+      if (chainUsed[b]) continue;
+      double c[3] = {0.0, 0.0, 0.0};
+      for (size_t q = 0; q < chains[b].size(); q++) for (int j = 0; j < 3; j++) c[j] += piece.points[(size_t)3*chains[b][q] + j]/(double)chains[b].size();
+      // A short closed chain no loop takes is closed with a fan from its
+      // centre: measured 2026-09-29 on the 178k model, chains of five and
+      // six points in the layer 2 piece over a stretch where two vessels
+      // 0.1 thick run against each other, more than two units from any
+      // zone loop, on a boundary of the piece with a large dropped region
+      // beyond (the mouth of a tunnel between the two walls, which the fan
+      // bridges with wall).
+      const size_t maxCapPoints = 12;
+      if (closed[b] && chains[b].size() <= maxCapPoints)
+      {
+        const ll centre = (ll)(out.points.size()/3);
+        out.points.insert(out.points.end(), c, c + 3);
+        // the fan winds as the piece's boundary does: the chain traverses
+        // its edges as the piece's triangles do, so (a, b, centre) faces
+        // the other way; (b, a, centre) faces as the piece does
+        for (size_t q = 0; q < chains[b].size(); q++)
+        {
+          const ll a = chains[b][q] + base, bb = chains[b][(q + 1)%chains[b].size()] + base;
+          out.triangles.push_back(bb); out.triangles.push_back(a); out.triangles.push_back(centre);
+          out.markers.push_back(marker);
+        }
+        out.numCappedChains++;
+        out.numCapTriangles += (ll)chains[b].size();
+        chainUsed[b] = 1;
+        continue;
+      }
+      error = "the layer " + std::to_string(k) + " surface's piece has a boundary chain of " + std::to_string(chains[b].size()) + " points around (" + std::to_string(c[0]) + ", " + std::to_string(c[1]) + ", " + std::to_string(c[2]) + ") that no zone loop takes" + (closed[b] ? "" : " (it is open)");
+      // the structured triangles owning or passing through the piece near
+      // the chain: within four thicknesses and two edges of its centre (the
+      // chain lies on a level at most one thickness above them)
+      std::vector<ll> candidates(out.crossingStructuredTriangles);
+      candidates.insert(candidates.end(), out.holeOwnerTriangles.begin(), out.holeOwnerTriangles.end());
+      for (size_t m = 0; m < candidates.size(); m++)
+      {
+        const ll t = candidates[m];
+        const ll *tt = &input.triangles[(size_t)3*t];
+        double centre[3] = {0.0, 0.0, 0.0}, thickness = 0.0;
+        for (int j = 0; j < 3; j++)
+        {
+          for (int q = 0; q < 3; q++) centre[q] += input.points[(size_t)3*tt[j] + q]/3.0;
+          thickness += input.thickness[(size_t)tt[j]]/3.0;
+        }
+        double edge = 0.0;
+        for (int j = 0; j < 3; j++) edge += Distance(&input.points[(size_t)3*tt[j]], &input.points[(size_t)3*tt[(j + 1)%3]])/3.0;
+        if (Distance(centre, c) < 4.0*thickness + 2.0*edge) out.failedTriangles.push_back(t);
+      }
+      std::sort(out.failedTriangles.begin(), out.failedTriangles.end());
+      out.failedTriangles.erase(std::unique(out.failedTriangles.begin(), out.failedTriangles.end()), out.failedTriangles.end());
+      return 1;
+    }
+    for (size_t a = 0; a < loops.size(); a++)
+    {
+      const std::vector<ll> &A = lifted[a];
+      std::vector<ll> B;
+      for (size_t q = 0; q < chains[(size_t)chainOfLoop[a]].size(); q++) B.push_back(chains[(size_t)chainOfLoop[a]][q] + base);
+      std::vector<ll> strip;
+      ZipReport zip;
+      zip.level = k;
+      zip.loopPoints = (ll)A.size();
+      zip.chainPoints = (ll)B.size();
+      zip.meanDistance = meanDistance[a][(size_t)chainOfLoop[a]];
+      for (size_t m = 0; m < A.size(); m++) for (int j = 0; j < 3; j++) zip.centre[j] += out.points[(size_t)3*A[m] + j]/(double)A.size();
+      if (ZipChains(out.points, A, B, true, strip, error, &zip.agreement) != 0)
+      {
+        double c[3] = {0.0, 0.0, 0.0};
+        for (size_t m = 0; m < A.size(); m++) for (int j = 0; j < 3; j++) c[j] += out.points[(size_t)3*A[m] + j]/(double)A.size();
+        error += " (a loop of " + std::to_string(A.size()) + " points and a chain of " + std::to_string(B.size()) + " around (" + std::to_string(c[0]) + ", " + std::to_string(c[1]) + ", " + std::to_string(c[2]) + ") at layer " + std::to_string(k) + ")";
         return 1;
       }
-      chainUsed[bestB] = 1;
-      std::vector<ll> B;
-      for (size_t q = 0; q < chains[bestB].size(); q++) B.push_back(chains[bestB][q] + base);
-      std::vector<ll> strip;
-      if (ZipChains(out.points, A, B, true, strip, error) != 0) return 1;
+      zip.stripTriangles = (ll)(strip.size()/3);
+      zip.crossingTriangles = -(ll)(out.triangles.size()/3);   // where the strip starts; the count is filled in after the check below
       for (size_t i = 0; i + 2 < strip.size(); i += 3)
       {
         out.triangles.push_back(strip[i]); out.triangles.push_back(strip[i + 1]); out.triangles.push_back(strip[i + 2]);
         out.markers.push_back(marker);
       }
       out.numZipperTriangles += (ll)(strip.size()/3);
+      out.zips.push_back(zip);
     }
-    for (size_t b = 0; b < chains.size(); b++)
+  }
+  // the shell against itself: how many of its triangles pass through
+  // another, and how many of each strip's
+  {
+    std::vector<unsigned char> crossing;
+    double at[3];
+    out.numCrossingTriangles = svenvelope::CountCrossingTriangles(out.points, out.triangles, crossing, at);
+    for (size_t z = 0; z < out.zips.size(); z++)
     {
-      if (!chainUsed[b])
-      {
-        error = "the layer " + std::to_string(k) + " surface's piece has a boundary chain of " + std::to_string(chains[b].size()) + " points that no zone loop takes";
-        return 1;
-      }
+      const ll first = -out.zips[z].crossingTriangles;
+      ll n = 0;
+      for (ll i = first; i < first + out.zips[z].stripTriangles && (size_t)i < crossing.size(); i++) if (crossing[(size_t)i]) n++;
+      out.zips[z].crossingTriangles = n;
     }
+  }
+  // 4. compact the points to those used
+  {
+    const ll numAll = (ll)(out.points.size()/3);
+    std::vector<ll> newId((size_t)numAll, -1);
+    std::vector<double> compact;
+    std::vector<ll> origin;
+    for (size_t i = 0; i < out.triangles.size(); i++)
+    {
+      ll v = out.triangles[i];
+      if (newId[(size_t)v] < 0)
+      {
+        newId[(size_t)v] = (ll)(compact.size()/3);
+        compact.insert(compact.end(), &out.points[(size_t)3*v], &out.points[(size_t)3*v] + 3);
+        origin.push_back(v < numPrismPoints ? v : -1);
+      }
+      out.triangles[i] = newId[(size_t)v];
+    }
+    out.points.swap(compact);
+    out.prismPoint.swap(origin);
   }
   return 0;
 }

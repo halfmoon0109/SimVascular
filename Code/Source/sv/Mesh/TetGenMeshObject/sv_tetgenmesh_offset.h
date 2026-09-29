@@ -423,7 +423,11 @@ struct ZoneOptions
   // The junction zone grows by this many rings of triangles (sharing a
   // point) around what the checks reject, so that the tetrahedra have room
   // and the zipper between the two zones' surfaces stays off the trouble.
-  int marginRings = 2;
+  // Three rather than two since the 178k model (2026-09-29): the piece of
+  // a layer surface over the annular junction of a thin branch on a thick
+  // parent was two triangles wide with two, too narrow to keep its shape
+  // through the erosion.
+  int marginRings = 3;
   // A structured island of fewer triangles than this joins the junction zone.
   long long minIsland = 50;
 };
@@ -439,6 +443,8 @@ struct ZoneReport
   long long numTrianglesMargin = 0;        // added to the junction zone by the margin rings
   long long numIslands = 0;                // structured islands too small to keep
   long long numIslandTriangles = 0;
+  long long numPinches = 0;                // points the zone boundary passed through twice, opened up
+  long long numTrianglesPinched = 0;       // given to the junction zone at them
   long long numJunctionRegions = 0;        // connected pieces of the junction zone
   long long numEvaluations = 0;
 };
@@ -510,6 +516,12 @@ struct ZonePieceReport
   long long numEroded = 0;             // dropped: within the erosion rings of a dropped triangle
   long long numCrossing = 0;           // dropped: passing through the prism zone's layer surface
   long long numEars = 0;               // dropped: on two boundary edges, so that the boundary the zipper follows is not jagged
+  long long numHoles = 0;              // dropped patches enclosed by kept triangles: a hole in the piece leaves the shell open, so the prisms that own or pass through it have to go to the junction zone
+  long long numHoleTriangles = 0;      // in them
+  long long numScraps = 0;             // dropped: kept pieces of fewer than a dozen triangles, which no zone loop could be zipped to
+  long long numScrapTriangles = 0;
+  long long numPinches = 0;            // points where the piece's boundary passed twice (two fans of kept triangles around them), opened by dropping all but the largest fan
+  long long numPinchTriangles = 0;
   long long numKept = 0;
   long long numChains = 0;             // boundary chains of the piece
 };
@@ -533,7 +545,8 @@ struct ZonePieceReport
 int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &field, long long numInterfaceTriangles,
     const std::vector<unsigned char> &structured, const std::vector<unsigned char> &rimStructured, int erosionRings,
     const std::vector<double> &guardPoints, const std::vector<long long> &guardTriangles, int earPasses,
-    Surface &piece, ZonePieceReport &report, std::string &error);
+    Surface &piece, ZonePieceReport &report, std::string &error,
+    std::vector<long long> *crossingGuards = nullptr, std::vector<long long> *holeOwners = nullptr);
 
 /**
  * @brief The boundary of a triangle set as chains of point ids, each in the
@@ -557,7 +570,8 @@ void BoundaryChains(const std::vector<long long> &triangles, std::vector<std::ve
  * @return 0 on success, 1 with error set otherwise.
  */
 int ZipChains(const std::vector<double> &points, const std::vector<long long> &chainA,
-    const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error);
+    const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error,
+    double *agreement = nullptr);
 
 /**
  * @brief The closed surface around the junction zone's volume (section 8
@@ -567,17 +581,38 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
  * the prism mesh's (the interface and its layer points, in its order)
  * followed by the pieces' at each level.
  */
+// One zipper strip of the junction shell: a zone boundary loop at a layer
+// and the piece chain it was zipped to, for the log.
+struct ZipReport
+{
+  int level = 0;
+  double centre[3] = {0.0, 0.0, 0.0};   // of the lifted loop
+  long long loopPoints = 0;
+  long long chainPoints = 0;
+  double meanDistance = 0.0;            // from the loop's points to the chain
+  double agreement = 0.0;               // of the two chains' directions (ZipChains), positive when they run the same way
+  long long stripTriangles = 0;
+  long long crossingTriangles = 0;      // of the strip's, passing through another shell triangle
+};
+
 struct JunctionShell
 {
-  std::vector<double> points;
+  std::vector<double> points;            // only the points the shell's triangles use
+  std::vector<long long> prismPoint;     // per shell point: its id in the prism mesh, -1 for a point of a layer surface's piece
   std::vector<long long> triangles;
   std::vector<int> markers;              // per triangle: 1 the interface, 2 the outer surface, 100+k the layer k surface, 300+k the prism zone's wall at layer k
-  long long numPrismPoints = 0;          // the prism mesh's points come first
-  std::vector<long long> pieceBase;      // [k-1]: where level k's piece points start
   std::vector<ZonePieceReport> pieces;   // [k-1]
+  std::vector<ZipReport> zips;           // one per loop and level
+  long long numCappedChains = 0;         // short boundary chains of the pieces that no zone loop takes (a tunnel's mouth where two walls nearly touch, or a hole left by the trim), closed with a fan of triangles each
+  long long numCapTriangles = 0;
+  long long numCrossingTriangles = 0;    // shell triangles passing through another (svenvelope::CountCrossingTriangles over the whole shell)
   long long numZipperTriangles = 0;
   long long numJunctionTriangles = 0;    // interface triangles of the zone
   long long numJunctionOnRims = 0;       // of them, on a cap rim: not handled yet, the build refuses them
+  std::vector<long long> failedLoopPoints;   // when the build fails for a zone boundary loop without a piece chain: the loop's interface points, for WidenJunctionZone
+  std::vector<long long> crossingStructuredTriangles;   // structured interface triangles whose layer surface passed through a piece at some level (the piece's triangles there were dropped, which can leave a hole in it)
+  std::vector<long long> holeOwnerTriangles;   // structured interface triangles owning a triangle of a hole in a piece (a dropped patch enclosed by kept ones) at some level
+  std::vector<long long> failedTriangles;    // when the build fails for a piece chain no loop takes (a hole): the structured triangles owning or passing through the piece near it, for WidenJunctionZone
 };
 
 /**
@@ -585,9 +620,31 @@ struct JunctionShell
  * come in the order of the layers (the last is the outer surface), already
  * trimmed at the caps; each is trimmed to the zone (TrimSurfaceToZone) and
  * zipped to the prism zone's ring at its layer. A junction zone touching a
- * cap rim is refused for now.
+ * cap rim is refused for now. The shell's points are compacted to those its
+ * triangles use, with prismPoint saying which are the prism mesh's (the
+ * zone's interface points and the walls' layer points), so that the mesher
+ * is not handed the whole prism zone's points.
  * @return 0 on success, 1 with error set otherwise.
  */
+/**
+ * @brief Widens the junction zone around the given interface points: the
+ * junction region they touch (junction triangles connected through shared
+ * points) grows by the given rings of triangles. For a zone boundary loop
+ * whose layer surface piece came out without a boundary chain of its own
+ * (a piece too narrow to keep its shape through the erosion, measured
+ * 2026-09-29 on the 178k model at a junction of two vessels 0.1 thick: one
+ * row wide at the upper levels with a margin of three rings), so that the
+ * next build has a wider piece there.
+ * @param seedPoints Interface points whose junction regions grow.
+ * @param seedTriangles Interface triangles given to the junction zone first
+ * (structured ones whose layer surface passed through a piece), whose
+ * regions then grow as well.
+ * @param structured Per interface triangle; the widened ones are cleared.
+ * @return How many triangles were given to the junction zone.
+ */
+long long WidenJunctionZone(const Interface &input, const std::vector<long long> &seedPoints,
+    const std::vector<long long> &seedTriangles, int rings, std::vector<unsigned char> &structured);
+
 int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
     int erosionRings, int earPasses, JunctionShell &out, std::string &error);
