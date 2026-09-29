@@ -45,6 +45,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <set>
 #include <queue>
 #include <unordered_map>
 
@@ -3466,6 +3467,7 @@ int BuildPrismLayers(const Interface &input, const std::vector<unsigned char> &s
   out.numLayers = numLayers;
   out.points = input.points;
   out.layerPoint.assign((size_t)np*(size_t)numLayers, -1);
+  out.layerTriangles.assign((size_t)numLayers, std::vector<ll>());
   // the layer point of interface point i at layer k (1..N), made when first asked for
   auto layerPointOf = [&](ll i, int k) -> ll
   {
@@ -3542,9 +3544,10 @@ int BuildPrismLayers(const Interface &input, const std::vector<unsigned char> &s
         addTet(b0, t1, b2, t2, k);
         addTet(b0, t1, t2, t0, k);
       }
+      // the layer's surface, facing away from the prism under it; the last is the top
+      orientedFace(t0, t1, t2, b0, out.layerTriangles[(size_t)k - 1]);
       if (k == numLayers)
       {
-        // the top, facing away from the prism (the base is behind it)
         orientedFace(t0, t1, t2, b0, out.topTriangles);
       }
     }
@@ -3574,6 +3577,318 @@ int BuildPrismLayers(const Interface &input, const std::vector<unsigned char> &s
         }
         if (!rim) { out.sideTriangleLayer.push_back(k); out.sideTriangleLayer.push_back(k); }
       }
+    }
+  }
+  return 0;
+}
+
+//-------------------
+// TrimSurfaceToZone
+//-------------------
+int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &field, long long numInterfaceTriangles,
+    const std::vector<unsigned char> &structured, const std::vector<unsigned char> &rimStructured, int erosionRings,
+    const std::vector<double> &guardPoints, const std::vector<long long> &guardTriangles, int earPasses,
+    Surface &piece, ZonePieceReport &report, std::string &error)
+{
+  report = ZonePieceReport();
+  piece = Surface();
+  const ll nt = (ll)(level.triangles.size()/3), np = (ll)(level.points.size()/3);
+  report.numTriangles = nt;
+  if (nt == 0)
+  {
+    return 0;
+  }
+  // 1. by ownership
+  std::vector<unsigned char> keep((size_t)nt, 0);
+  for (ll t = 0; t < nt; t++)
+  {
+    const ll *tt = &level.triangles[(size_t)3*t];
+    double c[3];
+    for (int k = 0; k < 3; k++) c[k] = (level.points[(size_t)3*tt[0] + k] + level.points[(size_t)3*tt[1] + k] + level.points[(size_t)3*tt[2] + k])/3.0;
+    ll owner = field.Owner(c, fraction);
+    bool ownerStructured;
+    if (owner < 0)
+    {
+      ownerStructured = false;
+    }
+    else if (owner < numInterfaceTriangles)
+    {
+      ownerStructured = structured[(size_t)owner] != 0;
+    }
+    else
+    {
+      double size, thickness;
+      ll rim;
+      field.Local(c, size, thickness, rim);
+      ownerStructured = (rim >= 0 && (size_t)rim < rimStructured.size()) ? rimStructured[(size_t)rim] != 0 : true;
+    }
+    if (ownerStructured) report.numStructuredOwned++;
+    else keep[(size_t)t] = 1;
+  }
+  // 2. erosion: the rings of kept triangles around a dropped one go too
+  std::vector<std::vector<ll> > incident((size_t)np);
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++) incident[(size_t)level.triangles[(size_t)3*t + j]].push_back(t);
+  }
+  for (int ring = 0; ring < erosionRings; ring++)
+  {
+    std::vector<unsigned char> before = keep;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (before[(size_t)t]) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        const std::vector<ll> &around = incident[(size_t)level.triangles[(size_t)3*t + j]];
+        for (size_t m = 0; m < around.size(); m++)
+        {
+          if (keep[(size_t)around[m]]) { keep[(size_t)around[m]] = 0; report.numEroded++; }
+        }
+      }
+    }
+  }
+  // 3. whatever passes through the prism zone's surface at this level
+  if (!guardTriangles.empty())
+  {
+    for (int pass = 0; pass < 4; pass++)
+    {
+      std::vector<double> pts(guardPoints);
+      std::vector<ll> tris(guardTriangles);
+      const ll numGuard = (ll)(guardTriangles.size()/3), base = (ll)(guardPoints.size()/3);
+      pts.insert(pts.end(), level.points.begin(), level.points.end());
+      std::vector<ll> which;
+      for (ll t = 0; t < nt; t++)
+      {
+        if (!keep[(size_t)t]) continue;
+        for (int j = 0; j < 3; j++) tris.push_back(level.triangles[(size_t)3*t + j] + base);
+        which.push_back(t);
+      }
+      std::vector<unsigned char> crossing;
+      double at[3];
+      ll numCrossing = svenvelope::CountCrossingTriangles(pts, tris, crossing, at);
+      ll dropped = 0;
+      for (size_t m = 0; m < which.size(); m++)
+      {
+        size_t c = (size_t)numGuard + m;
+        if (c < crossing.size() && crossing[c]) { keep[(size_t)which[m]] = 0; dropped++; }
+      }
+      report.numCrossing += dropped;
+      if (numCrossing == 0 || dropped == 0) break;
+    }
+  }
+  // 4. the ears: a kept triangle on two edges that no other kept triangle
+  // shares is a notch in the boundary
+  for (int pass = 0; pass < earPasses; pass++)
+  {
+    std::map<std::pair<ll, ll>, int> edgeCount;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (!keep[(size_t)t]) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        ll a = level.triangles[(size_t)3*t + j], b = level.triangles[(size_t)3*t + (j + 1)%3];
+        edgeCount[std::make_pair(std::min(a, b), std::max(a, b))]++;
+      }
+    }
+    ll dropped = 0;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (!keep[(size_t)t]) continue;
+      int onBoundary = 0;
+      for (int j = 0; j < 3; j++)
+      {
+        ll a = level.triangles[(size_t)3*t + j], b = level.triangles[(size_t)3*t + (j + 1)%3];
+        if (edgeCount[std::make_pair(std::min(a, b), std::max(a, b))] == 1) onBoundary++;
+      }
+      if (onBoundary >= 2) { keep[(size_t)t] = 0; dropped++; }
+    }
+    report.numEars += dropped;
+    if (dropped == 0) break;
+  }
+  // the piece, its points compacted
+  std::vector<ll> newId((size_t)np, -1);
+  for (ll t = 0; t < nt; t++)
+  {
+    if (!keep[(size_t)t]) continue;
+    report.numKept++;
+    for (int j = 0; j < 3; j++)
+    {
+      ll v = level.triangles[(size_t)3*t + j];
+      if (newId[(size_t)v] < 0)
+      {
+        newId[(size_t)v] = (ll)(piece.points.size()/3);
+        piece.points.insert(piece.points.end(), &level.points[(size_t)3*v], &level.points[(size_t)3*v] + 3);
+        if (level.pointRim.size() == (size_t)np) piece.pointRim.push_back(level.pointRim[(size_t)v]);
+      }
+      piece.triangles.push_back(newId[(size_t)v]);
+    }
+  }
+  piece.rims = level.rims;
+  std::vector<std::vector<ll> > chains;
+  std::vector<unsigned char> closed;
+  BoundaryChains(piece.triangles, chains, closed);
+  report.numChains = (ll)chains.size();
+  return 0;
+}
+
+//----------------
+// BoundaryChains
+//----------------
+void BoundaryChains(const std::vector<long long> &triangles, std::vector<std::vector<long long> > &chains,
+    std::vector<unsigned char> &closed)
+{
+  chains.clear();
+  closed.clear();
+  // the boundary edges, directed as the triangles traverse them
+  std::map<std::pair<ll, ll>, int> count;
+  for (size_t i = 0; i + 2 < triangles.size(); i += 3)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = triangles[i + j], b = triangles[i + (j + 1)%3];
+      count[std::make_pair(std::min(a, b), std::max(a, b))]++;
+    }
+  }
+  std::map<ll, std::vector<ll> > next;   // a -> the b's of boundary edges a -> b
+  std::map<ll, int> inDegree;
+  for (size_t i = 0; i + 2 < triangles.size(); i += 3)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = triangles[i + j], b = triangles[i + (j + 1)%3];
+      if (count[std::make_pair(std::min(a, b), std::max(a, b))] != 1) continue;
+      next[a].push_back(b);
+      inDegree[b]++;
+    }
+  }
+  std::set<std::pair<ll, ll> > used;
+  auto walk = [&](ll start, std::vector<ll> &chain)
+  {
+    chain.clear();
+    chain.push_back(start);
+    ll cur = start;
+    for (;;)
+    {
+      std::map<ll, std::vector<ll> >::iterator it = next.find(cur);
+      if (it == next.end() || it->second.size() != 1 || inDegree[cur] > 1) break;   // an end, or a point where chains meet
+      ll nxt = it->second[0];
+      if (used.count(std::make_pair(cur, nxt))) break;
+      used.insert(std::make_pair(cur, nxt));
+      chain.push_back(nxt);
+      cur = nxt;
+      if (cur == start) break;
+    }
+  };
+  // open chains first: from points with no incoming boundary edge, or where chains meet
+  for (std::map<ll, std::vector<ll> >::iterator it = next.begin(); it != next.end(); ++it)
+  {
+    ll a = it->first;
+    bool isStart = inDegree[a] == 0 || inDegree[a] > 1 || it->second.size() > 1;
+    if (!isStart) continue;
+    for (size_t m = 0; m < it->second.size(); m++)
+    {
+      ll b = it->second[m];
+      if (used.count(std::make_pair(a, b))) continue;
+      used.insert(std::make_pair(a, b));
+      std::vector<ll> chain;
+      walk(b, chain);
+      chain.insert(chain.begin(), a);
+      chains.push_back(chain);
+      closed.push_back(0);
+    }
+  }
+  // then the closed ones
+  for (std::map<ll, std::vector<ll> >::iterator it = next.begin(); it != next.end(); ++it)
+  {
+    ll a = it->first;
+    if (it->second.size() != 1 || used.count(std::make_pair(a, it->second[0]))) continue;
+    std::vector<ll> chain;
+    walk(a, chain);
+    if (chain.size() > 1 && chain.back() == chain.front())
+    {
+      chain.pop_back();
+      chains.push_back(chain);
+      closed.push_back(1);
+    }
+    else
+    {
+      chains.push_back(chain);
+      closed.push_back(0);
+    }
+  }
+}
+
+//-----------
+// ZipChains
+//-----------
+int ZipChains(const std::vector<double> &points, const std::vector<long long> &chainA,
+    const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error)
+{
+  const size_t nA = chainA.size(), nB = chainB.size();
+  if (nA < 2 || nB < 2)
+  {
+    error = "a chain to zip needs at least two points";
+    return 1;
+  }
+  auto at = [&](ll v) { return &points[(size_t)3*v]; };
+  auto dist = [&](ll u, ll v) { return Distance(at(u), at(v)); };
+  // the start: for closed chains the nearest pair, so that the zip goes round from there
+  size_t startA = 0, startB = 0;
+  if (closed)
+  {
+    double best = std::numeric_limits<double>::max();
+    for (size_t j = 0; j < nB; j++)
+    {
+      double d = dist(chainA[0], chainB[j]);
+      if (d < best) { best = d; startB = j; }
+    }
+  }
+  const size_t stepsA = closed ? nA : nA - 1, stepsB = closed ? nB : nB - 1;
+  size_t i = 0, j = 0;
+  auto A = [&](size_t k) { return chainA[(startA + k)%nA]; };
+  auto B = [&](size_t k) { return chainB[(startB + k)%nB]; };
+  // Both chains must run the same way, or the strip twists: each step of A
+  // against the step of B nearest its start.
+  {
+    double agreement = 0.0;
+    for (size_t k = 0; k < stepsA; k++)
+    {
+      const double *a0 = at(A(k)), *a1 = at(A(k + 1));
+      size_t nearest = 0;
+      double best = std::numeric_limits<double>::max();
+      for (size_t m = 0; m < stepsB; m++)
+      {
+        double d = Distance(a0, at(B(m)));
+        if (d < best) { best = d; nearest = m; }
+      }
+      double da[3], db[3];
+      Sub(a1, a0, da);
+      Sub(at(B(nearest + 1)), at(B(nearest)), db);
+      agreement += Dot(da, db);
+    }
+    if (agreement < 0.0)
+    {
+      error = "the two chains to zip run against each other";
+      return 1;
+    }
+  }
+  while (i < stepsA || j < stepsB)
+  {
+    bool advanceA;
+    if (i >= stepsA) advanceA = false;
+    else if (j >= stepsB) advanceA = true;
+    else advanceA = dist(A(i + 1), B(j)) <= dist(A(i), B(j + 1));
+    if (advanceA)
+    {
+      // (a_i, a_i+1, b_j): A's edge forwards
+      triangles.push_back(A(i)); triangles.push_back(A(i + 1)); triangles.push_back(B(j));
+      i++;
+    }
+    else
+    {
+      // (a_i, b_j+1, b_j): B's edge backwards
+      triangles.push_back(A(i)); triangles.push_back(B(j + 1)); triangles.push_back(B(j));
+      j++;
     }
   }
   return 0;

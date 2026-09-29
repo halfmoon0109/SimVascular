@@ -477,14 +477,16 @@ struct PrismMesh
   std::vector<long long> tetrahedra;          // four point ids each
   std::vector<long long> tetrahedronLayer;    // the layer (1..N) each tetrahedron lies in
   std::vector<long long> topTriangles;        // the outer surface of the zone: three ids, facing out of the wall
+  std::vector<std::vector<long long> > layerTriangles;   // [k-1]: the zone's layer k surface (k = N is the tops), facing out
   std::vector<long long> sideTriangles;       // the zone's walls toward the junction zone: three ids, facing the junction zone
   std::vector<long long> sideTriangleLayer;   // the layer (1..N) of each side triangle
   std::vector<long long> rimTriangles;        // the zone's walls at the cap rims (the interface's own boundary): three ids, facing out
   // The zone boundary on the interface, as directed edges (a, b) of
   // interface point ids in the structured triangle's winding, one entry per
-  // boundary edge: the junction zone lies to the edge's left when the wall
-  // is seen from outside. The zipper lifts them to each layer through
-  // layerPoint.
+  // boundary edge. The zone's layer surfaces traverse these edges the same
+  // way (they are wound like the interface, whose normal points into the
+  // wall, which is out of the wall's outer side), so a strip zipped to them
+  // must take them the other way round: ZipChains wants the chain reversed.
   std::vector<long long> zoneBoundaryEdges;
 };
 
@@ -496,6 +498,66 @@ struct PrismMesh
  */
 int BuildPrismLayers(const Interface &input, const std::vector<unsigned char> &structured, int numLayers,
     PrismMesh &out, std::string &error);
+
+/**
+ * @brief What is left of a layer surface over the junction zone (section 8
+ * step 3), and how much of it went.
+ */
+struct ZonePieceReport
+{
+  long long numTriangles = 0;          // of the level surface
+  long long numStructuredOwned = 0;    // dropped: their centre's offset stands on a structured triangle (or a collar of a structured rim)
+  long long numEroded = 0;             // dropped: within the erosion rings of a dropped triangle
+  long long numCrossing = 0;           // dropped: passing through the prism zone's layer surface
+  long long numEars = 0;               // dropped: on two boundary edges, so that the boundary the zipper follows is not jagged
+  long long numKept = 0;
+  long long numChains = 0;             // boundary chains of the piece
+};
+
+/**
+ * @brief Keeps the triangles of a layer surface whose centre's offset stands
+ * on a junction-zone triangle of the interface (by OffsetField::Owner at the
+ * level's fraction; a collar triangle counts as its rim's zone), takes off
+ * the given rings around what was dropped so that the piece ends short of
+ * the prism zone's surface rather than over it, and takes off whatever still
+ * passes through that surface (guardPoints/guardTriangles: the prism zone's
+ * layer surface at the same level), then the ears - triangles on two
+ * boundary edges - for the given passes, so that the boundary the zipper
+ * follows has no notches for a strip triangle to fold over (measured on the
+ * synthetic junction: one notch, four crossings). The piece's points are
+ * compacted.
+ * @param rimStructured One per cap rim: whether the interface triangles at
+ * that rim are all structured, for the collar-owned centres.
+ * @return 0 on success, 1 with error set otherwise.
+ */
+int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &field, long long numInterfaceTriangles,
+    const std::vector<unsigned char> &structured, const std::vector<unsigned char> &rimStructured, int erosionRings,
+    const std::vector<double> &guardPoints, const std::vector<long long> &guardTriangles, int earPasses,
+    Surface &piece, ZonePieceReport &report, std::string &error);
+
+/**
+ * @brief The boundary of a triangle set as chains of point ids, each in the
+ * direction the triangles traverse its edges: a closed chain repeats no
+ * point (closed[c] is 1), an open one runs from a point of one boundary
+ * end to the other. A point on more than two boundary edges ends the chains
+ * there.
+ */
+void BoundaryChains(const std::vector<long long> &triangles, std::vector<std::vector<long long> > &chains,
+    std::vector<unsigned char> &closed);
+
+/**
+ * @brief Zips two chains of point ids over one point array into a strip of
+ * triangles: both run the same way, and the strip takes each of its edges
+ * the way chain A gives them (a_i -> a_i+1) and the edges of chain B
+ * backwards (b_j+1 -> b_j), so that a surface traversing A's edges backwards
+ * and one traversing B's edges forwards are wound consistently with it. At
+ * each step the shorter of the two possible diagonals is taken. Closed
+ * chains are started at the nearest pair of points and go round once; open
+ * chains go from their first points to their last.
+ * @return 0 on success, 1 with error set otherwise.
+ */
+int ZipChains(const std::vector<double> &points, const std::vector<long long> &chainA,
+    const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error);
 
 /**
  * @brief The angle below which TetGen refuses two facets on one edge as
