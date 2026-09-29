@@ -2381,6 +2381,18 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   fprintf(stdout,"Wall mesh options in effect: WallThickness %g, CurvatureFactor %g, SmoothingIterations %d, NumberOfWallLayers %d\n",
       meshoptions_.wallthickness, meshoptions_.wallthicknesscurvaturefactor,
       meshoptions_.wallthicknesssmoothingiterations, meshoptions_.numwallsublayers);
+  // The thickness by model face, as set for this job: the point thickness
+  // is the mean over the faces a point touches (below), so this table is
+  // what a wall rebuilt elsewhere from the interface needs.
+  if (!localWallThickness_.empty())
+  {
+    fprintf(stdout,"  local wall thickness by model face (others %g):", meshoptions_.wallthickness);
+    for (std::map<int, double>::const_iterator it = localWallThickness_.begin(); it != localWallThickness_.end(); ++it)
+    {
+      fprintf(stdout," %d:%g", it->first, it->second);
+    }
+    fprintf(stdout,"\n");
+  }
   if (meshoptions_.walltetgenshell)
   {
     fprintf(stdout,"  the wall is filled with TetGen tetrahedra in %d layer(s) through the thickness: %d offset surface(s) at fractions of the thickness go into the shell as facets the mesher keeps, so each layer is one tetrahedron thick; SmoothingIterations and CurvatureFactor act on the thickness field only\n",
@@ -2910,8 +2922,14 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
 
   // The ratio is a field over the interface, and the log has room for eight
   // regions of it. Writing it out is the only way to see whether a shortfall is
-  // one junction or all of them.
+  // one junction or all of them. The thickness the offset was built from goes
+  // with it: the surface handed to this fill does not carry it (the wedge
+  // path attaches it after this fill has returned), and without it the file
+  // is not an interface anyone can rebuild the wall from (a web session
+  // needed it, 2026-09-30, and the uploaded file had only the ratio).
   {
+    surface->GetPointData()->RemoveArray(thicknessArray->GetName());
+    surface->GetPointData()->AddArray(thicknessArray);
     char offsetDiagnosticsFile[] = "wall_offset_diagnostics.vtp";
     TGenUtils_WriteVTP(offsetDiagnosticsFile, surface);
   }
