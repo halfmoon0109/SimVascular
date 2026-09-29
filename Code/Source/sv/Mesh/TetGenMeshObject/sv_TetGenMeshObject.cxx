@@ -3148,9 +3148,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         for (size_t k = 0; k < junction.pieces.size(); k++)
         {
           const svoffset::ZonePieceReport &piece = junction.pieces[k];
-          fprintf(stdout,"    %s: %lld of %lld triangles kept over the junction zones (%lld owned by the prism zone, %lld eroded from its edge, %lld passing through the prism layers, %lld ears, %lld at %lld pinches, %lld in %lld scraps; %lld in %lld holes), %lld boundary chain(s)\n",
+          fprintf(stdout,"    %s: %lld of %lld triangles kept over the junction zones (%lld owned by the prism zone, %lld hanging over the prism zone, %lld eroded from its edge, %lld passing through the prism layers, %lld ears, %lld at %lld pinches, %lld in %lld scraps; %lld in %lld holes), %lld boundary chain(s)\n",
               (k + 1 == junction.pieces.size()) ? "the outer surface's piece" : (std::string("layer ") + std::to_string(k + 1) + "'s piece").c_str(),
-              (long long)piece.numKept, (long long)piece.numTriangles, (long long)piece.numStructuredOwned, (long long)piece.numEroded,
+              (long long)piece.numKept, (long long)piece.numTriangles, (long long)piece.numStructuredOwned, (long long)piece.numOverPrisms, (long long)piece.numEroded,
               (long long)piece.numCrossing, (long long)piece.numEars, (long long)piece.numPinchTriangles, (long long)piece.numPinches,
               (long long)piece.numScrapTriangles, (long long)piece.numScraps,
               (long long)piece.numHoleTriangles, (long long)piece.numHoles, (long long)piece.numChains);

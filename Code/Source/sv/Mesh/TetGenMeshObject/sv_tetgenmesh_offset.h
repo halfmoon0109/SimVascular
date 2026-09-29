@@ -513,6 +513,7 @@ struct ZonePieceReport
 {
   long long numTriangles = 0;          // of the level surface
   long long numStructuredOwned = 0;    // dropped: their centre's offset stands on a structured triangle (or a collar of a structured rim)
+  long long numOverPrisms = 0;         // dropped: a corner or the centre of theirs, lowered a little, lies inside a prism tetrahedron of this layer (the triangle hangs over the prism zone)
   long long numEroded = 0;             // dropped: within the erosion rings of a dropped triangle
   long long numCrossing = 0;           // dropped: passing through the prism zone's layer surface
   long long numEars = 0;               // dropped: on two boundary edges, so that the boundary the zipper follows is not jagged
@@ -541,12 +542,31 @@ struct ZonePieceReport
  * @param rimStructured One per cap rim: whether the interface triangles at
  * that rim are all structured, for the collar-owned centres.
  * @return 0 on success, 1 with error set otherwise.
- */
+  * @param loopSegments The lifted zone boundary edges at this level, six
+ * numbers each (a, b): given, the erosion is by distance instead of rows -
+ * the kept triangles whose centre lies within erosionDistance times the
+ * nearest segment's length of it go (peeled one by one as the rows are,
+ * so that the piece keeps its shape). Rows are the level's triangles,
+ * which over the collar of a thick parent around a thin branch are few
+ * where the interface's are many (the level surface is compressed in the
+ * crotch), and two rows ate the whole band there (measured 2026-09-29 on
+ * the 178k model, a branch 0.38 thick on a parent 0.85 thick); the
+ * distance follows the loop's own edge instead.
+ * @param layerTetrahedra The prism tetrahedra of this layer (four ids into
+ * guardPoints each): a kept triangle whose corners or centre, lowered by
+ * a twentieth of the thickness, lie inside one hangs over the prism zone
+ * and goes, whatever owns it (its strip would pass through the prism
+ * wall; measured 2026-09-29 on the 178k model, 108 strip-wall crossings.
+ * The wall's plane was tried for this and cut the pieces off around every
+ * curved vessel).
+*/
 int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &field, long long numInterfaceTriangles,
     const std::vector<unsigned char> &structured, const std::vector<unsigned char> &rimStructured, int erosionRings,
     const std::vector<double> &guardPoints, const std::vector<long long> &guardTriangles, int earPasses,
     Surface &piece, ZonePieceReport &report, std::string &error,
-    std::vector<long long> *crossingGuards = nullptr, std::vector<long long> *holeOwners = nullptr);
+    std::vector<long long> *crossingGuards = nullptr, std::vector<long long> *holeOwners = nullptr,
+    const std::vector<long long> *layerTetrahedra = nullptr, const std::vector<double> *loopSegments = nullptr,
+    double erosionDistance = 1.0);
 
 /**
  * @brief The boundary of a triangle set as chains of point ids, each in the

@@ -5530,10 +5530,12 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
         return SV_ERROR;
       }
     }
-    // The pieces are peeled back two rows from the prism zone (one left
-    // the pieces' edges over the prism tops and the zipper strips through
-    // them on the synthetic junction) and their boundaries have their ears
-    // taken off in two passes, as the core's test has them. The shell is
+    // The pieces are peeled back one loop edge from the prism zone's
+    // lifted boundary (by distance, not rows: two rows ate the whole band
+    // over the collar of a thick parent, where the level surface is
+    // compressed; two edges over-eroded the synthetic junction) and their
+    // boundaries have their ears taken off in two passes, as the core's
+    // test has them. The shell is
     // built again with a wider junction zone, up to five times, when it
     // comes back with triangles passing through one another where a
     // prism's layer surface passes through a piece (those prisms' triangles
@@ -5544,7 +5546,7 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
     // when a zone boundary loop found no piece chain of its own (the piece
     // too narrow there; two rings around the loop), or when a piece has a
     // hole (the prisms owning or passing through it, with a ring).
-    const int erosionRings = 2, earPasses = 2, wideningRings = 2, maxWidenings = 5;
+    const int erosionRings = 1, earPasses = 2, wideningRings = 2, maxWidenings = 5;
     for (int attempt = 0; ; attempt++)
     {
       hybrid.prisms = svoffset::PrismMesh();

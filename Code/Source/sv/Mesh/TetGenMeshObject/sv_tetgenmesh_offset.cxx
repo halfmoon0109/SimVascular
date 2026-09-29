@@ -3657,7 +3657,8 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
     const std::vector<unsigned char> &structured, const std::vector<unsigned char> &rimStructured, int erosionRings,
     const std::vector<double> &guardPoints, const std::vector<long long> &guardTriangles, int earPasses,
     Surface &piece, ZonePieceReport &report, std::string &error, std::vector<long long> *crossingGuards,
-    std::vector<long long> *holeOwners)
+    std::vector<long long> *holeOwners, const std::vector<long long> *layerTetrahedra,
+    const std::vector<double> *loopSegments, double erosionDistance)
 {
   if (crossingGuards != nullptr) crossingGuards->clear();
   if (holeOwners != nullptr) holeOwners->clear();
@@ -3697,6 +3698,89 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
     }
     if (ownerStructured) report.numStructuredOwned++;
     else keep[(size_t)t] = 1;
+  }
+  // 1b. over the prism zone: a kept triangle with a corner or its centre
+  // inside a prism tetrahedron of this layer, once lowered a little (the
+  // level and the prism tops are the same surface within the tolerance,
+  // so a point on the level over the zone may lie just above the top)
+  if (layerTetrahedra != nullptr && layerTetrahedra->size() >= 4 && guardPoints.size() >= 12)
+  {
+    const ll numTets = (ll)(layerTetrahedra->size()/4);
+    double cell = 0.0;
+    std::vector<double> lo((size_t)3*numTets), hi((size_t)3*numTets);
+    for (ll t = 0; t < numTets; t++)
+    {
+      for (int j = 0; j < 3; j++) { lo[(size_t)3*t + j] = std::numeric_limits<double>::max(); hi[(size_t)3*t + j] = -std::numeric_limits<double>::max(); }
+      for (int m = 0; m < 4; m++)
+      {
+        const double *x = &guardPoints[(size_t)3*(*layerTetrahedra)[(size_t)4*t + m]];
+        for (int j = 0; j < 3; j++) { lo[(size_t)3*t + j] = std::min(lo[(size_t)3*t + j], x[j]); hi[(size_t)3*t + j] = std::max(hi[(size_t)3*t + j], x[j]); }
+      }
+      for (int j = 0; j < 3; j++) cell += (hi[(size_t)3*t + j] - lo[(size_t)3*t + j])/(3.0*numTets);
+    }
+    cell = std::max(cell, 1e-12);
+    std::map<std::array<ll, 3>, std::vector<ll> > grid;
+    auto cellOf = [&](const double *x) { std::array<ll, 3> c = {(ll)std::floor(x[0]/cell), (ll)std::floor(x[1]/cell), (ll)std::floor(x[2]/cell)}; return c; };
+    for (ll t = 0; t < numTets; t++)
+    {
+      std::array<ll, 3> c0 = cellOf(&lo[(size_t)3*t]), c1 = cellOf(&hi[(size_t)3*t]);
+      for (ll x = c0[0]; x <= c1[0]; x++) for (ll y = c0[1]; y <= c1[1]; y++) for (ll z = c0[2]; z <= c1[2]; z++)
+      {
+        std::array<ll, 3> c = {x, y, z};
+        grid[c].push_back(t);
+      }
+    }
+    auto inside = [&](const double *x) -> bool
+    {
+      std::map<std::array<ll, 3>, std::vector<ll> >::const_iterator at = grid.find(cellOf(x));
+      if (at == grid.end()) return false;
+      for (size_t m = 0; m < at->second.size(); m++)
+      {
+        const ll t = at->second[m];
+        bool out = false;
+        for (int j = 0; j < 3 && !out; j++) if (x[j] < lo[(size_t)3*t + j] || x[j] > hi[(size_t)3*t + j]) out = true;
+        if (out) continue;
+        const double *v[4];
+        for (int q = 0; q < 4; q++) v[q] = &guardPoints[(size_t)3*(*layerTetrahedra)[(size_t)4*t + q]];
+        // on the inner side of all four faces (the tetrahedra are built with positive volume)
+        bool in = true;
+        for (int q = 0; q < 4 && in; q++)
+        {
+          const double *a = v[(q + 1)%4], *b = v[(q + 2)%4], *c = v[(q + 3)%4], *d = v[q];
+          double ab[3], ac[3], ad[3], ax[3], n[3];
+          Sub(b, a, ab); Sub(c, a, ac); Sub(d, a, ad); Sub(x, a, ax);
+          Cross(ab, ac, n);
+          const double sd = Dot(n, ad), sx = Dot(n, ax);
+          if (sd*sx < 0.0) in = false;
+        }
+        if (in) return true;
+      }
+      return false;
+    };
+    for (ll t = 0; t < nt; t++)
+    {
+      if (!keep[(size_t)t]) continue;
+      const ll *tt = &level.triangles[(size_t)3*t];
+      double c[3], e1[3], e2[3], n[3];
+      for (int j = 0; j < 3; j++) c[j] = (level.points[(size_t)3*tt[0] + j] + level.points[(size_t)3*tt[1] + j] + level.points[(size_t)3*tt[2] + j])/3.0;
+      Sub(&level.points[(size_t)3*tt[1]], &level.points[(size_t)3*tt[0]], e1);
+      Sub(&level.points[(size_t)3*tt[2]], &level.points[(size_t)3*tt[0]], e2);
+      Cross(e1, e2, n);
+      const double len = Norm(n);
+      if (!(len > 0.0)) continue;
+      double size, thickness;
+      ll rim;
+      field.Local(c, size, thickness, rim);
+      const double lower = 0.05*thickness/len;
+      bool over = false;
+      for (int j = 0; j < 4 && !over; j++)
+      {
+        const double *x = (j < 3) ? &level.points[(size_t)3*tt[j]] : c;
+        double y[3] = {x[0] - lower*n[0], x[1] - lower*n[1], x[2] - lower*n[2]};
+        if (inside(y)) over = true;
+      }
+      if (over) { keep[(size_t)t] = 0; report.numOverPrisms++; }
+    }
   }
   // The boundary of the kept set, kept up to date as triangles go: how
   // many kept triangles each edge has, and how many boundary edges each
@@ -3857,23 +3941,98 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
     }
   };
   // 2. erosion: the rows of kept triangles along the boundary go, one row
-  // per ring, each triangle on its own where it may
-  for (int ring = 0; ring < erosionRings; ring++)
+  // per ring, each triangle on its own where it may; or, with the lifted
+  // loops given, the triangles within the erosion distance of them, peeled
+  // the same way until none is left within it
+  if (loopSegments != nullptr && loopSegments->size() >= 6)
   {
-    std::vector<ll> row;
-    for (ll t = 0; t < nt; t++)
+    const ll numSegments = (ll)(loopSegments->size()/6);
+    double cell = 0.0;
+    std::vector<double> reach((size_t)numSegments, 0.0);
+    for (ll w = 0; w < numSegments; w++)
     {
-      ll opposite;
-      if (keep[(size_t)t] && boundaryEdges(t, opposite) > 0) row.push_back(t);
+      reach[(size_t)w] = erosionDistance*Distance(&(*loopSegments)[(size_t)6*w], &(*loopSegments)[(size_t)6*w + 3]);
+      cell = std::max(cell, reach[(size_t)w]);
     }
-    for (size_t m = 0; m < row.size(); m++)
+    cell = std::max(cell, 1e-12);
+    std::map<std::array<ll, 3>, std::vector<ll> > grid;
+    auto cellOf = [&](const double *x) { std::array<ll, 3> c = {(ll)std::floor(x[0]/cell), (ll)std::floor(x[1]/cell), (ll)std::floor(x[2]/cell)}; return c; };
+    for (ll w = 0; w < numSegments; w++)
     {
-      ll holeOpened;
-      if (keep[(size_t)row[m]] && mayGo(row[m], holeOpened))
+      const double *a = &(*loopSegments)[(size_t)6*w], *b = a + 3;
+      double lo[3], hi[3];
+      for (int j = 0; j < 3; j++) { lo[j] = std::min(a[j], b[j]) - reach[(size_t)w]; hi[j] = std::max(a[j], b[j]) + reach[(size_t)w]; }
+      std::array<ll, 3> c0 = cellOf(lo), c1 = cellOf(hi);
+      for (ll x = c0[0]; x <= c1[0]; x++) for (ll y = c0[1]; y <= c1[1]; y++) for (ll z = c0[2]; z <= c1[2]; z++)
       {
-        drop(row[m]);
-        report.numEroded++;
-        if (holeOpened >= 0) openHole(holeOpened);
+        std::array<ll, 3> c = {x, y, z};
+        grid[c].push_back(w);
+      }
+    }
+    auto nearLoop = [&](ll t) -> bool
+    {
+      const ll *tt = &level.triangles[(size_t)3*t];
+      double c[3];
+      for (int j = 0; j < 3; j++) c[j] = (level.points[(size_t)3*tt[0] + j] + level.points[(size_t)3*tt[1] + j] + level.points[(size_t)3*tt[2] + j])/3.0;
+      std::map<std::array<ll, 3>, std::vector<ll> >::const_iterator at = grid.find(cellOf(c));
+      if (at == grid.end()) return false;
+      for (size_t m = 0; m < at->second.size(); m++)
+      {
+        const ll w = at->second[m];
+        const double *a = &(*loopSegments)[(size_t)6*w], *b = a + 3;
+        double ab[3], ac[3];
+        Sub(b, a, ab);
+        Sub(c, a, ac);
+        const double len2 = Dot(ab, ab);
+        double s = len2 > 0.0 ? Dot(ac, ab)/len2 : 0.0;
+        s = std::max(0.0, std::min(1.0, s));
+        double q[3] = {a[0] + s*ab[0], a[1] + s*ab[1], a[2] + s*ab[2]};
+        if (Distance(c, q) <= reach[(size_t)w]) return true;
+      }
+      return false;
+    };
+    for (int pass = 0; pass < 16; pass++)
+    {
+      std::vector<ll> row;
+      for (ll t = 0; t < nt; t++)
+      {
+        ll opposite;
+        if (keep[(size_t)t] && boundaryEdges(t, opposite) > 0 && nearLoop(t)) row.push_back(t);
+      }
+      ll dropped = 0;
+      for (size_t m = 0; m < row.size(); m++)
+      {
+        ll holeOpened;
+        if (keep[(size_t)row[m]] && mayGo(row[m], holeOpened))
+        {
+          drop(row[m]);
+          report.numEroded++;
+          dropped++;
+          if (holeOpened >= 0) openHole(holeOpened);
+        }
+      }
+      if (dropped == 0) break;
+    }
+  }
+  else
+  {
+    for (int ring = 0; ring < erosionRings; ring++)
+    {
+      std::vector<ll> row;
+      for (ll t = 0; t < nt; t++)
+      {
+        ll opposite;
+        if (keep[(size_t)t] && boundaryEdges(t, opposite) > 0) row.push_back(t);
+      }
+      for (size_t m = 0; m < row.size(); m++)
+      {
+        ll holeOpened;
+        if (keep[(size_t)row[m]] && mayGo(row[m], holeOpened))
+        {
+          drop(row[m]);
+          report.numEroded++;
+          if (holeOpened >= 0) openHole(holeOpened);
+        }
       }
     }
   }
@@ -4293,6 +4452,9 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
     int erosionRings, int earPasses, JunctionShell &out, std::string &error)
 {
+  // the erosion of the pieces is by distance from the lifted loops, in
+  // loop edges: the rings asked for, one edge each
+  const double erosionDistance = (double)erosionRings;
   out = JunctionShell();
   const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
   const int numLayers = prisms.numLayers;
@@ -4391,8 +4553,27 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
   {
     Surface piece;
     std::vector<ll> crossingGuards, holeOwners;
+    // the lifted zone boundary edges at this level, for the erosion by distance
+    std::vector<double> loopSegments;
+    for (size_t e = 0; e + 1 < prisms.zoneBoundaryEdges.size(); e += 2)
+    {
+      const ll la = prisms.layerPoint[(size_t)(k - 1)*(size_t)np + (size_t)prisms.zoneBoundaryEdges[e]];
+      const ll lb = prisms.layerPoint[(size_t)(k - 1)*(size_t)np + (size_t)prisms.zoneBoundaryEdges[e + 1]];
+      if (la < 0 || lb < 0) continue;
+      for (int j = 0; j < 3; j++) loopSegments.push_back(prisms.points[(size_t)3*la + j]);
+      for (int j = 0; j < 3; j++) loopSegments.push_back(prisms.points[(size_t)3*lb + j]);
+    }
+    // the prism tetrahedra of this layer, for the triangles hanging over the prism zone
+    std::vector<ll> layerTets;
+    for (size_t t = 0; t + 3 < prisms.tetrahedra.size(); t += 4)
+    {
+      if (t/4 < prisms.tetrahedronLayer.size() && prisms.tetrahedronLayer[t/4] == k)
+      {
+        for (int m = 0; m < 4; m++) layerTets.push_back(prisms.tetrahedra[t + m]);
+      }
+    }
     if (TrimSurfaceToZone(levels[(size_t)k - 1], fractions[(size_t)k - 1], field, nt, structured, rimStructured, erosionRings,
-          prisms.points, prisms.layerTriangles[(size_t)k - 1], earPasses, piece, out.pieces[(size_t)k - 1], error, &crossingGuards, &holeOwners) != 0)
+          prisms.points, prisms.layerTriangles[(size_t)k - 1], earPasses, piece, out.pieces[(size_t)k - 1], error, &crossingGuards, &holeOwners, &layerTets, &loopSegments, erosionDistance) != 0)
     {
       return 1;
     }
@@ -4460,7 +4641,7 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
         meanDistance[a][b] = d/(double)lifted[a].size();
       }
     }
-    const double reach = 2.0*erosionRings + 4.0;   // in loop edges
+    const double reach = 2.0*erosionDistance + 4.0;   // in loop edges
     std::vector<ll> chainOfLoop(loops.size(), -1);
     std::vector<unsigned char> chainUsed(chains.size(), 0);
     for (;;)

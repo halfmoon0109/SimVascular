@@ -260,7 +260,12 @@ static void CheckLevelPiece(const Interface &iface, const OffsetField &field, co
   }
   Surface piece; ZonePieceReport zp; std::string err;
   const std::vector<ll> &guard = pm.layerTriangles[k-1];
-  if (TrimSurfaceToZone(level, fraction, field, (ll)(iface.triangles.size()/3), structured, rimStructured, 2, pm.points, guard, 2, piece, zp, err) != 0) { printf("  FAIL trim: %s\n", err.c_str()); numFailed++; return; }
+  // as BuildJunctionShell trims: the layer's prism tetrahedra for the triangles hanging over the zone, the lifted loops for the erosion by distance (one loop edge)
+  const ll np = (ll)(iface.points.size()/3);
+  std::vector<ll> layerTets; for (size_t t = 0; t + 3 < pm.tetrahedra.size(); t += 4) if (pm.tetrahedronLayer[t/4] == k) for (int m = 0; m < 4; m++) layerTets.push_back(pm.tetrahedra[t + m]);
+  std::vector<double> loopSegments;
+  for (size_t e = 0; e + 1 < pm.zoneBoundaryEdges.size(); e += 2) { ll la = pm.layerPoint[(size_t)(k-1)*np + pm.zoneBoundaryEdges[e]], lb = pm.layerPoint[(size_t)(k-1)*np + pm.zoneBoundaryEdges[e+1]]; if (la < 0 || lb < 0) continue; for (int j = 0; j < 3; j++) loopSegments.push_back(pm.points[3*la+j]); for (int j = 0; j < 3; j++) loopSegments.push_back(pm.points[3*lb+j]); }
+  if (TrimSurfaceToZone(level, fraction, field, (ll)(iface.triangles.size()/3), structured, rimStructured, 1, pm.points, guard, 2, piece, zp, err, nullptr, nullptr, &layerTets, &loopSegments, 1.0) != 0) { printf("  FAIL trim: %s\n", err.c_str()); numFailed++; return; }
   printf("  level %d: %lld triangles, %lld owned by the prism zone, %lld eroded, %lld crossing, %lld ears, %lld kept in the piece, %lld boundary chains\n", k, zp.numTriangles, zp.numStructuredOwned, zp.numEroded, zp.numCrossing, zp.numEars, zp.numKept, zp.numChains);
   // one point array: the prism mesh's points, then the piece's
   std::vector<double> pts = pm.points; ll base = (ll)(pts.size()/3); pts.insert(pts.end(), piece.points.begin(), piece.points.end());
@@ -421,7 +426,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   {
     pm = PrismMesh(); shell = JunctionShell();
     if (BuildPrismLayers(iface, structured, numLayers, pm, err) != 0) { printf("  FAIL prisms: %s\n", err.c_str()); numFailed++; return; }
-    const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 2, 2, shell, err) == 0;
+    const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err) == 0;
     // a shell whose triangles pass through one another where a prism's layer surface passes through a piece gives those prisms' triangles to the junction zone (as the glue does);
     // a loop without a chain widens its region; a piece with a chain no loop takes (a hole) gives the prisms owning or passing through it to the junction zone
     if (built && (shell.numCrossingTriangles == 0 || shell.crossingStructuredTriangles.empty())) break;
