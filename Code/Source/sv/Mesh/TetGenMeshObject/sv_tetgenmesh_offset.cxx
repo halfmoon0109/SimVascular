@@ -1511,7 +1511,8 @@ double OffsetField::Evaluate(const double x[3], double thicknessScale) const
   return bestTerm;
 }
 
-void OffsetField::Local(const double x[3], double &size, double &thickness, long long &rim) const
+void OffsetField::Search(const double x[3], double thicknessScale, long long &nearest, double &distance,
+    long long &owner, double &term) const
 {
   const Data &d = *data_;
   const TriangleGrid &g = d.grid;
@@ -1530,6 +1531,7 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
   // be handed to that neighbour's cap.
   double best = std::numeric_limits<double>::max(), bestTerm = std::numeric_limits<double>::max();
   ll bestT = -1, ownerT = -1;
+  const double scale = thicknessScale;
   // Rings out until one lies farther than either could be beaten from; the
   // whole grid at most, since x may be far from the surface.
   int rings = std::max(g.n[0], std::max(g.n[1], g.n[2]));
@@ -1537,7 +1539,7 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
   {
     // every bin of this ring is at least (r-1) cells away
     double bound = (r - 1)*g.cell;
-    if (bestT >= 0 && bound >= best && bound - d.largestThickness >= bestTerm)
+    if (bestT >= 0 && bound >= best && bound - scale*d.largestThickness >= bestTerm)
     {
       break;
     }
@@ -1552,7 +1554,7 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
           size_t b = g.Index(i, j, k);
           if (g.start[b + 1] == g.start[b]) continue;
           double dd = g.BoxDistance(x, i, j, k);
-          if (dd >= best && dd - g.binMaxThickness[b] >= bestTerm) continue;
+          if (dd >= best && dd - scale*g.binMaxThickness[b] >= bestTerm) continue;
           for (ll m = g.start[b]; m < g.start[b + 1]; m++)
           {
             ll t = g.cells[(size_t)m];
@@ -1565,9 +1567,9 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
               bestT = t;
             }
             double tq = bary[0]*d.thickness[(size_t)tt[0]] + bary[1]*d.thickness[(size_t)tt[1]] + bary[2]*d.thickness[(size_t)tt[2]];
-            if (dist - tq < bestTerm)
+            if (dist - scale*tq < bestTerm)
             {
-              bestTerm = dist - tq;
+              bestTerm = dist - scale*tq;
               ownerT = t;
             }
           }
@@ -1575,9 +1577,29 @@ void OffsetField::Local(const double x[3], double &size, double &thickness, long
       }
     }
   }
+  nearest = bestT;
+  distance = best;
+  owner = ownerT;
+  term = bestTerm;
+}
+
+void OffsetField::Local(const double x[3], double &size, double &thickness, long long &rim) const
+{
+  const Data &d = *data_;
+  ll bestT, ownerT;
+  double best, bestTerm;
+  Search(x, 1.0, bestT, best, ownerT, bestTerm);
   size = (bestT >= 0) ? d.localSize[(size_t)bestT] : d.meanEdge;
   thickness = (bestT >= 0) ? d.localThickness[(size_t)bestT] : d.largestThickness;
   rim = (ownerT >= 0) ? d.triangleRim[(size_t)ownerT] : -1;
+}
+
+long long OffsetField::Owner(const double x[3], double thicknessScale) const
+{
+  ll bestT, ownerT;
+  double best, bestTerm;
+  Search(x, thicknessScale, bestT, best, ownerT, bestTerm);
+  return ownerT;
 }
 
 double OffsetField::Reach() const
@@ -3204,6 +3226,222 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
   }  // each level
   std::vector<double>().swap(cloud);
   std::vector<double>().swap(value);
+  return 0;
+}
+
+//-------------------
+// ClassifyPrismZone
+//-------------------
+int ClassifyPrismZone(const Interface &input, const OffsetField &field, int numLayers,
+    const ZoneOptions &options, std::vector<unsigned char> &structured, ZoneReport &report, std::string &error)
+{
+  report = ZoneReport();
+  const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
+  if (np == 0 || nt == 0 || input.normals.size() != input.points.size() || input.thickness.size() != (size_t)np)
+  {
+    error = "the interface needs points, normals, a thickness per point and triangles";
+    return 1;
+  }
+  if (numLayers < 1)
+  {
+    error = "at least one layer";
+    return 1;
+  }
+  report.numTriangles = nt;
+  // Every layer point of every interface point, and whether it stands on
+  // its level: below the tolerance it lies inside another part of the wall.
+  std::vector<double> layerPoints((size_t)3*np*(size_t)numLayers);
+  std::vector<unsigned char> pointValid((size_t)np, 1);
+  for (ll i = 0; i < np; i++)
+  {
+    const double *p = &input.points[(size_t)3*i];
+    double n[3] = {input.normals[(size_t)3*i], input.normals[(size_t)3*i + 1], input.normals[(size_t)3*i + 2]};
+    double ln = Norm(n);
+    if (!(ln > 0.0))
+    {
+      pointValid[(size_t)i] = 0;
+      continue;
+    }
+    for (int k = 0; k < 3; k++) n[k] /= ln;
+    double t = input.thickness[(size_t)i];
+    for (int k = 1; k <= numLayers; k++)
+    {
+      double f = (double)k/(double)numLayers;
+      double *q = &layerPoints[((size_t)(k - 1)*(size_t)np + (size_t)i)*3];
+      for (int m = 0; m < 3; m++) q[m] = p[m] + f*t*n[m];
+      double value = field.Evaluate(q, f);
+      report.numEvaluations++;
+      if (value < -options.levelTolerance*f*t)
+      {
+        if (pointValid[(size_t)i]) report.numPointsCovered++;
+        pointValid[(size_t)i] = 0;
+      }
+      else if (value > options.levelTolerance*f*t)
+      {
+        if (pointValid[(size_t)i]) report.numPointsOffLevel++;
+        pointValid[(size_t)i] = 0;
+      }
+    }
+  }
+  // A triangle: its corners valid and every layer triangle facing the way
+  // the base does with enough area.
+  structured.assign((size_t)nt, 0);
+  for (ll t = 0; t < nt; t++)
+  {
+    const ll *tt = &input.triangles[(size_t)3*t];
+    if (!pointValid[(size_t)tt[0]] || !pointValid[(size_t)tt[1]] || !pointValid[(size_t)tt[2]]) continue;
+    double e1[3], e2[3], nb[3];
+    Sub(&input.points[(size_t)3*tt[1]], &input.points[(size_t)3*tt[0]], e1);
+    Sub(&input.points[(size_t)3*tt[2]], &input.points[(size_t)3*tt[0]], e2);
+    Cross(e1, e2, nb);
+    double lb = Norm(nb);
+    bool ok = lb > 0.0;
+    for (int k = 1; k <= numLayers && ok; k++)
+    {
+      const double *a = &layerPoints[((size_t)(k - 1)*(size_t)np + (size_t)tt[0])*3];
+      const double *b = &layerPoints[((size_t)(k - 1)*(size_t)np + (size_t)tt[1])*3];
+      const double *c = &layerPoints[((size_t)(k - 1)*(size_t)np + (size_t)tt[2])*3];
+      double f1[3], f2[3], nl[3];
+      Sub(b, a, f1);
+      Sub(c, a, f2);
+      Cross(f1, f2, nl);
+      if (Dot(nl, nb) <= 0.0 || Norm(nl) < options.minTopArea*lb) ok = false;
+    }
+    if (!ok)
+    {
+      report.numTrianglesInverted++;
+      continue;
+    }
+    structured[(size_t)t] = 1;
+  }
+  // The tops of the prisms kept must not pass through one another.
+  {
+    std::vector<double> tops(layerPoints.begin() + (size_t)3*np*(size_t)(numLayers - 1), layerPoints.end());
+    std::vector<ll> topTris;
+    std::vector<ll> topOf;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (!structured[(size_t)t]) continue;
+      topTris.insert(topTris.end(), &input.triangles[(size_t)3*t], &input.triangles[(size_t)3*t] + 3);
+      topOf.push_back(t);
+    }
+    if (!topTris.empty())
+    {
+      std::vector<unsigned char> crossing;
+      double at[3];
+      svenvelope::CountCrossingTriangles(tops, topTris, crossing, at);
+      for (size_t m = 0; m < topOf.size(); m++)
+      {
+        if (m < crossing.size() && crossing[m])
+        {
+          structured[(size_t)topOf[m]] = 0;
+          report.numTrianglesCrossing++;
+        }
+      }
+    }
+  }
+  // The junction zone grows by the margin rings: a triangle sharing a point
+  // with one of the zone joins it.
+  std::vector<std::vector<ll> > incident((size_t)np);
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++) incident[(size_t)input.triangles[(size_t)3*t + j]].push_back(t);
+  }
+  for (int ring = 0; ring < options.marginRings; ring++)
+  {
+    std::vector<unsigned char> before = structured;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (before[(size_t)t]) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+        for (size_t m = 0; m < around.size(); m++)
+        {
+          if (structured[(size_t)around[m]])
+          {
+            structured[(size_t)around[m]] = 0;
+            report.numTrianglesMargin++;
+          }
+        }
+      }
+    }
+  }
+  // Connected pieces, by shared points, of each zone: small structured
+  // islands are given up, and the junction pieces are counted.
+  {
+    std::vector<ll> label((size_t)nt, -1);
+    std::vector<std::pair<ll, unsigned char> > pieces;   // size, zone
+    std::vector<ll> stack;
+    for (ll seed = 0; seed < nt; seed++)
+    {
+      if (label[(size_t)seed] >= 0) continue;
+      ll id = (ll)pieces.size();
+      pieces.push_back(std::make_pair(0LL, structured[(size_t)seed]));
+      label[(size_t)seed] = id;
+      stack.push_back(seed);
+      while (!stack.empty())
+      {
+        ll t = stack.back();
+        stack.pop_back();
+        pieces[(size_t)id].first++;
+        for (int j = 0; j < 3; j++)
+        {
+          const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+          for (size_t m = 0; m < around.size(); m++)
+          {
+            ll u = around[m];
+            if (label[(size_t)u] >= 0 || structured[(size_t)u] != structured[(size_t)t]) continue;
+            label[(size_t)u] = id;
+            stack.push_back(u);
+          }
+        }
+      }
+    }
+    std::vector<unsigned char> giveUp(pieces.size(), 0);
+    for (size_t m = 0; m < pieces.size(); m++)
+    {
+      if (pieces[m].second && pieces[m].first < options.minIsland)
+      {
+        giveUp[m] = 1;
+        report.numIslands++;
+        report.numIslandTriangles += pieces[m].first;
+      }
+    }
+    for (ll t = 0; t < nt; t++)
+    {
+      if (giveUp[(size_t)label[(size_t)t]]) structured[(size_t)t] = 0;
+    }
+    // the junction pieces, after the islands joined them (adjacent pieces merge)
+    std::vector<ll> label2((size_t)nt, -1);
+    for (ll seed = 0; seed < nt; seed++)
+    {
+      if (label2[(size_t)seed] >= 0 || structured[(size_t)seed]) continue;
+      report.numJunctionRegions++;
+      label2[(size_t)seed] = 1;
+      stack.push_back(seed);
+      while (!stack.empty())
+      {
+        ll t = stack.back();
+        stack.pop_back();
+        for (int j = 0; j < 3; j++)
+        {
+          const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+          for (size_t m = 0; m < around.size(); m++)
+          {
+            ll u = around[m];
+            if (label2[(size_t)u] >= 0 || structured[(size_t)u]) continue;
+            label2[(size_t)u] = 1;
+            stack.push_back(u);
+          }
+        }
+      }
+    }
+  }
+  for (ll t = 0; t < nt; t++)
+  {
+    if (structured[(size_t)t]) report.numStructured++;
+  }
   return 0;
 }
 

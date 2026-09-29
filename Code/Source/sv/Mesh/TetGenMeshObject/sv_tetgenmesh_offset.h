@@ -316,6 +316,12 @@ public:
   /// interface x's offset stands on.
   void Local(const double x[3], double &size, double &thickness, long long &rim) const;
 
+  /// The triangle of the field's surface x's offset stands on: the one whose
+  /// term, its distance less the wall there at the scale, is the least at x,
+  /// the piece of the interface the field takes its value from (a collar
+  /// triangle counts; its id is past the interface's). -1 if none.
+  long long Owner(const double x[3], double thicknessScale = 1.0) const;
+
 
   /// How far from the field's surface a point is surely outside the wall.
   double Reach() const;
@@ -333,6 +339,10 @@ public:
 
 private:
   struct Data;
+  /// The search behind Local and Owner: the nearest triangle by distance and
+  /// the one of the least term (distance less the scaled wall) at x.
+  void Search(const double x[3], double thicknessScale, long long &nearest, double &distance,
+      long long &owner, double &term) const;
   Data *data_;
 };
 
@@ -391,6 +401,62 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
  */
 void CountEdges(const std::vector<long long> &triangles, long long &numBoundary,
     long long &numNonManifold, long long &numMiswound);
+
+/**
+ * @brief What decides where the wall can be prism layers extruded along the
+ * interface's normals (the structured zone) and where it must be filled
+ * with tetrahedra between the interface and the offset surfaces (the
+ * junction zone). See docs/wall-mesh-purpose.md section 8.
+ */
+struct ZoneOptions
+{
+  // A layer point p + f t n stands on its level when the field at it, at
+  // the scale f, is within this fraction of f t of zero. It cannot be above
+  // (its own triangle is within f t of it); it is below where another part
+  // of the wall covers it - the collar a thick parent's offset makes around
+  // a thin branch's root, or a fold where the normals of a concave stretch
+  // meet within the wall.
+  double levelTolerance = 0.1;
+  // The top of a prism must face the way its base does and keep this
+  // fraction of the base's area, at every layer.
+  double minTopArea = 0.1;
+  // The junction zone grows by this many rings of triangles (sharing a
+  // point) around what the checks reject, so that the tetrahedra have room
+  // and the zipper between the two zones' surfaces stays off the trouble.
+  int marginRings = 2;
+  // A structured island of fewer triangles than this joins the junction zone.
+  long long minIsland = 50;
+};
+
+struct ZoneReport
+{
+  long long numTriangles = 0;
+  long long numStructured = 0;             // prism layers
+  long long numPointsCovered = 0;          // a layer point of theirs inside another part of the wall
+  long long numPointsOffLevel = 0;         // a layer point off its level the other way (should not happen)
+  long long numTrianglesInverted = 0;      // a layer triangle facing away from the base, or too small
+  long long numTrianglesCrossing = 0;      // tops of otherwise valid prisms passing through each other
+  long long numTrianglesMargin = 0;        // added to the junction zone by the margin rings
+  long long numIslands = 0;                // structured islands too small to keep
+  long long numIslandTriangles = 0;
+  long long numJunctionRegions = 0;        // connected pieces of the junction zone
+  long long numEvaluations = 0;
+};
+
+/**
+ * @brief Decides, triangle by triangle of the interface, whether the wall
+ * over it can be prism layers along the normals (structured, 1) or has to
+ * be filled with tetrahedra (0): the layer points p + (k/N) t n of its
+ * corners must all stand on their levels of the field, the layer triangles
+ * must face the way the base does, and the tops of the prisms kept must not
+ * pass through one another; the junction zone is then widened by the
+ * margin rings and small structured islands are given up.
+ * @param numLayers N, the layers through the thickness.
+ * @param structured One per interface triangle.
+ * @return 0 on success, 1 with error set otherwise.
+ */
+int ClassifyPrismZone(const Interface &input, const OffsetField &field, int numLayers,
+    const ZoneOptions &options, std::vector<unsigned char> &structured, ZoneReport &report, std::string &error);
 
 /**
  * @brief The angle below which TetGen refuses two facets on one edge as
