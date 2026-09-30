@@ -413,7 +413,7 @@ static void DihedralStats(const std::vector<double> &pts, const std::vector<ll> 
 }
 
 // The junction zone filled and joined to the prism layers: the whole wall as one tetrahedral mesh, over the given trimmed levels.
-static void FillHybridWithLevels(const Interface &iface, int numLayers, const std::vector<Surface> &surfs)
+static void FillHybridWithLevels(const Interface &iface, int numLayers, const std::vector<Surface> &surfs, bool innerLevels = true)
 {
   std::vector<double> fractions; for (int k = 1; k <= numLayers; k++) fractions.push_back((double)k/numLayers);
   std::string err;
@@ -426,7 +426,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   {
     pm = PrismMesh(); shell = JunctionShell();
     if (BuildPrismLayers(iface, structured, numLayers, pm, err) != 0) { printf("  FAIL prisms: %s\n", err.c_str()); numFailed++; return; }
-    const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err) == 0;
+    const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err, innerLevels) == 0;
     // as the glue does: a built shell with triangles passing through one another or folded onto each other widens the junction zone at the prisms whose layer
     // surface passes through a piece (a ring) and around the loops whose strips are at fault (two rings: a strip hops between the sides of a piece too narrow for it);
     // a loop without a chain widens its region; a piece with a chain no loop takes (a hole) gives the prisms owning or passing through it to the junction zone
@@ -485,7 +485,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   for (std::map<int, ll>::iterator it = byMarker.begin(); it != byMarker.end(); ++it) printf(" %d:%lld", it->first, it->second);
   printf("; boundary %lld, non-manifold %lld, miswound %lld, crossing %lld\n", nb, nn, nm, crossings);
   // the rings of the zone walls at the layers inside the wall are on three triangles: the wall below, the wall above and the layer's strip
-  const ll ringEdges = (ll)(numLayers - 1)*(ll)(pm.zoneBoundaryEdges.size()/2);
+  const ll ringEdges = innerLevels ? (ll)(numLayers - 1)*(ll)(pm.zoneBoundaryEdges.size()/2) : 0;   // without the inner layer surfaces the rings below the outer one lie on two wall triangles only
   Check(nb == 0 && nn == ringEdges && nm == 0 && crossings == 0, "the junction shell is closed, wound consistently and free of crossings (the layer rings on three triangles apart)");
   if (nb || nn != ringEdges || nm || crossings) return;
   // TetGen as the fill flow calls it

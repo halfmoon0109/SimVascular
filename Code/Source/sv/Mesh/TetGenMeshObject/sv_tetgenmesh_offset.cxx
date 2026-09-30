@@ -4495,7 +4495,7 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
 //--------------------
 int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
-    int erosionRings, int earPasses, JunctionShell &out, std::string &error)
+    int erosionRings, int earPasses, JunctionShell &out, std::string &error, bool innerLevels)
 {
   // the erosion of the pieces is by distance from the lifted loops, in
   // loop edges: the rings asked for, one edge each
@@ -4596,6 +4596,7 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
   for (ll t = 0; t < nt; t++) if (structured[(size_t)t]) structuredIds.push_back(t);
   for (int k = 1; k <= numLayers; k++)
   {
+    if (!innerLevels && k < numLayers) continue;   // the zone filled without the layer surfaces inside it
     Surface piece;
     std::vector<ll> crossingGuards, holeOwners, overPrismTets;
     // the lifted zone boundary edges at this level, for the erosion by distance
