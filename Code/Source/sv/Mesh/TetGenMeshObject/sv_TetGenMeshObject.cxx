@@ -3173,6 +3173,15 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
               (long long)piece.numScrapTriangles, (long long)piece.numScraps,
               (long long)piece.numHoleTriangles, (long long)piece.numHoles, (long long)piece.numChains);
         }
+        fprintf(stdout,"    the bands (pieces and strips, %lld triangles) relaxed with %lld edge flips and %lld point moves onto the level: triangles with an angle under 10 degrees %lld -> %lld, the smallest angle %.3g -> %.3g degrees%s\n",
+            (long long)junction.numBandTriangles, (long long)junction.numBandFlips, (long long)junction.numBandPointsMoved,
+            (long long)junction.numBandUnder10Before, (long long)junction.numBandUnder10After, junction.bandSmallestAngleBefore, junction.bandSmallestAngleAfter,
+            junction.relaxationReverted ? " (undone whole: the relaxed shell crossed or folded)" : "");
+        if (junction.numRelaxationUndone > 0 || junction.relaxationCrossingsAfter > 0 || junction.relaxationFoldsAfter > 0)
+        {
+          fprintf(stdout,"      the relaxed bands had %lld crossing triangles and %lld folded edges; %lld triangles had their relaxation undone locally\n",
+              (long long)junction.relaxationCrossingsAfter, (long long)junction.relaxationFoldsAfter, (long long)junction.numRelaxationUndone);
+        }
         // The strips whose triangles pass through another shell triangle, worst first: a strip that crosses is a loop zipped to a chain that does not run beside it
         {
           std::vector<svoffset::ZipReport> zips = junction.zips;

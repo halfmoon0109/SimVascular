@@ -631,6 +631,19 @@ struct JunctionShell
   std::vector<int> markers;              // per triangle: 1 the interface, 2 the outer surface, 100+k the layer k surface, 300+k the prism zone's wall at layer k
   std::vector<ZonePieceReport> pieces;   // [k-1]
   std::vector<ZipReport> zips;           // one per loop and level
+  // The bands (the pieces with their zipper strips) relaxed before the
+  // check: edge flips that raise the smallest angle and a smoothing of the
+  // pieces' points projected back onto the level, the prism rings fixed.
+  long long numBandFlips = 0;
+  long long numBandPointsMoved = 0;
+  long long numBandTriangles = 0;
+  long long numBandUnder10Before = 0;    // band triangles with an angle under 10 degrees, before and after
+  long long numBandUnder10After = 0;
+  double bandSmallestAngleBefore = 180.0;
+  double bandSmallestAngleAfter = 180.0;
+  bool relaxationReverted = false;       // the relaxation made the shell cross itself or fold and was undone whole (after the local undo below failed)
+  long long numRelaxationUndone = 0;     // triangles whose relaxation was undone locally (their points put back, their flips undone) for crossing or folding
+  long long relaxationCrossingsAfter = 0, relaxationFoldsAfter = 0;   // what the relaxed shell had before the undo, against the shell's own counts before
   long long numCappedChains = 0;         // short boundary chains of the pieces that no zone loop takes (a tunnel's mouth where two walls nearly touch, or a hole left by the trim), closed with a fan of triangles each
   long long numCapTriangles = 0;
   long long numCrossingTriangles = 0;    // shell triangles passing through another (svenvelope::CountCrossingTriangles over the whole shell)

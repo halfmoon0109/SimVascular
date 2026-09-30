@@ -448,6 +448,39 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   ll nb, nn, nm; CountEdges(shell.triangles, nb, nn, nm);
   std::vector<unsigned char> cr; double at[3]; ll crossings = svenvelope::CountCrossingTriangles(shell.points, shell.triangles, cr, at);
   std::map<int, ll> byMarker; for (size_t i = 0; i < shell.markers.size(); i++) byMarker[shell.markers[i]]++;
+  printf("  band relaxed: %lld flips, %lld moves; under 10 degrees %lld -> %lld of %lld, smallest %.2f -> %.2f; relaxed shell had %lld crossing, %lld folded; %lld triangles undone locally%s\n", shell.numBandFlips, shell.numBandPointsMoved, shell.numBandUnder10Before, shell.numBandUnder10After, shell.numBandTriangles, shell.bandSmallestAngleBefore, shell.bandSmallestAngleAfter, shell.relaxationCrossingsAfter, shell.relaxationFoldsAfter, shell.numRelaxationUndone, shell.relaxationReverted ? " (reverted whole)" : "");
+  {
+    // the band triangles still under 10 degrees, by how many of their corners are prism points (fixed by the relaxation): 0 piece interior, 1-2 strip or on the loop, 3 all fixed
+    ll byFixed[4] = {0, 0, 0, 0}, worstTri = -1; double worst = 180.0; int worstFixed = 0;
+    for (size_t i = 0; i < shell.markers.size(); i++)
+    {
+      if (shell.markers[i] == 1 || shell.markers[i] >= 300) continue;
+      const ll *tri = &shell.triangles[3*i];
+      double best = 180.0;
+      for (int j = 0; j < 3; j++)
+      {
+        double ab[3], ac[3];
+        for (int m = 0; m < 3; m++) { ab[m] = shell.points[3*tri[(j + 1)%3] + m] - shell.points[3*tri[j] + m]; ac[m] = shell.points[3*tri[(j + 2)%3] + m] - shell.points[3*tri[j] + m]; }
+        const double la = std::sqrt(ab[0]*ab[0] + ab[1]*ab[1] + ab[2]*ab[2]), lc = std::sqrt(ac[0]*ac[0] + ac[1]*ac[1] + ac[2]*ac[2]);
+        if (!(la > 0.0) || !(lc > 0.0)) { best = 0.0; break; }
+        best = std::min(best, std::acos(std::max(-1.0, std::min(1.0, (ab[0]*ac[0] + ab[1]*ac[1] + ab[2]*ac[2])/(la*lc))))*180.0/M_PI);
+      }
+      if (best >= 10.0) continue;
+      int fixedCorners = 0;
+      for (int j = 0; j < 3; j++) if (shell.prismPoint[(size_t)tri[j]] >= 0) fixedCorners++;
+      byFixed[fixedCorners]++;
+      if (best < worst) { worst = best; worstTri = (ll)i; worstFixed = fixedCorners; }
+    }
+    printf("  band triangles under 10 degrees by fixed corners: 0:%lld 1:%lld 2:%lld 3:%lld", byFixed[0], byFixed[1], byFixed[2], byFixed[3]);
+    if (worstTri >= 0)
+    {
+      const ll *tri = &shell.triangles[3*worstTri];
+      double c[3] = {0, 0, 0};
+      for (int j = 0; j < 3; j++) for (int m = 0; m < 3; m++) c[m] += shell.points[3*tri[j] + m]/3.0;
+      printf("; the worst %.2f degrees, marker %d, %d fixed corners, at (%.3f, %.3f, %.3f)", worst, shell.markers[worstTri], worstFixed, c[0], c[1], c[2]);
+    }
+    printf("\n");
+  }
   printf("  junction shell: %lld points, %zu triangles (zone interface %lld, zipper %lld); by marker:", (ll)(shell.points.size()/3), shell.triangles.size()/3, shell.numJunctionTriangles, shell.numZipperTriangles);
   for (std::map<int, ll>::iterator it = byMarker.begin(); it != byMarker.end(); ++it) printf(" %d:%lld", it->first, it->second);
   printf("; boundary %lld, non-manifold %lld, miswound %lld, crossing %lld\n", nb, nn, nm, crossings);
@@ -503,6 +536,36 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   DihedralStats(pts, pm.tetrahedra, "prism layers");
   DihedralStats(pts, zoneTets, "junction zone");
   DihedralStats(pts, all, "whole wall");
+  {
+    // the worst zone tetrahedron: where, and whose points (the prism mesh's, the pieces', or Steiner points of the fill)
+    const ll numPrism = (ll)(pm.points.size()/3), numShellOwn = (ll)(pts.size()/3) - (ll)steinerToAll.size();
+    ll worst = -1; double worstAngle = 180.0;
+    for (size_t t = 0; t < zoneTets.size()/4; t++) { const double d = MinDihedral(pts, &zoneTets[4*t]); if (d < worstAngle) { worstAngle = d; worst = (ll)t; } }
+    if (worst >= 0)
+    {
+      int prism = 0, piece = 0, steiner = 0; double c[3] = {0, 0, 0};
+      for (int m = 0; m < 4; m++) { const ll v = zoneTets[4*worst + m]; if (v < numPrism) prism++; else if (v < numShellOwn) piece++; else steiner++; for (int k = 0; k < 3; k++) c[k] += pts[3*v + k]/4.0; }
+      printf("  the worst zone tetrahedron: %.4f degrees at (%.3f, %.3f, %.3f), corners: %d prism, %d piece, %d Steiner\n", worstAngle, c[0], c[1], c[2], prism, piece, steiner);
+    }
+    // with SV_HYBRID_DUMP set, the shell and the zone's tetrahedra go to that file for a look afterwards
+    if (const char *dump = getenv("SV_HYBRID_DUMP"))
+    {
+      FILE *f = fopen(dump, "wb");
+      if (f != nullptr)
+      {
+        auto writeVec = [&](const void *data, size_t bytes, ll count) { fwrite(&count, sizeof(ll), 1, f); fwrite(data, 1, bytes, f); };
+        writeVec(shell.points.data(), shell.points.size()*sizeof(double), (ll)shell.points.size());
+        writeVec(shell.triangles.data(), shell.triangles.size()*sizeof(ll), (ll)shell.triangles.size());
+        std::vector<ll> markers(shell.markers.begin(), shell.markers.end());
+        writeVec(markers.data(), markers.size()*sizeof(ll), (ll)markers.size());
+        writeVec(shell.prismPoint.data(), shell.prismPoint.size()*sizeof(ll), (ll)shell.prismPoint.size());
+        writeVec(pts.data(), pts.size()*sizeof(double), (ll)pts.size());
+        writeVec(zoneTets.data(), zoneTets.size()*sizeof(ll), (ll)zoneTets.size());
+        fclose(f);
+        printf("  the shell and the zone's tetrahedra written to %s\n", dump);
+      }
+    }
+  }
 }
 
 // The same from the interface alone: the offset surfaces built and trimmed at the caps first.
