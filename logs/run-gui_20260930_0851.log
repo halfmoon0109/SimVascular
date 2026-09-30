@@ -1,25 +1,25 @@
 Reading plugin paths SV_PLUGIN_PATH environment variable...
 
 
-[Wed Sep 30 03:58:47 2026 
-2.135] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
-[2.138] OpenCASCADE module loaded.
+[Wed Sep 30 08:52:12 2026 
+2.192] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
+[2.195] OpenCASCADE module loaded.
 sv4guiDataManagerPluginActivator::start()
 sv4guiMeshingPluginActivator::start()
-[2.478] BlueBerry Workbench ready
+[2.543] BlueBerry Workbench ready
 Expand
 Expand
 Expand
 Expand
-!31.081! WARNING: QPainter::end: Painter ended with 2 saved states
-!31.081! WARNING: QPainter::end: Painter ended with 2 saved states
-!31.081! WARNING: QPainter::end: Painter ended with 2 saved states
-!32.021! WARNING: QPainter::end: Painter ended with 2 saved states
-!32.022! WARNING: QPainter::end: Painter ended with 2 saved states
-!32.022! WARNING: QPainter::end: Painter ended with 2 saved states
-!32.080! WARNING: QPainter::end: Painter ended with 2 saved states
-!32.080! WARNING: QPainter::end: Painter ended with 2 saved states
-!32.080! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.814! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.814! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.814! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.892! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.893! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.894! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.949! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.949! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.949! WARNING: QPainter::end: Painter ended with 2 saved states
 Getting sizing function Surface
 Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
   Number of triangles: 4218044
@@ -42,7 +42,7 @@ Remeshing surface with MMG...
 
   -- MESH QUALITY   4218044
      BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
-  -- PHASE 1 COMPLETED.     3.270s
+  -- PHASE 1 COMPLETED.     3.167s
 
   -- PHASE 2 : ISOTROPIC MESHING
         78112 splitted,  1499785 collapsed,    78452 swapped, 5 iter.
@@ -50,7 +50,7 @@ Remeshing surface with MMG...
   -- GRADATION : 1.300000
          1065 splitted,       28 collapsed,       64 swapped, 3 iter.
         90659 splitted,   356083 collapsed,    26568 swapped,  9421952 moved, 2 iter. 
-  -- PHASE 2 COMPLETED.     23.655s
+  -- PHASE 2 COMPLETED.     25.427s
 
   &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
    END OF MODULE MMGS: IMB-LJLL 
@@ -64,7 +64,7 @@ Remeshing surface with MMG...
      NUMBER OF TRIANGLES    896556
      NUMBER OF EDGES          2430   RIDGES      2430
 
-   MMGSLIB: ELAPSED TIME  27.041s
+   MMGSLIB: ELAPSED TIME  28.704s
 Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
   Number of triangles: 888201
   Min / Avg / Max: 1.000 / 1.213 / 8.421
@@ -127,20 +127,20 @@ Wall outer surface and its 2 layer surface(s) as offsets of the interface at 0.3
   offset surface: marching tetrahedra over the cloud (surface 3 of 3, at 1 of the thickness)
   offset surface: the decimation of the contour to the interface's size (surface 3 of 3, at 1 of the thickness)
   thickness 0.1 to 1.2; 14 cap rims continued by collars of 1390 triangles
-  the field was sampled on 1781882 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges, each offset point 0.1 of its distance off its ray); 11.2 s for the field
+  the field was sampled on 1781882 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges, each offset point 0.1 of its distance off its ray); 11.3 s for the field
   wrote wall_layer_1_of_3_offset.vtp in /work
   surface 1 of 3, at 0.333 of the thickness (layer_1_of_3):
-  12729997 tetrahedra over the cloud, 3209958 of them cut by the level (8.1 s); the contour had 2314832 points and 4629680 triangles (17.2 s; 0 cloud points on the level itself, 0 triangles of no area left out, 38 points still off the level after 16 steps); 1719785 edges collapsed onto the level to the interface's own size, leaving 595047 points and 1190110 triangles (155.5 s; 0 operations refused because a triangle they would make passes through a neighbour)
+  12729997 tetrahedra over the cloud, 3209958 of them cut by the level (8.7 s); the contour had 2314832 points and 4629680 triangles (16.8 s; 0 cloud points on the level itself, 0 triangles of no area left out, 38 points still off the level after 16 steps); 1719785 edges collapsed onto the level to the interface's own size, leaving 595047 points and 1190110 triangles (157.7 s; 0 operations refused because a triangle they would make passes through a neighbour)
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation; the smallest angle between two triangles on an edge is 1.41 degrees)
   wrote wall_layer_2_of_3_offset.vtp in /work
   surface 2 of 3, at 0.667 of the thickness (layer_2_of_3):
-  12729997 tetrahedra over the cloud, 3109678 of them cut by the level (8.5 s); the contour had 2212333 points and 4424674 triangles (15.8 s; 0 cloud points on the level itself, 0 triangles of no area left out, 18 points still off the level after 16 steps); 1642552 edges collapsed onto the level to the interface's own size, leaving 569781 points and 1139570 triangles (152.2 s; 4 operations refused because a triangle they would make passes through a neighbour)
+  12729997 tetrahedra over the cloud, 3109678 of them cut by the level (8.2 s); the contour had 2212333 points and 4424674 triangles (15.9 s; 0 cloud points on the level itself, 0 triangles of no area left out, 18 points still off the level after 16 steps); 1642552 edges collapsed onto the level to the interface's own size, leaving 569781 points and 1139570 triangles (154.5 s; 4 operations refused because a triangle they would make passes through a neighbour)
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation; the smallest angle between two triangles on an edge is 1.14 degrees)
   wrote wall_outer_offset.vtp in /work
   surface 3 of 3, at 1 of the thickness (outer):
-  12729997 tetrahedra over the cloud, 3102931 of them cut by the level (7.9 s); the contour had 2207744 points and 4415520 triangles (17.0 s; 0 cloud points on the level itself, 0 triangles of no area left out, 46 points still off the level after 16 steps); 1498029 edges collapsed onto the level to the interface's own size, leaving 709714 points and 1419460 triangles (152.8 s; 0 operations refused because a triangle they would make passes through a neighbour)
+  12729997 tetrahedra over the cloud, 3102931 of them cut by the level (8.2 s); the contour had 2207744 points and 4415520 triangles (17.1 s; 0 cloud points on the level itself, 0 triangles of no area left out, 46 points still off the level after 16 steps); 1498029 edges collapsed onto the level to the interface's own size, leaving 709714 points and 1419460 triangles (156.8 s; 0 operations refused because a triangle they would make passes through a neighbour)
   0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (1 unfolded by the decimation; the smallest angle between two triangles on an edge is 0.855 degrees)
-  30815972 field evaluations in all; 582.0 s for the 3 surface(s)
+  30815972 field evaluations in all; 590.8 s for the 3 surface(s)
   trimming at the caps by the ownership the offset surface carries
     cap at (-7.3418, -29.886, 73.207): 127 points past its plane came off, 30 moved onto it
     cap at (6.8102, -35.173, 74.946): 124 points past its plane came off, 29 moved onto it
@@ -290,43 +290,43 @@ Hybrid wall: prism layers where the interface extrudes cleanly through the wall,
   junction shell attempt 1: a zone boundary loop of 43 points around (1.610504, -23.798517, 77.613252) at layer 1 has no boundary chain of the layer surface's piece within 1.330192 (the nearest one is 0.264415 away on average); the junction zone is widened by two rings around that loop (558 more triangles) and the shell built again
   junction shell attempt 2: a zone boundary loop of 97 points around (2.611441, -24.295130, 76.802283) at layer 1 has no boundary chain of the layer surface's piece within 1.354258 (the nearest one is 0.252209 away on average); the junction zone is widened by two rings around that loop (385 more triangles) and the shell built again
   junction shell attempt 3: a zone boundary loop of 89 points around (-2.211421, -48.408789, 95.304834) at layer 2 has no boundary chain of the layer surface's piece within 0.509578 (the nearest one is 0.087826 away on average); the junction zone is widened by two rings around that loop (775 more triangles) and the shell built again
-  junction shell attempt 4: 1213 of its triangles pass through another and 1 of its edges are folded; the junction zone is widened at 0 prisms whose layer surface passes through a piece and by 2 rings around the 1260 points of the loops whose strips are at fault (4071 more triangles), and the shell is built again
-  junction shell attempt 5: a zone boundary loop of 90 points around (-27.362409, -38.532462, -152.015973) at layer 1 has no boundary chain of the layer surface's piece within 3.952989 (the nearest one is 0.809303 away on average); the junction zone is widened by two rings around that loop (649 more triangles) and the shell built again
-  junction shell attempt 6: a zone boundary loop of 119 points around (-2.165747, -48.147730, 95.315785) at layer 3 has no boundary chain of the layer surface's piece within 0.513530 (the nearest one is 0.094514 away on average); the junction zone is widened by two rings around that loop (1008 more triangles) and the shell built again
-  junction shell attempt 7: a zone boundary loop of 131 points around (-2.172837, -48.091553, 95.340928) at layer 3 has no boundary chain of the layer surface's piece within 0.518073 (the nearest one is 0.096264 away on average); the junction zone is widened by two rings around that loop (1110 more triangles) and the shell built again
-  junction shell attempt 8: a zone boundary loop of 149 points around (-2.143093, -48.020384, 95.358557) at layer 3 has no boundary chain of the layer surface's piece within 0.507014 (the nearest one is 0.096248 away on average); the junction zone is widened by two rings around that loop (1217 more triangles) and the shell built again
-  junction shell attempt 9: a zone boundary loop of 155 points around (-2.294641, -48.842372, 95.228862) at layer 3 has no boundary chain of the layer surface's piece within 0.522438 (the nearest one is 0.098402 away on average); the junction zone is widened by two rings around that loop (1335 more triangles) and the shell built again
-  junction shell attempt 10: 16 of its triangles pass through another and 1 of its edges are folded; the junction zone is widened at 0 prisms whose layer surface passes through a piece and by 2 rings around the 193 points of the loops whose strips are at fault (825 more triangles), and the shell is built again
-  prism zone: 845905 of 888201 interface triangles (95.2%) extrude cleanly through all 3 layer(s); left to the mesher: 0 with a layer point off its level (4759 points covered by another wall), 7 whose top faces the wrong way or is too small, 247 whose tops pass through a neighbour's, 18008 within the margin of those, 1 in 1 islands too small to keep; 33 junction region(s); 1333284 field evaluations (1.8 s for the field, 7.1 s to classify)
-  the junction zone was widened 10 time(s) by 11933 triangles where a layer surface's piece was too narrow, leaving 845905 of 888201 triangles (95.2%) to the prisms
-  prism layers: 7613145 tetrahedra on 1719590 points; 845905 tops, 21420 side triangles toward the junction zones, 4170 at the cap rims (13.0 s)
-  junction shell: 108036 points and 223144 triangles - 42296 of the zones' interface, 21420 prism walls, 104604 of the layer surfaces' pieces and 54824 of the outer surface's, 23061 of them zipper strips between a piece and the prism walls' ring, 0 fans closing 0 short chains of the pieces no loop takes (353.4 s)
-    layer 1's piece: 45777 of 1181550 triangles kept over the junction zones (1124252 owned by the prism zone, 4873 hanging over the prism zone, 5954 eroded from its edge, 0 passing through the prism layers, 694 ears, 0 at 0 pinches, 0 in 0 scraps; 0 in 0 holes), 53 boundary chain(s)
-    layer 2's piece: 43731 of 1131308 triangles kept over the junction zones (1076349 owned by the prism zone, 4679 hanging over the prism zone, 5901 eroded from its edge, 0 passing through the prism layers, 628 ears, 0 at 0 pinches, 20 in 2 scraps; 20 in 2 holes), 53 boundary chain(s)
-    the outer surface's piece: 46859 of 1410907 triangles kept over the junction zones (1349104 owned by the prism zone, 5168 hanging over the prism zone, 8847 eroded from its edge, 0 passing through the prism layers, 929 ears, 0 at 0 pinches, 0 in 0 scraps; 0 in 0 holes), 53 boundary chain(s)
-    159 zipper strips, 0 with triangles passing through another shell triangle (the core counts 0 crossing triangles and 0 folded edges in the shell)
-  the junction shell has 7140 edges on three facets (the prism walls' rings at the layers), 0 wound against each other, 0 triangles passing through another, 0 edges whose two triangles lie on each other (the smallest angle between two triangles on an edge is 1.35 degrees)
+  junction shell attempt 4: 1198 of its triangles pass through another and 1 of its edges are folded; the junction zone is widened at 0 prisms whose layer surface passes through a piece and by 2 rings around the 1061 points of the loops whose strips are at fault (3195 more triangles), and the shell is built again
+  junction shell attempt 5: a zone boundary loop of 119 points around (-2.165747, -48.147730, 95.315785) at layer 3 has no boundary chain of the layer surface's piece within 0.513530 (the nearest one is 0.094514 away on average); the junction zone is widened by two rings around that loop (1008 more triangles) and the shell built again
+  junction shell attempt 6: a zone boundary loop of 131 points around (-2.172837, -48.091553, 95.340928) at layer 3 has no boundary chain of the layer surface's piece within 0.518073 (the nearest one is 0.096264 away on average); the junction zone is widened by two rings around that loop (1110 more triangles) and the shell built again
+  junction shell attempt 7: a zone boundary loop of 149 points around (-2.143093, -48.020384, 95.358557) at layer 3 has no boundary chain of the layer surface's piece within 0.507014 (the nearest one is 0.096248 away on average); the junction zone is widened by two rings around that loop (1217 more triangles) and the shell built again
+  junction shell attempt 8: a zone boundary loop of 155 points around (-2.294641, -48.842372, 95.228862) at layer 3 has no boundary chain of the layer surface's piece within 0.522438 (the nearest one is 0.098402 away on average); the junction zone is widened by two rings around that loop (1335 more triangles) and the shell built again
+  junction shell attempt 9: 16 of its triangles pass through another and 1 of its edges are folded; the junction zone is widened at 0 prisms whose layer surface passes through a piece and by 2 rings around the 193 points of the loops whose strips are at fault (825 more triangles), and the shell is built again
+  prism zone: 847430 of 888201 interface triangles (95.4%) extrude cleanly through all 3 layer(s); left to the mesher: 0 with a layer point off its level (4759 points covered by another wall), 7 whose top faces the wrong way or is too small, 247 whose tops pass through a neighbour's, 18008 within the margin of those, 1 in 1 islands too small to keep; 33 junction region(s); 1333284 field evaluations (1.8 s for the field, 7.3 s to classify)
+  the junction zone was widened 9 time(s) by 10408 triangles where a layer surface's piece was too narrow, leaving 847430 of 888201 triangles (95.4%) to the prisms
+  prism layers: 7626870 tetrahedra on 1721810 points; 847430 tops, 21162 side triangles toward the junction zones, 4170 at the cap rims (12.0 s)
+  junction shell: 103947 points and 214872 triangles - 40771 of the zones' interface, 21162 prism walls, 100504 of the layer surfaces' pieces and 52435 of the outer surface's, 22740 of them zipper strips between a piece and the prism walls' ring, 0 fans closing 0 short chains of the pieces no loop takes (388.0 s)
+    layer 1's piece: 43820 of 1181550 triangles kept over the junction zones (1126360 owned by the prism zone, 4820 hanging over the prism zone, 5870 eroded from its edge, 0 passing through the prism layers, 680 ears, 0 at 0 pinches, 0 in 0 scraps; 0 in 0 holes), 52 boundary chain(s)
+    layer 2's piece: 41805 of 1131308 triangles kept over the junction zones (1078418 owned by the prism zone, 4622 hanging over the prism zone, 5817 eroded from its edge, 0 passing through the prism layers, 626 ears, 0 at 0 pinches, 20 in 2 scraps; 20 in 2 holes), 52 boundary chain(s)
+    the outer surface's piece: 44574 of 1410907 triangles kept over the junction zones (1351633 owned by the prism zone, 5109 hanging over the prism zone, 8695 eroded from its edge, 0 passing through the prism layers, 896 ears, 0 at 0 pinches, 0 in 0 scraps; 0 in 0 holes), 52 boundary chain(s)
+    the bands (pieces and strips, 152939 triangles) relaxed with 7594 edge flips and 213166 point moves onto the level: triangles with an angle under 10 degrees 1933 -> 33, the smallest angle 0.355 -> 4.51 degrees
+    156 zipper strips, 0 with triangles passing through another shell triangle (the core counts 0 crossing triangles and 0 folded edges in the shell)
+  the junction shell has 7054 edges on three facets (the prism walls' rings at the layers), 0 wound against each other, 0 triangles passing through another, 0 edges whose two triangles lie on each other (the smallest angle between two triangles on an edge is 3.2 degrees)
   wrote wall_junction_shell.vtp in /work
-Filling the junction zones with TetGen tetrahedra: their shell has 108036 points and 223144 triangles
-  the shell carries 126024 triangles as facets inside the wall (layer surfaces and the prism zone's walls)
+Filling the junction zones with TetGen tetrahedra: their shell has 103947 points and 214872 triangles
+  the shell carries 121666 triangles as facets inside the wall (layer surfaces and the prism zone's walls)
   3 layers: the fill's quality bounds are loosened to radius-edge 2 and dihedral 5 degrees
   TetGen wall fill started...
 Delaunizing vertices...
-Delaunay seconds:  0.313684
+Delaunay seconds:  0.30446
 Creating surface mesh ...
-Surface mesh seconds:  0.114294
+Surface mesh seconds:  0.108108
 Recovering boundaries...
-Boundary recovery seconds:  0.592033
+Boundary recovery seconds:  0.546044
 Removing exterior tetrahedra ...
-Exterior tets removal seconds:  0.118629
+Exterior tets removal seconds:  0.117133
 Suppressing Steiner points ...
-Steiner suppression seconds:  0.00012
+Steiner suppression seconds:  0.000153
 Recovering Delaunayness...
-Delaunay recovery seconds:  0.150694
+Delaunay recovery seconds:  0.141286
 Refining mesh...
-Refinement seconds:  0.281018
+Refinement seconds:  0.142922
 Optimizing mesh...
-Optimization seconds:  0.128611
+Optimization seconds:  0.105181
 
 Writing nodes.
 Writing elements.
@@ -334,54 +334,53 @@ Writing faces.
 Writing edges.
 Writing neighbors.
 
-Output seconds:  0.061206
-Total running seconds:  1.76165
+Output seconds:  0.060627
+Total running seconds:  1.527
 
 Statistics:
 
-  Input points: 108036
-  Input facets: 223144
+  Input points: 103947
+  Input facets: 214872
   Input holes: 0
   Input regions: 0
 
-  Mesh points: 109541
-  Mesh tetrahedra: 504882
-  Mesh faces: 1069034
-  Mesh faces on facets: 223144
-  Mesh edges on segments: 331146
-  Steiner points inside domain: 1493
+  Mesh points: 104139
+  Mesh tetrahedra: 468441
+  Mesh faces: 994066
+  Mesh faces on facets: 214872
+  Mesh edges on segments: 318781
+  Steiner points inside domain: 190
 
   TetGen wall fill finished
-  junction zones filled with 504882 tetrahedra on 109541 points (108036 the shell's, 1505 the mesher's own); 7613145 prism tetrahedra joined to them on 1685936 more points
-  wall filled with 8118027 tetrahedra on 1795477 nodes
-Wall mesh quality (the wall's 8118027 tetrahedra alone, before they join the fluid mesh):
-  smallest dihedral angle 0.121 degrees; under 1 degree: 34, under 5: 780 (0.01%), under 10: 7929 (0.10%)
-  the junction zones: 504882 tetrahedra, smallest dihedral angle 0.121 degrees, under 5: 778 (0.15%), under 10: 7926 (1.57%)
-  the prism layers: 7613145 tetrahedra, smallest dihedral angle 4.478 degrees, under 5: 2 (0.00%), under 10: 3 (0.00%)
-  dihedral angle 0.121 degrees at (-20.41, -43.16, -148.9), corners on the junction shell + the mesher's own
-  dihedral angle 0.133 degrees at (-20.66, -43.22, -148.9), corners on the junction shell + the mesher's own
-  dihedral angle 0.134 degrees at (-20.35, -43.35, -149.1), corners on the junction shell + the mesher's own
-  dihedral angle 0.226 degrees at (-20.23, -43.26, -149), corners on the junction shell + the mesher's own
-  dihedral angle 0.281 degrees at (15.52, -32.75, 76.92), corners on the junction shell only
+  junction zones filled with 468441 tetrahedra on 104139 points (103947 the shell's, 192 the mesher's own); 7626870 prism tetrahedra joined to them on 1689068 more points
+  wall filled with 8095311 tetrahedra on 1793207 nodes
+Wall mesh quality (the wall's 8095311 tetrahedra alone, before they join the fluid mesh):
+  smallest dihedral angle 0.501 degrees; under 1 degree: 9, under 5: 130 (0.00%), under 10: 4826 (0.06%)
+  the junction zones: 468441 tetrahedra, smallest dihedral angle 0.501 degrees, under 5: 128 (0.03%), under 10: 4823 (1.03%)
+  the prism layers: 7626870 tetrahedra, smallest dihedral angle 4.478 degrees, under 5: 2 (0.00%), under 10: 3 (0.00%)
+  dihedral angle 0.501 degrees at (-32.16, -34.58, -148.2), corners on the junction shell only
+  dihedral angle 0.511 degrees at (-1.997, -48.62, 96.84), corners on the junction shell only
+  dihedral angle 0.757 degrees at (-41.67, -25.59, -100.9), corners on the junction shell only
+  dihedral angle 0.803 degrees at (-1.383, -49.08, 94.2), corners on the junction shell only
+  dihedral angle 0.910 degrees at (-41.74, -25.65, -100.9), corners on the junction shell only
   the tetrahedra under 10 degrees, by where their corners lie (a pair of neighbouring surfaces is the layer spacing against the facet size; one surface only is a boundary sliver the mesher cannot move under -Y):
-    7526 (94.9%) on the junction shell only
-    397 (5.0%) on the junction shell + the mesher's own
-    3 (0.0%) on the prism layers only
-    3 (0.0%) on the mesher's own only
-  wrote wall_fill_poor.vtu: the 7929 tetrahedra under 10 degrees with their angle and the bands of their corners (0 the interface, then the layers in order, then the outer surface, then the mesher's own points)
+    4785 (99.2%) on the junction shell only
+    38 (0.8%) on the junction shell + the mesher's own
+    3 (0.1%) on the prism layers only
+  wrote wall_fill_poor.vtu: the 4826 tetrahedra under 10 degrees with their angle and the bands of their corners (0 the interface, then the layers in order, then the outer surface, then the mesher's own points)
 Mesh quality (aspect ratio, 1.0 is an equilateral tetrahedron):
-  Number of elements: 8118027
-  Min / Avg / Max: 1.019 / 1.860 / 344.847
-  Elements with aspect ratio > 3 (distorted): 48845 (0.60%)
-  Elements with aspect ratio > 10 (poor): 965 (0.01%)
+  Number of elements: 8095311
+  Min / Avg / Max: 1.018 / 1.843 / 398.554
+  Elements with aspect ratio > 3 (distorted): 23043 (0.28%)
+  Elements with aspect ratio > 10 (poor): 202 (0.00%)
   Mesh quality assessment: ACCEPTABLE (some distorted elements)
-  aspect ratio 344.847 at element centroid (-20.347, -43.347, -149.08)
-  aspect ratio 311.729 at element centroid (15.517, -32.748, 76.92)
-  aspect ratio 292.992 at element centroid (15.521, -32.749, 76.947)
-  aspect ratio 291.315 at element centroid (-20.655, -43.221, -148.93)
-  aspect ratio 270.457 at element centroid (-20.414, -43.161, -148.94)
-  the prism layers add 845905 interface, 845905 outer and 4170 side wall triangles to the wall boundary; the whole interface is on 888201 triangles (the surface has 888201)
-  wall boundary tagged from 223144 TetGen boundary faces: 42296 interface, 54824 outer, 0 side wall triangles (shell had 42296, 54824, 0), 126024 faces of layer surfaces inside the wall left out (shell had 126024); the outer wall is ModelFaceID 41
+  aspect ratio 398.554 at element centroid (-32.163, -34.577, -148.21)
+  aspect ratio 116.443 at element centroid (-1.9972, -48.62, 96.835)
+  aspect ratio 89.999 at element centroid (-3.4911, -47.311, 94.484)
+  aspect ratio 83.034 at element centroid (-41.673, -25.591, -100.89)
+  aspect ratio 79.553 at element centroid (7.6778, -37.571, 66.142)
+  the prism layers add 847430 interface, 847430 outer and 4170 side wall triangles to the wall boundary; the whole interface is on 888201 triangles (the surface has 888201)
+  wall boundary tagged from 214872 TetGen boundary faces: 40771 interface, 52435 outer, 0 side wall triangles (shell had 40771, 52435, 0), 121666 faces of layer surfaces inside the wall left out (shell had 121666); the outer wall is ModelFaceID 41
 Getting sizing function caps
 Got function caps
 Iteration 1/10
@@ -399,19 +398,19 @@ Converting to TetGen...
 Adding mesh sizing metric...
 TetGen Meshing Started...
 Delaunizing vertices...
-Delaunay seconds:  1.40916
+Delaunay seconds:  1.45116
 Creating surface mesh ...
-Surface mesh seconds:  0.66091
+Surface mesh seconds:  0.636265
 Recovering boundaries...
-Boundary recovery seconds:  2.3559
+Boundary recovery seconds:  2.43335
 Removing exterior tetrahedra ...
-Exterior tets removal seconds:  0.911935
+Exterior tets removal seconds:  0.879068
 Recovering Delaunayness...
-Delaunay recovery seconds:  0.51883
+Delaunay recovery seconds:  0.518014
 Refining mesh...
-Refinement seconds:  107.559
+Refinement seconds:  112.313
 Optimizing mesh...
-Optimization seconds:  6.01213
+Optimization seconds:  6.43662
 
 Writing nodes.
 Writing elements.
@@ -420,8 +419,8 @@ Writing edges.
 Writing metrics.
 Writing neighbors.
 
-Output seconds:  2.50223
-Total running seconds:  121.934
+Output seconds:  2.43914
+Total running seconds:  127.112
 
 Statistics:
 
@@ -442,30 +441,23 @@ Note: the NewRegionBoundaryLayer option is ignored when generating a wall mesh
 Appending Boundary Layer and Volume Mesh
 Mesh Appended
 Mesh quality (aspect ratio, 1.0 is an equilateral tetrahedron):
-  Number of elements: 36580430
-  Min / Avg / Max: 1.000 / 1.869 / 344.847
-  Elements with aspect ratio > 3 (distorted): 3385048 (9.25%)
-  Elements with aspect ratio > 10 (poor): 1010 (0.00%)
+  Number of elements: 36557714
+  Min / Avg / Max: 1.000 / 1.865 / 398.554
+  Elements with aspect ratio > 3 (distorted): 3359246 (9.19%)
+  Elements with aspect ratio > 10 (poor): 247 (0.00%)
   Mesh quality assessment: ACCEPTABLE (some distorted elements)
-  aspect ratio 344.847 at element centroid (-20.347, -43.347, -149.08)
-  aspect ratio 311.729 at element centroid (15.517, -32.748, 76.92)
-  aspect ratio 292.992 at element centroid (15.521, -32.749, 76.947)
-  aspect ratio 291.315 at element centroid (-20.655, -43.221, -148.93)
-  aspect ratio 270.457 at element centroid (-20.414, -43.161, -148.94)
-Number of Nodes: 6134571
-Number of Elems: 36580430
-Number of Edges: 4038990
-Number of Faces: 2692660
+  aspect ratio 398.554 at element centroid (-32.163, -34.577, -148.21)
+  aspect ratio 116.443 at element centroid (-1.9972, -48.62, 96.835)
+  aspect ratio 89.999 at element centroid (-3.4911, -47.311, 94.484)
+  aspect ratio 83.034 at element centroid (-41.673, -25.591, -100.89)
+  aspect ratio 79.553 at element centroid (7.6778, -37.571, 66.142)
+Number of Nodes: 6132311
+Number of Elems: 36557714
+Number of Edges: 4037694
+Number of Faces: 2691796
 
 Mesh Quality (Aspect Ratio):
-Min / Avg / Max: 1.000 / 1.869 / 344.847
-Aspect Ratio > 3 (distorted): 3385048 (9.25%)
-Aspect Ratio > 10 (poor): 1010 (0.00%)
+Min / Avg / Max: 1.000 / 1.865 / 398.554
+Aspect Ratio > 3 (distorted): 3359246 (9.19%)
+Aspect Ratio > 10 (poor): 247 (0.00%)
 Assessment: ACCEPTABLE (some distorted elements)
-!1997.168! WARNING: QPainter::end: Painter ended with 2 saved states
-!1997.205! WARNING: QPainter::end: Painter ended with 2 saved states
-!1999.476! WARNING: QPainter::end: Painter ended with 2 saved states
-!1999.515! WARNING: QPainter::end: Painter ended with 2 saved states
-[2013.788] Closing workbench...
-!2014.790! WARNING: Empty filename passed to function
-[2014.862] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
