@@ -413,7 +413,7 @@ static void DihedralStats(const std::vector<double> &pts, const std::vector<ll> 
 }
 
 // The junction zone filled and joined to the prism layers: the whole wall as one tetrahedral mesh, over the given trimmed levels.
-static void FillHybridWithLevels(const Interface &iface, int numLayers, const std::vector<Surface> &surfs, bool innerLevels = true, double bandJitter = 0.15)
+static void FillHybridWithLevels(const Interface &iface, int numLayers, const std::vector<Surface> &surfs, bool innerLevels = true, const BandRelaxation &relaxation = BandRelaxation())
 {
   std::vector<double> fractions; for (int k = 1; k <= numLayers; k++) fractions.push_back((double)k/numLayers);
   std::string err;
@@ -426,7 +426,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   {
     pm = PrismMesh(); shell = JunctionShell();
     if (BuildPrismLayers(iface, structured, numLayers, pm, err) != 0) { printf("  FAIL prisms: %s\n", err.c_str()); numFailed++; return; }
-    const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err, innerLevels, bandJitter) == 0;
+    const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err, innerLevels, relaxation) == 0;
     // as the glue does: a built shell with triangles passing through one another or folded onto each other widens the junction zone at the prisms whose layer
     // surface passes through a piece (a ring) and around the loops whose strips are at fault (two rings: a strip hops between the sides of a piece too narrow for it);
     // a loop without a chain widens its region; a piece with a chain no loop takes (a hole) gives the prisms owning or passing through it to the junction zone
@@ -449,6 +449,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   std::vector<unsigned char> cr; double at[3]; ll crossings = svenvelope::CountCrossingTriangles(shell.points, shell.triangles, cr, at);
   std::map<int, ll> byMarker; for (size_t i = 0; i < shell.markers.size(); i++) byMarker[shell.markers[i]]++;
   printf("  band relaxed: %lld flips, %lld moves; under 10 degrees %lld -> %lld of %lld, smallest %.2f -> %.2f; relaxed shell had %lld crossing, %lld folded; %lld triangles undone locally%s\n", shell.numBandFlips, shell.numBandPointsMoved, shell.numBandUnder10Before, shell.numBandUnder10After, shell.numBandTriangles, shell.bandSmallestAngleBefore, shell.bandSmallestAngleAfter, shell.relaxationCrossingsAfter, shell.relaxationFoldsAfter, shell.numRelaxationUndone, shell.relaxationReverted ? " (reverted whole)" : "");
+  printf("  band edges collapsed %lld, free points on three triangles removed %lld (%lld triangles gone)%s\n", shell.numBandCollapses, shell.numBandVerticesRemoved, shell.numBandTrianglesRemoved, shell.collapseReverted ? " (undone: the shell crossed or folded)" : "");
   {
     // the band triangles still under 10 degrees, by how many of their corners are prism points (fixed by the relaxation): 0 piece interior, 1-2 strip or on the loop, 3 all fixed
     ll byFixed[4] = {0, 0, 0, 0}, worstTri = -1; double worst = 180.0; int worstFixed = 0;

@@ -4491,11 +4491,823 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
 }
 
 //--------------------
+// RelaxJunctionBands
+//--------------------
+// 3b. The bands relaxed. The pieces are marching-tetrahedra triangles
+// decimated to the interface's size and the strips are what the greedy
+// zipper makes of a jagged chain, so the band is uneven and the strips
+// hold long thin triangles standing off the surface (the user's picture,
+// 2026-09-30), and the mesher's boundary slivers sit on them (95% of the
+// wall's tetrahedra under 10 degrees in the 18th run). Each band is
+// relaxed in rounds of edge flips that raise the smallest angle of the
+// two triangles on the edge (no inversion, no doubled edge) and a
+// smoothing of the pieces' points toward their neighbours' mean, put
+// back onto the level along the surface normal with the field (secant
+// steps), the prism rings' points fixed. Every flip and move is tested
+// against the shell's triangles near it with the decimation's crossing
+// guard and refused if it would make one pass through another (without
+// the guard, the relaxation of the user's model made crossings and had
+// to be undone whole, 2026-09-30); a relaxation that still leaves the
+// shell crossing itself more than before is undone.
+// The shell's own points may move and its band triangles may be flipped;
+// the points flagged fixed (the prism mesh's) stay. Callable on a built
+// shell too (a compacted one flags the points with a prismPoint), for the
+// relaxation to be studied apart from the builder.
+int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::vector<double> &fractions,
+    const std::vector<unsigned char> &fixed, const BandRelaxation &options)
+{
+  if (fixed.size() != out.points.size()/3 || fractions.empty()) return 1;
+  const int rounds = options.rounds;
+  const double bandJitter = options.jitter;
+  if (rounds <= 0) return 0;
+  const int numLayers = (int)fractions.size();
+  std::vector<double> pointsBefore(out.points);
+  std::vector<ll> trianglesBefore(out.triangles);
+  std::vector<unsigned char> crossingBefore;
+  double atBefore[3];
+  const ll numCrossingBefore = svenvelope::CountCrossingTriangles(out.points, out.triangles, crossingBefore, atBefore);
+  std::vector<FoldedPair> foldedBefore;
+  double smallestFoldBefore = 180.0;
+  const ll numFoldedBefore = ListFoldedEdges(out.points, out.triangles, foldDegrees, (size_t)1 << 20, foldedBefore, smallestFoldBefore);
+  std::map<ll, std::vector<ll> > flipPartners;   // per flipped triangle: the triangles it was flipped with
+  std::vector<unsigned char> dead(out.triangles.size()/3, 0);
+  CrossingGuard guard(out.points, out.triangles, dead);
+  double guardCell = 1.0;
+  {
+    // the grid's cell: twice the mean edge of the bands' triangles
+    double sum = 0.0;
+    ll n = 0;
+    for (size_t i = 0; i < out.markers.size(); i++)
+    {
+      if (out.markers[i] == 1 || out.markers[i] >= 300) continue;
+      const ll *tri = &out.triangles[(size_t)3*i];
+      for (int j = 0; j < 3; j++) { sum += Distance(&out.points[(size_t)3*tri[j]], &out.points[(size_t)3*tri[(j + 1)%3]]); n++; }
+    }
+    guardCell = n > 0 ? 2.0*sum/(double)n : 1.0;
+    guard.Build(guardCell);
+  }
+  auto smallestAngle = [&](const ll *tri) -> double
+  {
+    double best = 180.0;
+    for (int j = 0; j < 3; j++)
+    {
+      const double *a = &out.points[(size_t)3*tri[j]], *b = &out.points[(size_t)3*tri[(j + 1)%3]], *c = &out.points[(size_t)3*tri[(j + 2)%3]];
+      double ab[3], ac[3];
+      Sub(b, a, ab); Sub(c, a, ac);
+      const double la = Norm(ab), lc = Norm(ac);
+      if (!(la > 0.0) || !(lc > 0.0)) return 0.0;
+      double cs = Dot(ab, ac)/(la*lc);
+      cs = std::max(-1.0, std::min(1.0, cs));
+      best = std::min(best, std::acos(cs)*180.0/M_PI);
+    }
+    return best;
+  };
+  auto normalOf = [&](const ll *tri, double n[3])
+  {
+    double ab[3], ac[3];
+    Sub(&out.points[(size_t)3*tri[1]], &out.points[(size_t)3*tri[0]], ab);
+    Sub(&out.points[(size_t)3*tri[2]], &out.points[(size_t)3*tri[0]], ac);
+    Cross(ab, ac, n);
+  };
+  // The triangles at each point of the whole shell (the walls and the
+  // interface too): a strip triangle on a loop edge rotates about that
+  // edge when its chain point moves, and can lie down on the prism wall
+  // on the same edge - a fold the crossing guard does not see, as the
+  // two share the edge. The angle two triangles on an edge make (the
+  // directions from the edge into each, 180 when flat, 0 when one lies on
+  // the other, as ListFoldedEdges measures it) must not go under 5
+  // degrees by a flip or a move unless it was under already and rises.
+  // The lists never hold a dead triangle.
+  std::vector<std::vector<ll> > incident(out.points.size()/3);
+  for (size_t i = 0; i + 2 < out.triangles.size(); i += 3) for (int j = 0; j < 3; j++) incident[(size_t)out.triangles[i + j]].push_back((ll)(i/3));
+  auto dropIncident = [&](ll v, ll t)
+  {
+    std::vector<ll> &at = incident[(size_t)v];
+    std::vector<ll>::iterator it = std::find(at.begin(), at.end(), t);
+    if (it != at.end()) at.erase(it);
+  };
+  auto intoDirection = [&](const ll *tri, ll p, ll q, double w[3]) -> bool
+  {
+    ll r = -1;
+    for (int j = 0; j < 3; j++) if (tri[j] != p && tri[j] != q) r = tri[j];
+    if (r < 0) return false;
+    double e[3], v[3];
+    Sub(&out.points[(size_t)3*q], &out.points[(size_t)3*p], e);
+    Sub(&out.points[(size_t)3*r], &out.points[(size_t)3*p], v);
+    const double ee = Dot(e, e);
+    if (!(ee > 0.0)) return false;
+    const double along = Dot(v, e)/ee;
+    for (int j = 0; j < 3; j++) w[j] = v[j] - along*e[j];
+    const double L = Norm(w);
+    if (!(L > 0.0)) return false;
+    for (int j = 0; j < 3; j++) w[j] /= L;
+    return true;
+  };
+  auto intoAngle = [&](const ll *tri, const ll *other, ll p, ll q) -> double
+  {
+    double w1[3], w2[3];
+    if (!intoDirection(tri, p, q, w1) || !intoDirection(other, p, q, w2)) return 180.0;
+    return std::acos(std::max(-1.0, std::min(1.0, Dot(w1, w2))))*180.0/M_PI;
+  };
+  // the triangles on the edge p-q other than those listed
+  auto acrossEdge = [&](ll p, ll q, const ll *except, int numExcept, std::vector<ll> &others)
+  {
+    others.clear();
+    const std::vector<ll> &at = incident[(size_t)p];
+    for (size_t m = 0; m < at.size(); m++)
+    {
+      const ll u = at[m];
+      bool skip = false;
+      for (int e = 0; e < numExcept; e++) if (u == except[e]) skip = true;
+      if (skip) continue;
+      const ll *U = &out.triangles[(size_t)3*u];
+      if (U[0] == q || U[1] == q || U[2] == q) others.push_back(u);
+    }
+  };
+  const double minEdgeAngle = 5.0;
+  const double collapseFraction = options.collapseFraction;
+  auto liveBand = [&](int marker, std::vector<ll> &band)
+  {
+    band.clear();
+    for (size_t i = 0; i < out.markers.size(); i++) if (!dead[i] && out.markers[i] == marker) band.push_back((ll)i);
+  };
+  // the fold pairs a set of triangles makes with their neighbours across
+  // every edge, with the angle now, for a test after the triangles change
+  struct EdgePair { ll t, u, p, q; double before; };
+  auto pairsOf = [&](const std::vector<ll> &tris, const ll *except, int numExcept, std::vector<EdgePair> &pairs)
+  {
+    pairs.clear();
+    std::vector<ll> others;
+    for (size_t q = 0; q < tris.size(); q++)
+    {
+      const ll *T = &out.triangles[(size_t)3*tris[q]];
+      for (int j = 0; j < 3; j++)
+      {
+        const ll p = T[j], r = T[(j + 1)%3];
+        acrossEdge(p, r, &tris[q], 1, others);
+        for (size_t m = 0; m < others.size(); m++)
+        {
+          bool skip = false;
+          for (int e = 0; e < numExcept; e++) if (others[m] == except[e]) skip = true;
+          if (skip) continue;
+          if (others[m] < tris[q] && std::find(tris.begin(), tris.end(), others[m]) != tris.end()) continue;   // the pair once
+          pairs.push_back(EdgePair{tris[q], others[m], p, r, intoAngle(T, &out.triangles[(size_t)3*others[m]], p, r)});
+        }
+      }
+    }
+  };
+  // 1. the flips of a band: the new edge must not exist anywhere in the
+  // shell (two loop points are joined by a wall edge already, and a flip
+  // onto it put that edge on three triangles)
+  auto flipsPass = [&](const std::vector<ll> &band)
+  {
+    std::map<std::pair<ll, ll>, std::vector<ll> > onEdge;
+    for (size_t m = 0; m < band.size(); m++)
+    {
+      const ll *tri = &out.triangles[(size_t)3*band[m]];
+      for (int j = 0; j < 3; j++) onEdge[std::make_pair(std::min(tri[j], tri[(j + 1)%3]), std::max(tri[j], tri[(j + 1)%3]))].push_back(band[m]);
+    }
+    std::set<std::pair<ll, ll> > shellEdges;
+    for (size_t i = 0; i + 2 < out.triangles.size(); i += 3)
+    {
+      if (dead[i/3]) continue;
+      for (int j = 0; j < 3; j++) shellEdges.insert(std::make_pair(std::min(out.triangles[i + j], out.triangles[i + (j + 1)%3]), std::max(out.triangles[i + j], out.triangles[i + (j + 1)%3])));
+    }
+    std::vector<unsigned char> touched(out.triangles.size()/3, 0);
+    for (std::map<std::pair<ll, ll>, std::vector<ll> >::const_iterator it = onEdge.begin(); it != onEdge.end(); ++it)
+    {
+      if (it->second.size() != 2) continue;
+      const ll t1 = it->second[0], t2 = it->second[1];
+      if (touched[(size_t)t1] || touched[(size_t)t2]) continue;
+      ll *T1 = &out.triangles[(size_t)3*t1], *T2 = &out.triangles[(size_t)3*t2];
+      // t1 as (a, b, c) with a -> b the edge, t2 as (b, a, d)
+      int j1 = -1, j2 = -1;
+      for (int j = 0; j < 3; j++)
+      {
+        if ((T1[j] == it->first.first && T1[(j + 1)%3] == it->first.second) || (T1[j] == it->first.second && T1[(j + 1)%3] == it->first.first)) j1 = j;
+      }
+      if (j1 < 0) continue;
+      const ll a = T1[j1], b = T1[(j1 + 1)%3], c = T1[(j1 + 2)%3];
+      for (int j = 0; j < 3; j++) if (T2[j] == b && T2[(j + 1)%3] == a) j2 = j;
+      if (j2 < 0) continue;   // not wound against each other: leave it
+      const ll d = T2[(j2 + 2)%3];
+      if (c == d || (fixed[(size_t)c] && fixed[(size_t)d])) continue;
+      const std::pair<ll, ll> newEdge = std::make_pair(std::min(c, d), std::max(c, d));
+      if (shellEdges.count(newEdge)) continue;
+      const ll oldMin1[3] = {a, b, c}, oldMin2[3] = {b, a, d};
+      const ll new1[3] = {a, d, c}, new2[3] = {b, c, d};
+      const double before = std::min(smallestAngle(oldMin1), smallestAngle(oldMin2));
+      const double after = std::min(smallestAngle(new1), smallestAngle(new2));
+      if (!(after > before + 0.5)) continue;
+      double n1[3], n2[3], m1[3], m2[3];
+      normalOf(oldMin1, n1); normalOf(oldMin2, n2); normalOf(new1, m1); normalOf(new2, m2);
+      double nsum[3] = {n1[0] + n2[0], n1[1] + n2[1], n1[2] + n2[2]};
+      if (!(Dot(m1, nsum) > 0.0) || !(Dot(m2, nsum) > 0.0)) continue;
+      // the quad has to be convex: a and b on opposite sides of the new
+      // edge c-d (and c, d of a-b), or the two new triangles lie on each
+      // other without either turning over (TetGen refused such a pair
+      // as nearly self-intersecting facets, 0.0055 degrees apart)
+      {
+        const double *pa = &out.points[(size_t)3*a], *pb = &out.points[(size_t)3*b], *pc = &out.points[(size_t)3*c], *pd = &out.points[(size_t)3*d];
+        double cd[3], ca[3], cb[3], ab[3], ac[3], ad[3], x1[3], x2[3], y1[3], y2[3];
+        Sub(pd, pc, cd); Sub(pa, pc, ca); Sub(pb, pc, cb); Sub(pb, pa, ab); Sub(pc, pa, ac); Sub(pd, pa, ad);
+        Cross(cd, ca, x1); Cross(cd, cb, x2); Cross(ab, ac, y1); Cross(ab, ad, y2);
+        if (!(Dot(x1, nsum)*Dot(x2, nsum) < 0.0) || !(Dot(y1, nsum)*Dot(y2, nsum) < 0.0)) continue;
+      }
+      // neither new triangle may lie down on a neighbour across an
+      // outer edge (the old triangle on that edge sets what was there)
+      {
+        const ll pair[2] = {t1, t2};
+        const ll *newTris[2] = {new1, new2};
+        const ll *oldOn[2][2] = {{oldMin1, oldMin2}, {oldMin1, oldMin2}};   // new1: a-d was t2's, c-a was t1's; new2: b-c was t1's, d-b was t2's
+        const ll edges[2][2][2] = {{{a, d}, {c, a}}, {{b, c}, {d, b}}};
+        const int oldIndex[2][2] = {{1, 0}, {0, 1}};
+        bool folds = false;
+        std::vector<ll> others;
+        for (int w = 0; w < 2 && !folds; w++)
+        {
+          for (int e = 0; e < 2 && !folds; e++)
+          {
+            acrossEdge(edges[w][e][0], edges[w][e][1], pair, 2, others);
+            for (size_t m = 0; m < others.size() && !folds; m++)
+            {
+              const ll *U = &out.triangles[(size_t)3*others[m]];
+              const double after = intoAngle(newTris[w], U, edges[w][e][0], edges[w][e][1]);
+              const double before = intoAngle(oldOn[w][oldIndex[w][e]], U, edges[w][e][0], edges[w][e][1]);
+              if (after < minEdgeAngle && after < before) folds = true;
+            }
+          }
+        }
+        if (folds) continue;
+      }
+      guard.BeginOperation();
+      guard.Leave(t1);
+      guard.Leave(t2);
+      if (guard.Crosses(new1) || guard.Crosses(new2)) continue;
+      guard.Remove(t1);
+      guard.Remove(t2);
+      T1[0] = new1[0]; T1[1] = new1[1]; T1[2] = new1[2];
+      T2[0] = new2[0]; T2[1] = new2[1]; T2[2] = new2[2];
+      guard.Add(t1);
+      guard.Add(t2);
+      // b loses t1 and d gains it; a loses t2 and c gains it
+      dropIncident(b, t1);
+      incident[(size_t)d].push_back(t1);
+      dropIncident(a, t2);
+      incident[(size_t)c].push_back(t2);
+      touched[(size_t)t1] = touched[(size_t)t2] = 1;
+      shellEdges.insert(newEdge);
+      flipPartners[t1].push_back(t2);
+      flipPartners[t2].push_back(t1);
+      out.numBandFlips++;
+    }
+  };
+  // 2. the smoothing of a band's free points onto the level
+  auto movesPass = [&](int k, double fraction, const std::vector<ll> &band)
+  {
+    std::map<ll, std::vector<ll> > around;   // point -> band triangles
+    std::map<ll, std::set<ll> > neighbours;
+    for (size_t m = 0; m < band.size(); m++)
+    {
+      const ll *tri = &out.triangles[(size_t)3*band[m]];
+      for (int j = 0; j < 3; j++)
+      {
+        if (fixed[(size_t)tri[j]]) continue;
+        around[tri[j]].push_back(band[m]);
+        neighbours[tri[j]].insert(tri[(j + 1)%3]);
+        neighbours[tri[j]].insert(tri[(j + 2)%3]);
+      }
+    }
+    std::vector<std::pair<ll, std::array<double, 3> > > moves;
+    for (std::map<ll, std::set<ll> >::const_iterator it = neighbours.begin(); it != neighbours.end(); ++it)
+    {
+      const ll v = it->first;
+      if (it->second.size() < 3) continue;
+      double mean[3] = {0.0, 0.0, 0.0};
+      for (std::set<ll>::const_iterator q = it->second.begin(); q != it->second.end(); ++q) for (int j = 0; j < 3; j++) mean[j] += out.points[(size_t)3*(*q) + j]/(double)it->second.size();
+      const double *x0 = &out.points[(size_t)3*v];
+      // the surface normal at the point, from its band triangles
+      double n[3] = {0.0, 0.0, 0.0};
+      const std::vector<ll> &tris = around[v];
+      for (size_t m = 0; m < tris.size(); m++) { double tn[3]; normalOf(&out.triangles[(size_t)3*tris[m]], tn); for (int j = 0; j < 3; j++) n[j] += tn[j]; }
+      const double nl = Norm(n);
+      if (!(nl > 0.0)) continue;
+      for (int j = 0; j < 3; j++) n[j] /= nl;
+      unsigned long long h = (unsigned long long)(v + 1)*11400714819323198485ULL + (unsigned long long)k*0x9E3779B97F4A7C15ULL;
+      h ^= h >> 29;
+      const double unit = (double)(h & 0xFFFFFFFFULL)/4294967296.0;   // in [0, 1), the same on every run
+      // The target is the neighbours' mean moved in the surface by the
+      // jitter fraction of the mean edge here, in a direction hashed
+      // from the point and the level: the levels are cut from one
+      // Delaunay and smoothed alike, so their triangulations come out
+      // aligned, and four points of two aligned edges on neighbouring
+      // levels lie in one plane - the mesher's sliver (96 of the 186
+      // zone tetrahedra under 5 degrees on the user's model had two
+      // parallel edges on neighbouring levels, 2026-09-30).
+      if (bandJitter > 0.0)
+      {
+        double meanEdge = 0.0;
+        for (std::set<ll>::const_iterator q = it->second.begin(); q != it->second.end(); ++q) meanEdge += Distance(x0, &out.points[(size_t)3*(*q)])/(double)it->second.size();
+        const int axis = (std::fabs(n[0]) <= std::fabs(n[1]) && std::fabs(n[0]) <= std::fabs(n[2])) ? 0 : ((std::fabs(n[1]) <= std::fabs(n[2])) ? 1 : 2);
+        double e[3] = {0.0, 0.0, 0.0}, u[3], w[3];
+        e[axis] = 1.0;
+        Cross(n, e, u);
+        if (Normalize(u))
+        {
+          Cross(n, u, w);
+          const double theta = 6.283185307179586*unit;
+          for (int j = 0; j < 3; j++) mean[j] += bandJitter*meanEdge*(std::cos(theta)*u[j] + std::sin(theta)*w[j]);
+        }
+      }
+      double x[3] = {0.5*(x0[0] + mean[0]), 0.5*(x0[1] + mean[1]), 0.5*(x0[2] + mean[2])};
+      double size, thickness;
+      ll rim;
+      field.Local(x, size, thickness, rim);
+      const double delta = 0.05*thickness;
+      for (int step = 0; step < 3; step++)
+      {
+        const double f0 = field.Evaluate(x, fraction);
+        if (std::fabs(f0) < 1e-3*thickness) break;
+        double xp[3] = {x[0] + delta*n[0], x[1] + delta*n[1], x[2] + delta*n[2]};
+        const double slope = (field.Evaluate(xp, fraction) - f0)/delta;
+        if (!(std::fabs(slope) > 0.2)) break;
+        for (int j = 0; j < 3; j++) x[j] -= n[j]*f0/slope;
+      }
+      // no farther than half the local size from where it was
+      double dx[3];
+      Sub(x, x0, dx);
+      const double moved = Norm(dx);
+      if (!(moved > 0.0)) continue;
+      if (moved > 0.5*size) for (int j = 0; j < 3; j++) x[j] = x0[j] + dx[j]*(0.5*size/moved);
+      std::array<double, 3> xa = {x[0], x[1], x[2]};
+      moves.push_back(std::make_pair(v, xa));
+    }
+    for (size_t m = 0; m < moves.size(); m++)
+    {
+      const ll v = moves[m].first;
+      double old[3] = {out.points[(size_t)3*v], out.points[(size_t)3*v + 1], out.points[(size_t)3*v + 2]};
+      // the triangles around must keep facing the way they did, and
+      // none may lie down on a neighbour across any of its edges
+      const std::vector<ll> &tris = incident[(size_t)v];
+      std::vector<std::array<double, 3> > oldNormals(tris.size());
+      std::vector<double> oldAngles(tris.size());
+      for (size_t q = 0; q < tris.size(); q++) { double tn[3]; normalOf(&out.triangles[(size_t)3*tris[q]], tn); oldNormals[q] = {tn[0], tn[1], tn[2]}; oldAngles[q] = smallestAngle(&out.triangles[(size_t)3*tris[q]]); }
+      std::vector<EdgePair> pairs;
+      pairsOf(tris, nullptr, 0, pairs);
+      // the triangles around leave the guard's cells before the point
+      // moves (their boxes change) and are tested and re-added after
+      guard.BeginOperation();
+      for (size_t q = 0; q < tris.size(); q++) { guard.Leave(tris[q]); guard.Remove(tris[q]); }
+      for (int j = 0; j < 3; j++) out.points[(size_t)3*v + j] = moves[m].second[j];
+      bool ok = true;
+      for (size_t q = 0; q < tris.size() && ok; q++)
+      {
+        double tn[3];
+        normalOf(&out.triangles[(size_t)3*tris[q]], tn);
+        const double *on = oldNormals[q].data();
+        // a triangle under 5 degrees has no normal to keep: the caps
+        // the zipper leaves stand off the surface with their apex on
+        // the neighbour's side of the long edge, and the move that
+        // pulls the apex back turns such a normal right over (2026-09-30,
+        // the user's model: 37 of the 42 band triangles left under 10
+        // degrees were caps whose every flip and move this refused)
+        if ((oldAngles[q] >= 5.0 || !options.freeThinCaps) && !(tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0)) ok = false;
+        else if (smallestAngle(&out.triangles[(size_t)3*tris[q]]) < std::min(5.0, oldAngles[q])) ok = false;
+        else if (guard.Crosses(&out.triangles[(size_t)3*tris[q]])) ok = false;
+      }
+      for (size_t q = 0; q < pairs.size() && ok; q++)
+      {
+        // nor has such a cap a crease to keep: its apex comes back over
+        // the long edge through the neighbour's plane, which this test
+        // would refuse (the caps left after the first relaxation stood
+        // 3 to 5 degrees off their neighbours, 2026-09-30)
+        const size_t at = (size_t)(std::find(tris.begin(), tris.end(), pairs[q].t) - tris.begin());
+        if (options.freeThinCaps && at < tris.size() && oldAngles[at] < 5.0) continue;
+        const double after = intoAngle(&out.triangles[(size_t)3*pairs[q].t], &out.triangles[(size_t)3*pairs[q].u], pairs[q].p, pairs[q].q);
+        if (after < minEdgeAngle && after < pairs[q].before) ok = false;
+      }
+      if (!ok) for (int j = 0; j < 3; j++) out.points[(size_t)3*v + j] = old[j];
+      for (size_t q = 0; q < tris.size(); q++) guard.Add(tris[q]);
+      if (!ok) continue;
+      out.numBandPointsMoved++;
+    }
+  };
+  // 3. the collapse of a band's short edges: an edge between two free
+  // points under the collapse fraction of its triangles' other edges goes,
+  // its two triangles with it, the two points merged at the midpoint (the
+  // needles the marching, the trim and the zipper leave: four of the 37
+  // band triangles left under 10 degrees had an edge a tenth of the
+  // others, 2026-09-30). The link condition holds (the two points share
+  // no neighbour but the two apexes), and the merged triangles pass the
+  // tests a move passes.
+  auto collapsePass = [&](int marker, double fraction, const std::vector<ll> &band)
+  {
+    std::map<std::pair<ll, ll>, std::vector<ll> > onEdge;
+    for (size_t m = 0; m < band.size(); m++)
+    {
+      const ll *tri = &out.triangles[(size_t)3*band[m]];
+      for (int j = 0; j < 3; j++) onEdge[std::make_pair(std::min(tri[j], tri[(j + 1)%3]), std::max(tri[j], tri[(j + 1)%3]))].push_back(band[m]);
+    }
+    std::vector<unsigned char> touched(out.triangles.size()/3, 0);
+    for (std::map<std::pair<ll, ll>, std::vector<ll> >::const_iterator it = onEdge.begin(); it != onEdge.end(); ++it)
+    {
+      if (it->second.size() != 2) continue;
+      const ll u = it->first.first, v = it->first.second;
+      if (fixed[(size_t)u] || fixed[(size_t)v]) continue;
+      const ll t1 = it->second[0], t2 = it->second[1];
+      if (dead[(size_t)t1] || dead[(size_t)t2] || touched[(size_t)t1] || touched[(size_t)t2]) continue;
+      const double len = Distance(&out.points[(size_t)3*u], &out.points[(size_t)3*v]);
+      double others = 0.0;
+      int numOthers = 0;
+      ll apex[2] = {-1, -1};
+      for (int w = 0; w < 2; w++)
+      {
+        const ll *T = &out.triangles[(size_t)3*(w == 0 ? t1 : t2)];
+        for (int j = 0; j < 3; j++)
+        {
+          const ll p = T[j], q = T[(j + 1)%3];
+          if ((p == u && q == v) || (p == v && q == u)) continue;
+          others += Distance(&out.points[(size_t)3*p], &out.points[(size_t)3*q]);
+          numOthers++;
+          if (p != u && p != v) apex[w] = p;
+          if (q != u && q != v) apex[w] = q;
+        }
+      }
+      if (numOthers != 4 || apex[0] < 0 || apex[1] < 0 || apex[0] == apex[1]) continue;
+      if (!(len < collapseFraction*others/4.0)) continue;
+      const std::vector<ll> &Iu = incident[(size_t)u], &Iv = incident[(size_t)v];
+      bool clean = true;
+      std::set<ll> Nu, Nv;
+      for (size_t m = 0; m < Iu.size() && clean; m++)
+      {
+        const ll t = Iu[m];
+        if (touched[(size_t)t] || out.markers[(size_t)t] != marker) clean = false;
+        for (int j = 0; j < 3; j++) if (out.triangles[(size_t)3*t + j] != u) Nu.insert(out.triangles[(size_t)3*t + j]);
+      }
+      for (size_t m = 0; m < Iv.size() && clean; m++)
+      {
+        const ll t = Iv[m];
+        if (touched[(size_t)t] || out.markers[(size_t)t] != marker) clean = false;
+        for (int j = 0; j < 3; j++) if (out.triangles[(size_t)3*t + j] != v) Nv.insert(out.triangles[(size_t)3*t + j]);
+      }
+      if (!clean) continue;
+      // the link condition
+      {
+        int common = 0;
+        bool onlyApexes = true;
+        for (std::set<ll>::const_iterator q = Nu.begin(); q != Nu.end(); ++q)
+        {
+          if (*q == v) continue;
+          if (Nv.count(*q)) { common++; if (*q != apex[0] && *q != apex[1]) onlyApexes = false; }
+        }
+        if (common != 2 || !onlyApexes) continue;
+      }
+      // the survivors: the triangles at u and v but the two on the edge
+      std::vector<ll> survivors;
+      for (size_t m = 0; m < Iu.size(); m++) if (Iu[m] != t1 && Iu[m] != t2) survivors.push_back(Iu[m]);
+      for (size_t m = 0; m < Iv.size(); m++) if (Iv[m] != t1 && Iv[m] != t2 && std::find(survivors.begin(), survivors.end(), Iv[m]) == survivors.end()) survivors.push_back(Iv[m]);
+      std::vector<std::array<double, 3> > oldNormals(survivors.size());
+      std::vector<double> oldAngles(survivors.size());
+      for (size_t q = 0; q < survivors.size(); q++) { double tn[3]; normalOf(&out.triangles[(size_t)3*survivors[q]], tn); oldNormals[q] = {tn[0], tn[1], tn[2]}; oldAngles[q] = smallestAngle(&out.triangles[(size_t)3*survivors[q]]); }
+      std::vector<EdgePair> pairs;
+      {
+        const ll dying[2] = {t1, t2};
+        pairsOf(survivors, dying, 2, pairs);
+      }
+      // the change: v's triangles re-pointed to u, both points at the midpoint
+      std::vector<std::pair<ll, int> > repointed;   // triangle, corner
+      for (size_t q = 0; q < survivors.size(); q++) for (int j = 0; j < 3; j++) if (out.triangles[(size_t)3*survivors[q] + j] == v) repointed.push_back(std::make_pair(survivors[q], j));
+      double oldU[3], oldV[3], mid[3];
+      for (int j = 0; j < 3; j++) { oldU[j] = out.points[(size_t)3*u + j]; oldV[j] = out.points[(size_t)3*v + j]; mid[j] = 0.5*(oldU[j] + oldV[j]); }
+      // the midpoint put onto the level along the survivors' mean normal, as a move does
+      {
+        double n[3] = {0.0, 0.0, 0.0};
+        for (size_t q = 0; q < survivors.size(); q++) for (int j = 0; j < 3; j++) n[j] += oldNormals[q][j];
+        if (Normalize(n))
+        {
+          double size, thickness;
+          ll rim;
+          field.Local(mid, size, thickness, rim);
+          const double delta = 0.05*thickness;
+          for (int step = 0; step < 3; step++)
+          {
+            const double f0 = field.Evaluate(mid, fraction);
+            if (std::fabs(f0) < 1e-3*thickness) break;
+            double xp[3] = {mid[0] + delta*n[0], mid[1] + delta*n[1], mid[2] + delta*n[2]};
+            const double slope = (field.Evaluate(xp, fraction) - f0)/delta;
+            if (!(std::fabs(slope) > 0.2)) break;
+            for (int j = 0; j < 3; j++) mid[j] -= n[j]*f0/slope;
+          }
+        }
+      }
+      guard.BeginOperation();
+      for (size_t q = 0; q < survivors.size(); q++) { guard.Leave(survivors[q]); guard.Remove(survivors[q]); }
+      guard.Leave(t1); guard.Leave(t2); guard.Remove(t1); guard.Remove(t2);
+      for (size_t r = 0; r < repointed.size(); r++) out.triangles[(size_t)3*repointed[r].first + repointed[r].second] = u;
+      for (int j = 0; j < 3; j++) { out.points[(size_t)3*u + j] = mid[j]; out.points[(size_t)3*v + j] = mid[j]; }
+      bool ok = true;
+      for (size_t q = 0; q < survivors.size() && ok; q++)
+      {
+        double tn[3];
+        normalOf(&out.triangles[(size_t)3*survivors[q]], tn);
+        const double *on = oldNormals[q].data();
+        if (oldAngles[q] >= 5.0 && !(tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0)) ok = false;
+        else if (smallestAngle(&out.triangles[(size_t)3*survivors[q]]) < std::min(5.0, oldAngles[q])) ok = false;
+        else if (guard.Crosses(&out.triangles[(size_t)3*survivors[q]])) ok = false;
+      }
+      for (size_t q = 0; q < pairs.size() && ok; q++)
+      {
+        const ll p = pairs[q].p == v ? u : pairs[q].p, r = pairs[q].q == v ? u : pairs[q].q;
+        const double after = intoAngle(&out.triangles[(size_t)3*pairs[q].t], &out.triangles[(size_t)3*pairs[q].u], p, r);
+        if (after < minEdgeAngle && after < pairs[q].before) ok = false;
+      }
+      if (!ok)
+      {
+        for (size_t r = 0; r < repointed.size(); r++) out.triangles[(size_t)3*repointed[r].first + repointed[r].second] = v;
+        for (int j = 0; j < 3; j++) { out.points[(size_t)3*u + j] = oldU[j]; out.points[(size_t)3*v + j] = oldV[j]; }
+        for (size_t q = 0; q < survivors.size(); q++) guard.Add(survivors[q]);
+        guard.Add(t1); guard.Add(t2);
+        continue;
+      }
+      for (size_t q = 0; q < survivors.size(); q++) { guard.Add(survivors[q]); touched[(size_t)survivors[q]] = 1; }
+      dead[(size_t)t1] = dead[(size_t)t2] = 1;
+      touched[(size_t)t1] = touched[(size_t)t2] = 1;
+      incident[(size_t)u] = survivors;
+      incident[(size_t)v].clear();
+      dropIncident(apex[0], t1);
+      dropIncident(apex[1], t2);
+      out.numBandCollapses++;
+      out.numBandTrianglesRemoved += 2;
+    }
+  };
+  // 4. the removal of a band's free points on three triangles: the three
+  // become one (the kites the zipper and the trim leave, whose flip is
+  // refused as the new edge exists already: 12 of the 37 band triangles
+  // left under 10 degrees, 2026-09-30), when the one is no worse than the
+  // three's worst and passes the tests a move passes.
+  auto degree3Pass = [&](int marker, const std::vector<ll> &band)
+  {
+    std::set<ll> candidates;
+    for (size_t m = 0; m < band.size(); m++) for (int j = 0; j < 3; j++) { const ll v = out.triangles[(size_t)3*band[m] + j]; if (!fixed[(size_t)v] && incident[(size_t)v].size() == 3) candidates.insert(v); }
+    std::vector<unsigned char> touched(out.triangles.size()/3, 0);
+    for (std::set<ll>::const_iterator cv = candidates.begin(); cv != candidates.end(); ++cv)
+    {
+      const ll v = *cv;
+      std::vector<ll> tris = incident[(size_t)v];
+      if (tris.size() != 3) continue;
+      bool clean = true;
+      for (int m = 0; m < 3; m++) if (dead[(size_t)tris[m]] || touched[(size_t)tris[m]] || out.markers[(size_t)tris[m]] != marker) clean = false;
+      if (!clean) continue;
+      // the ring a, b, c: t1 = (v, a, b), then the triangle with b and v, then the one with c and v
+      ll ring[3] = {-1, -1, -1};
+      ll order[3] = {tris[0], -1, -1};
+      {
+        const ll *T = &out.triangles[(size_t)3*tris[0]];
+        int jv = -1;
+        for (int j = 0; j < 3; j++) if (T[j] == v) jv = j;
+        ring[0] = T[(jv + 1)%3]; ring[1] = T[(jv + 2)%3];
+        for (int m = 1; m < 3; m++)
+        {
+          const ll *U = &out.triangles[(size_t)3*tris[m]];
+          int ju = -1;
+          for (int j = 0; j < 3; j++) if (U[j] == v) ju = j;
+          if (U[(ju + 1)%3] == ring[1]) { order[1] = tris[m]; ring[2] = U[(ju + 2)%3]; }
+          else if (U[(ju + 2)%3] == ring[0]) order[2] = tris[m];
+        }
+      }
+      if (order[1] < 0 || order[2] < 0 || ring[2] < 0 || ring[2] == ring[0] || ring[2] == ring[1]) continue;
+      {
+        const ll *W = &out.triangles[(size_t)3*order[2]];
+        if (W[0] != ring[2] && W[1] != ring[2] && W[2] != ring[2]) continue;   // the third must close the ring
+      }
+      const ll merged[3] = {ring[0], ring[1], ring[2]};
+      double nsum[3] = {0.0, 0.0, 0.0}, nm[3];
+      double worstOld = 180.0;
+      for (int m = 0; m < 3; m++) { double tn[3]; normalOf(&out.triangles[(size_t)3*order[m]], tn); for (int j = 0; j < 3; j++) nsum[j] += tn[j]; worstOld = std::min(worstOld, smallestAngle(&out.triangles[(size_t)3*order[m]])); }
+      // only where one of the three is a defect: a free point on three
+      // sound triangles is a coarse spot, not a kite, and taking it out
+      // coarsens the band against the slab (the synthetic junction's zone
+      // lost a degree of its smallest dihedral to 251 such removals)
+      if (!(worstOld < 10.0)) continue;
+      normalOf(merged, nm);
+      if (!(Dot(nm, nsum) > 0.0)) continue;
+      if (!(smallestAngle(merged) >= std::max(1.0, worstOld))) continue;
+      // no lying down on the neighbours across the ring's edges
+      {
+        bool folds = false;
+        std::vector<ll> others;
+        for (int e = 0; e < 3 && !folds; e++)
+        {
+          const ll p = ring[e], q = ring[(e + 1)%3];
+          acrossEdge(p, q, order, 3, others);
+          for (size_t m = 0; m < others.size() && !folds; m++)
+          {
+            const ll *U = &out.triangles[(size_t)3*others[m]];
+            const double after = intoAngle(merged, U, p, q);
+            const double before = intoAngle(&out.triangles[(size_t)3*order[e]], U, p, q);
+            if (after < minEdgeAngle && after < before) folds = true;
+          }
+        }
+        if (folds) continue;
+      }
+      guard.BeginOperation();
+      for (int m = 0; m < 3; m++) guard.Leave(order[m]);
+      if (guard.Crosses(merged)) continue;
+      for (int m = 0; m < 3; m++) guard.Remove(order[m]);
+      ll *T = &out.triangles[(size_t)3*order[0]];
+      T[0] = merged[0]; T[1] = merged[1]; T[2] = merged[2];
+      guard.Add(order[0]);
+      dead[(size_t)order[1]] = dead[(size_t)order[2]] = 1;
+      for (int m = 0; m < 3; m++) touched[(size_t)order[m]] = 1;
+      for (int e = 0; e < 3; e++) { for (int m = 0; m < 3; m++) dropIncident(ring[e], order[m]); incident[(size_t)ring[e]].push_back(order[0]); }
+      incident[(size_t)v].clear();
+      out.numBandVerticesRemoved++;
+      out.numBandTrianglesRemoved += 2;
+    }
+  };
+  auto bandStats = [&](const std::vector<ll> &band, double &smallest, ll &under10)
+  {
+    for (size_t m = 0; m < band.size(); m++)
+    {
+      const double a = smallestAngle(&out.triangles[(size_t)3*band[m]]);
+      smallest = std::min(smallest, a);
+      if (a < 10.0) under10++;
+    }
+  };
+  auto shellFaults = [&](ll &crossing, ll &folded)
+  {
+    // over the live triangles only
+    std::vector<ll> live;
+    live.reserve(out.triangles.size());
+    for (size_t i = 0; i + 2 < out.triangles.size(); i += 3) if (!dead[i/3]) { live.push_back(out.triangles[i]); live.push_back(out.triangles[i + 1]); live.push_back(out.triangles[i + 2]); }
+    std::vector<unsigned char> cr;
+    double at[3];
+    crossing = svenvelope::CountCrossingTriangles(out.points, live, cr, at);
+    std::vector<FoldedPair> fp;
+    double sf = 180.0;
+    folded = ListFoldedEdges(out.points, live, foldDegrees, 1, fp, sf);
+  };
+  // Phase 1: rounds of flips and moves, per level
+  for (int k = 1; k <= numLayers; k++)
+  {
+    const int marker = (k == numLayers) ? 2 : 100 + k;
+    const double fraction = fractions[(size_t)k - 1];
+    std::vector<ll> band;
+    liveBand(marker, band);
+    if (band.empty()) continue;
+    out.numBandTriangles += (ll)band.size();
+    bandStats(band, out.bandSmallestAngleBefore, out.numBandUnder10Before);
+    for (int round = 0; round < rounds; round++)
+    {
+      flipsPass(band);
+      movesPass(k, fraction, band);
+    }
+  }
+  // What the relaxation broke is undone where it broke: the triangles
+  // that cross or fold now have their pieces' points put back and their
+  // flips undone (with the partners of those flips), a few times over;
+  // only if that does not bring the shell back to what it was is the
+  // whole relaxation undone.
+  for (int pass = 0; pass < 4; pass++)
+  {
+    std::vector<unsigned char> crossingAfter;
+    double atAfter[3];
+    const ll numCrossingAfter = svenvelope::CountCrossingTriangles(out.points, out.triangles, crossingAfter, atAfter);
+    std::vector<FoldedPair> foldedAfter;
+    double smallestFoldAfter = 180.0;
+    const ll numFoldedAfter = ListFoldedEdges(out.points, out.triangles, foldDegrees, (size_t)1 << 20, foldedAfter, smallestFoldAfter);
+    if (pass == 0) { out.relaxationCrossingsAfter = numCrossingAfter; out.relaxationFoldsAfter = numFoldedAfter; }
+    if (numCrossingAfter <= numCrossingBefore && numFoldedAfter <= numFoldedBefore) break;
+    if (pass == 3)
+    {
+      out.points.swap(pointsBefore);
+      out.triangles.swap(trianglesBefore);
+      out.relaxationReverted = true;
+      break;
+    }
+    std::set<ll> undo;
+    for (size_t i = 0; i < crossingAfter.size(); i++) if (crossingAfter[i]) undo.insert((ll)i);
+    for (size_t f = 0; f < foldedAfter.size(); f++) { undo.insert(foldedAfter[f].a); undo.insert(foldedAfter[f].b); }
+    // the flips' partners, transitively
+    std::vector<ll> stack(undo.begin(), undo.end());
+    while (!stack.empty())
+    {
+      const ll t = stack.back();
+      stack.pop_back();
+      std::map<ll, std::vector<ll> >::const_iterator at = flipPartners.find(t);
+      if (at == flipPartners.end()) continue;
+      for (size_t q = 0; q < at->second.size(); q++) if (undo.insert(at->second[q]).second) stack.push_back(at->second[q]);
+    }
+    for (std::set<ll>::const_iterator it = undo.begin(); it != undo.end(); ++it)
+    {
+      const ll t = *it;
+      if ((size_t)3*t + 2 >= trianglesBefore.size()) continue;
+      // the points first (of the triangle as it is now and as it was), then the triangle
+      for (int j = 0; j < 3; j++)
+      {
+        const ll v[2] = {out.triangles[(size_t)3*t + j], trianglesBefore[(size_t)3*t + j]};
+        for (int q = 0; q < 2; q++)
+        {
+          if (fixed[(size_t)v[q]] || (size_t)3*v[q] + 2 >= pointsBefore.size()) continue;
+          for (int m = 0; m < 3; m++) out.points[(size_t)3*v[q] + m] = pointsBefore[(size_t)3*v[q] + m];
+        }
+      }
+      for (int j = 0; j < 3; j++) out.triangles[(size_t)3*t + j] = trianglesBefore[(size_t)3*t + j];
+      out.numRelaxationUndone++;
+    }
+  }
+  // Phase 2: the collapses and removals; undone whole if the shell crosses
+  // or folds more than after phase 1 (the undo above cannot put a removed
+  // triangle back on its own). No further round of moves follows: every
+  // round flattens the bands a little more, and the flatter a crease that
+  // bends into a slab, the thinner the tetrahedron the mesher makes of its
+  // two triangles (3 rounds: smallest dihedral 0.30 degrees; 4: 0.08; 5:
+  // 0.004, on the user's model, 2026-09-30).
+  if (!out.relaxationReverted && (collapseFraction > 0.0 || options.removeDegree3))
+  {
+    ll crossingPhase1 = 0, foldedPhase1 = 0;
+    shellFaults(crossingPhase1, foldedPhase1);
+    const std::vector<double> pointsPhase1(out.points);
+    const std::vector<ll> trianglesPhase1(out.triangles);
+    // the incidence is rebuilt from the triangles after the local undo, which may have changed them
+    for (size_t i = 0; i < incident.size(); i++) incident[i].clear();
+    for (size_t i = 0; i + 2 < out.triangles.size(); i += 3) if (!dead[i/3]) for (int j = 0; j < 3; j++) incident[(size_t)out.triangles[i + j]].push_back((ll)(i/3));
+    guard.Build(guardCell);
+    for (int k = 1; k <= numLayers; k++)
+    {
+      const int marker = (k == numLayers) ? 2 : 100 + k;
+      const double fraction = fractions[(size_t)k - 1];
+      std::vector<ll> band;
+      liveBand(marker, band);
+      if (band.empty()) continue;
+      if (collapseFraction > 0.0) { collapsePass(marker, fraction, band); liveBand(marker, band); }
+      if (options.removeDegree3) degree3Pass(marker, band);
+    }
+    ll crossingPhase2 = 0, foldedPhase2 = 0;
+    shellFaults(crossingPhase2, foldedPhase2);
+    if (crossingPhase2 > crossingPhase1 || foldedPhase2 > foldedPhase1)
+    {
+      out.points = pointsPhase1;
+      out.triangles = trianglesPhase1;
+      dead.assign(dead.size(), 0);
+      out.collapseReverted = true;
+      out.numBandCollapses = 0;
+      out.numBandVerticesRemoved = 0;
+      out.numBandTrianglesRemoved = 0;
+    }
+  }
+  for (int k = 1; k <= numLayers; k++)
+  {
+    const int marker = (k == numLayers) ? 2 : 100 + k;
+    std::vector<ll> band;
+    liveBand(marker, band);
+    bandStats(band, out.bandSmallestAngleAfter, out.numBandUnder10After);
+  }
+  // the dead triangles taken out, the strips' index ranges kept straight
+  {
+    ll numDead = 0;
+    for (size_t i = 0; i < dead.size(); i++) if (dead[i]) numDead++;
+    if (numDead > 0)
+    {
+      std::vector<ll> newIndex(dead.size(), -1);
+      std::vector<ll> tris;
+      std::vector<int> marks;
+      tris.reserve(out.triangles.size());
+      marks.reserve(out.markers.size());
+      for (size_t i = 0; i < dead.size(); i++)
+      {
+        if (dead[i]) continue;
+        newIndex[i] = (ll)(tris.size()/3);
+        for (int j = 0; j < 3; j++) tris.push_back(out.triangles[3*i + j]);
+        marks.push_back(out.markers[i]);
+      }
+      for (size_t z = 0; z < out.zips.size(); z++)
+      {
+        if (out.zips[z].crossingTriangles > 0 || out.zips[z].stripTriangles <= 0) continue;
+        const ll first = -out.zips[z].crossingTriangles;
+        ll newFirst = -1, kept = 0;
+        for (ll i = first; i < first + out.zips[z].stripTriangles && (size_t)i < dead.size(); i++)
+        {
+          if (dead[(size_t)i]) { out.numZipperTriangles--; continue; }
+          if (newFirst < 0) newFirst = newIndex[(size_t)i];
+          kept++;
+        }
+        out.zips[z].crossingTriangles = newFirst >= 0 ? -newFirst : 0;
+        out.zips[z].stripTriangles = kept;
+      }
+      out.triangles.swap(tris);
+      out.markers.swap(marks);
+    }
+  }
+  return 0;
+}
+
+//--------------------
 // BuildJunctionShell
 //--------------------
 int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
-    int erosionRings, int earPasses, JunctionShell &out, std::string &error, bool innerLevels, double bandJitter)
+    int erosionRings, int earPasses, JunctionShell &out, std::string &error, bool innerLevels, const BandRelaxation &relaxation)
 {
   // the erosion of the pieces is by distance from the lifted loops, in
   // loop edges: the rings asked for, one edge each
@@ -4837,439 +5649,11 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       out.zips.push_back(zip);
     }
   }
-  // 3b. The bands relaxed. The pieces are marching-tetrahedra triangles
-  // decimated to the interface's size and the strips are what the greedy
-  // zipper makes of a jagged chain, so the band is uneven and the strips
-  // hold long thin triangles standing off the surface (the user's picture,
-  // 2026-09-30), and the mesher's boundary slivers sit on them (95% of the
-  // wall's tetrahedra under 10 degrees in the 18th run). Each band is
-  // relaxed in rounds of edge flips that raise the smallest angle of the
-  // two triangles on the edge (no inversion, no doubled edge) and a
-  // smoothing of the pieces' points toward their neighbours' mean, put
-  // back onto the level along the surface normal with the field (secant
-  // steps), the prism rings' points fixed. Every flip and move is tested
-  // against the shell's triangles near it with the decimation's crossing
-  // guard and refused if it would make one pass through another (without
-  // the guard, the relaxation of the user's model made crossings and had
-  // to be undone whole, 2026-09-30); a relaxation that still leaves the
-  // shell crossing itself more than before is undone.
+  // 3b. the bands relaxed (RelaxJunctionBands above)
   {
-    const ll numPrismPointsHere = (ll)(prisms.points.size()/3);
-    std::vector<double> pointsBefore(out.points);
-    std::vector<ll> trianglesBefore(out.triangles);
-    std::vector<unsigned char> crossingBefore;
-    double atBefore[3];
-    const ll numCrossingBefore = svenvelope::CountCrossingTriangles(out.points, out.triangles, crossingBefore, atBefore);
-    std::vector<FoldedPair> foldedBefore;
-    double smallestFoldBefore = 180.0;
-    const ll numFoldedBefore = ListFoldedEdges(out.points, out.triangles, foldDegrees, (size_t)1 << 20, foldedBefore, smallestFoldBefore);
-    std::map<ll, std::vector<ll> > flipPartners;   // per flipped triangle: the triangles it was flipped with
-    std::vector<unsigned char> dead(out.triangles.size()/3, 0);
-    CrossingGuard guard(out.points, out.triangles, dead);
-    {
-      // the grid's cell: twice the mean edge of the bands' triangles
-      double sum = 0.0;
-      ll n = 0;
-      for (size_t i = 0; i < out.markers.size(); i++)
-      {
-        if (out.markers[i] == 1 || out.markers[i] >= 300) continue;
-        const ll *tri = &out.triangles[(size_t)3*i];
-        for (int j = 0; j < 3; j++) { sum += Distance(&out.points[(size_t)3*tri[j]], &out.points[(size_t)3*tri[(j + 1)%3]]); n++; }
-      }
-      guard.Build(n > 0 ? 2.0*sum/(double)n : 1.0);
-    }
-    auto smallestAngle = [&](const ll *tri) -> double
-    {
-      double best = 180.0;
-      for (int j = 0; j < 3; j++)
-      {
-        const double *a = &out.points[(size_t)3*tri[j]], *b = &out.points[(size_t)3*tri[(j + 1)%3]], *c = &out.points[(size_t)3*tri[(j + 2)%3]];
-        double ab[3], ac[3];
-        Sub(b, a, ab); Sub(c, a, ac);
-        const double la = Norm(ab), lc = Norm(ac);
-        if (!(la > 0.0) || !(lc > 0.0)) return 0.0;
-        double cs = Dot(ab, ac)/(la*lc);
-        cs = std::max(-1.0, std::min(1.0, cs));
-        best = std::min(best, std::acos(cs)*180.0/M_PI);
-      }
-      return best;
-    };
-    auto normalOf = [&](const ll *tri, double n[3])
-    {
-      double ab[3], ac[3];
-      Sub(&out.points[(size_t)3*tri[1]], &out.points[(size_t)3*tri[0]], ab);
-      Sub(&out.points[(size_t)3*tri[2]], &out.points[(size_t)3*tri[0]], ac);
-      Cross(ab, ac, n);
-    };
-    // The triangles at each point of the whole shell (the walls and the
-    // interface too): a strip triangle on a loop edge rotates about that
-    // edge when its chain point moves, and can lie down on the prism wall
-    // on the same edge - a fold the crossing guard does not see, as the
-    // two share the edge. The angle two triangles on an edge make (the
-    // directions from the edge into each, 180 when flat, 0 when one lies on
-    // the other, as ListFoldedEdges measures it) must not go under 5
-    // degrees by a flip or a move unless it was under already and rises.
-    std::vector<std::vector<ll> > incident(out.points.size()/3);
-    for (size_t i = 0; i + 2 < out.triangles.size(); i += 3) for (int j = 0; j < 3; j++) incident[(size_t)out.triangles[i + j]].push_back((ll)(i/3));
-    auto intoDirection = [&](const ll *tri, ll p, ll q, double w[3]) -> bool
-    {
-      ll r = -1;
-      for (int j = 0; j < 3; j++) if (tri[j] != p && tri[j] != q) r = tri[j];
-      if (r < 0) return false;
-      double e[3], v[3];
-      Sub(&out.points[(size_t)3*q], &out.points[(size_t)3*p], e);
-      Sub(&out.points[(size_t)3*r], &out.points[(size_t)3*p], v);
-      const double ee = Dot(e, e);
-      if (!(ee > 0.0)) return false;
-      const double along = Dot(v, e)/ee;
-      for (int j = 0; j < 3; j++) w[j] = v[j] - along*e[j];
-      const double L = Norm(w);
-      if (!(L > 0.0)) return false;
-      for (int j = 0; j < 3; j++) w[j] /= L;
-      return true;
-    };
-    auto intoAngle = [&](const ll *tri, const ll *other, ll p, ll q) -> double
-    {
-      double w1[3], w2[3];
-      if (!intoDirection(tri, p, q, w1) || !intoDirection(other, p, q, w2)) return 180.0;
-      return std::acos(std::max(-1.0, std::min(1.0, Dot(w1, w2))))*180.0/M_PI;
-    };
-    // the triangles on the edge p-q other than those listed
-    auto acrossEdge = [&](ll p, ll q, const ll *except, int numExcept, std::vector<ll> &others)
-    {
-      others.clear();
-      const std::vector<ll> &at = incident[(size_t)p];
-      for (size_t m = 0; m < at.size(); m++)
-      {
-        const ll u = at[m];
-        bool skip = false;
-        for (int e = 0; e < numExcept; e++) if (u == except[e]) skip = true;
-        if (skip) continue;
-        const ll *U = &out.triangles[(size_t)3*u];
-        if (U[0] == q || U[1] == q || U[2] == q) others.push_back(u);
-      }
-    };
-    const double minEdgeAngle = 5.0;
-    for (int k = 1; k <= numLayers; k++)
-    {
-      const int marker = (k == numLayers) ? 2 : 100 + k;
-      const double fraction = fractions[(size_t)k - 1];
-      std::vector<ll> band;
-      for (size_t i = 0; i < out.markers.size(); i++) if (out.markers[i] == marker) band.push_back((ll)i);
-      if (band.empty()) continue;
-      out.numBandTriangles += (ll)band.size();
-      for (size_t m = 0; m < band.size(); m++)
-      {
-        const double a = smallestAngle(&out.triangles[(size_t)3*band[m]]);
-        out.bandSmallestAngleBefore = std::min(out.bandSmallestAngleBefore, a);
-        if (a < 10.0) out.numBandUnder10Before++;
-      }
-      for (int round = 0; round < 3; round++)
-      {
-        // the flips; the new edge must not exist anywhere in the shell
-        // (two loop points are joined by a wall edge already, and a flip
-        // onto it put that edge on three triangles)
-        std::map<std::pair<ll, ll>, std::vector<ll> > onEdge;
-        for (size_t m = 0; m < band.size(); m++)
-        {
-          const ll *tri = &out.triangles[(size_t)3*band[m]];
-          for (int j = 0; j < 3; j++) onEdge[std::make_pair(std::min(tri[j], tri[(j + 1)%3]), std::max(tri[j], tri[(j + 1)%3]))].push_back(band[m]);
-        }
-        std::set<std::pair<ll, ll> > shellEdges;
-        for (size_t i = 0; i + 2 < out.triangles.size(); i += 3)
-        {
-          for (int j = 0; j < 3; j++) shellEdges.insert(std::make_pair(std::min(out.triangles[i + j], out.triangles[i + (j + 1)%3]), std::max(out.triangles[i + j], out.triangles[i + (j + 1)%3])));
-        }
-        std::vector<unsigned char> touched(out.triangles.size()/3, 0);
-        for (std::map<std::pair<ll, ll>, std::vector<ll> >::const_iterator it = onEdge.begin(); it != onEdge.end(); ++it)
-        {
-          if (it->second.size() != 2) continue;
-          const ll t1 = it->second[0], t2 = it->second[1];
-          if (touched[(size_t)t1] || touched[(size_t)t2]) continue;
-          ll *T1 = &out.triangles[(size_t)3*t1], *T2 = &out.triangles[(size_t)3*t2];
-          // t1 as (a, b, c) with a -> b the edge, t2 as (b, a, d)
-          int j1 = -1, j2 = -1;
-          for (int j = 0; j < 3; j++)
-          {
-            if ((T1[j] == it->first.first && T1[(j + 1)%3] == it->first.second) || (T1[j] == it->first.second && T1[(j + 1)%3] == it->first.first)) j1 = j;
-          }
-          if (j1 < 0) continue;
-          const ll a = T1[j1], b = T1[(j1 + 1)%3], c = T1[(j1 + 2)%3];
-          for (int j = 0; j < 3; j++) if (T2[j] == b && T2[(j + 1)%3] == a) j2 = j;
-          if (j2 < 0) continue;   // not wound against each other: leave it
-          const ll d = T2[(j2 + 2)%3];
-          if (c == d || (c < numPrismPointsHere && d < numPrismPointsHere)) continue;
-          const std::pair<ll, ll> newEdge = std::make_pair(std::min(c, d), std::max(c, d));
-          if (shellEdges.count(newEdge)) continue;
-          const ll oldMin1[3] = {a, b, c}, oldMin2[3] = {b, a, d};
-          const ll new1[3] = {a, d, c}, new2[3] = {b, c, d};
-          const double before = std::min(smallestAngle(oldMin1), smallestAngle(oldMin2));
-          const double after = std::min(smallestAngle(new1), smallestAngle(new2));
-          if (!(after > before + 0.5)) continue;
-          double n1[3], n2[3], m1[3], m2[3];
-          normalOf(oldMin1, n1); normalOf(oldMin2, n2); normalOf(new1, m1); normalOf(new2, m2);
-          double nsum[3] = {n1[0] + n2[0], n1[1] + n2[1], n1[2] + n2[2]};
-          if (!(Dot(m1, nsum) > 0.0) || !(Dot(m2, nsum) > 0.0)) continue;
-          // the quad has to be convex: a and b on opposite sides of the new
-          // edge c-d (and c, d of a-b), or the two new triangles lie on each
-          // other without either turning over (TetGen refused such a pair
-          // as nearly self-intersecting facets, 0.0055 degrees apart)
-          {
-            const double *pa = &out.points[(size_t)3*a], *pb = &out.points[(size_t)3*b], *pc = &out.points[(size_t)3*c], *pd = &out.points[(size_t)3*d];
-            double cd[3], ca[3], cb[3], ab[3], ac[3], ad[3], x1[3], x2[3], y1[3], y2[3];
-            Sub(pd, pc, cd); Sub(pa, pc, ca); Sub(pb, pc, cb); Sub(pb, pa, ab); Sub(pc, pa, ac); Sub(pd, pa, ad);
-            Cross(cd, ca, x1); Cross(cd, cb, x2); Cross(ab, ac, y1); Cross(ab, ad, y2);
-            if (!(Dot(x1, nsum)*Dot(x2, nsum) < 0.0) || !(Dot(y1, nsum)*Dot(y2, nsum) < 0.0)) continue;
-          }
-          // neither new triangle may lie down on a neighbour across an
-          // outer edge (the old triangle on that edge sets what was there)
-          {
-            const ll pair[2] = {t1, t2};
-            const ll *newTris[2] = {new1, new2};
-            const ll *oldOn[2][2] = {{oldMin1, oldMin2}, {oldMin1, oldMin2}};   // new1: a-d was t2's, c-a was t1's; new2: b-c was t1's, d-b was t2's
-            const ll edges[2][2][2] = {{{a, d}, {c, a}}, {{b, c}, {d, b}}};
-            const int oldIndex[2][2] = {{1, 0}, {0, 1}};
-            bool folds = false;
-            std::vector<ll> others;
-            for (int w = 0; w < 2 && !folds; w++)
-            {
-              for (int e = 0; e < 2 && !folds; e++)
-              {
-                acrossEdge(edges[w][e][0], edges[w][e][1], pair, 2, others);
-                for (size_t m = 0; m < others.size() && !folds; m++)
-                {
-                  const ll *U = &out.triangles[(size_t)3*others[m]];
-                  const double after = intoAngle(newTris[w], U, edges[w][e][0], edges[w][e][1]);
-                  const double before = intoAngle(oldOn[w][oldIndex[w][e]], U, edges[w][e][0], edges[w][e][1]);
-                  if (after < minEdgeAngle && after < before) folds = true;
-                }
-              }
-            }
-            if (folds) continue;
-          }
-          guard.BeginOperation();
-          guard.Leave(t1);
-          guard.Leave(t2);
-          if (guard.Crosses(new1) || guard.Crosses(new2)) continue;
-          guard.Remove(t1);
-          guard.Remove(t2);
-          T1[0] = new1[0]; T1[1] = new1[1]; T1[2] = new1[2];
-          T2[0] = new2[0]; T2[1] = new2[1]; T2[2] = new2[2];
-          guard.Add(t1);
-          guard.Add(t2);
-          // b loses t1 and d gains it; a loses t2 and c gains it
-          {
-            std::vector<ll> &atB = incident[(size_t)b];
-            atB.erase(std::find(atB.begin(), atB.end(), t1));
-            incident[(size_t)d].push_back(t1);
-            std::vector<ll> &atA = incident[(size_t)a];
-            atA.erase(std::find(atA.begin(), atA.end(), t2));
-            incident[(size_t)c].push_back(t2);
-          }
-          touched[(size_t)t1] = touched[(size_t)t2] = 1;
-          shellEdges.insert(newEdge);
-          flipPartners[t1].push_back(t2);
-          flipPartners[t2].push_back(t1);
-          out.numBandFlips++;
-        }
-        // the smoothing of the pieces' points
-        std::map<ll, std::vector<ll> > around;   // point -> band triangles
-        std::map<ll, std::set<ll> > neighbours;
-        for (size_t m = 0; m < band.size(); m++)
-        {
-          const ll *tri = &out.triangles[(size_t)3*band[m]];
-          for (int j = 0; j < 3; j++)
-          {
-            if (tri[j] < numPrismPointsHere) continue;
-            around[tri[j]].push_back(band[m]);
-            neighbours[tri[j]].insert(tri[(j + 1)%3]);
-            neighbours[tri[j]].insert(tri[(j + 2)%3]);
-          }
-        }
-        std::vector<std::pair<ll, std::array<double, 3> > > moves;
-        for (std::map<ll, std::set<ll> >::const_iterator it = neighbours.begin(); it != neighbours.end(); ++it)
-        {
-          const ll v = it->first;
-          if (it->second.size() < 3) continue;
-          double mean[3] = {0.0, 0.0, 0.0};
-          for (std::set<ll>::const_iterator q = it->second.begin(); q != it->second.end(); ++q) for (int j = 0; j < 3; j++) mean[j] += out.points[(size_t)3*(*q) + j]/(double)it->second.size();
-          const double *x0 = &out.points[(size_t)3*v];
-          // the surface normal at the point, from its band triangles
-          double n[3] = {0.0, 0.0, 0.0};
-          const std::vector<ll> &tris = around[v];
-          for (size_t m = 0; m < tris.size(); m++) { double tn[3]; normalOf(&out.triangles[(size_t)3*tris[m]], tn); for (int j = 0; j < 3; j++) n[j] += tn[j]; }
-          const double nl = Norm(n);
-          if (!(nl > 0.0)) continue;
-          for (int j = 0; j < 3; j++) n[j] /= nl;
-          // The target is the neighbours' mean moved in the surface by the
-          // jitter fraction of the mean edge here, in a direction hashed
-          // from the point and the level: the levels are cut from one
-          // Delaunay and smoothed alike, so their triangulations come out
-          // aligned, and four points of two aligned edges on neighbouring
-          // levels lie in one plane - the mesher's sliver (96 of the 186
-          // zone tetrahedra under 5 degrees on the user's model had two
-          // parallel edges on neighbouring levels, 2026-09-30).
-          if (bandJitter > 0.0)
-          {
-            double meanEdge = 0.0;
-            for (std::set<ll>::const_iterator q = it->second.begin(); q != it->second.end(); ++q) meanEdge += Distance(x0, &out.points[(size_t)3*(*q)])/(double)it->second.size();
-            const int axis = (std::fabs(n[0]) <= std::fabs(n[1]) && std::fabs(n[0]) <= std::fabs(n[2])) ? 0 : ((std::fabs(n[1]) <= std::fabs(n[2])) ? 1 : 2);
-            double e[3] = {0.0, 0.0, 0.0}, u[3], w[3];
-            e[axis] = 1.0;
-            Cross(n, e, u);
-            if (Normalize(u))
-            {
-              Cross(n, u, w);
-              unsigned long long h = (unsigned long long)(v + 1)*11400714819323198485ULL + (unsigned long long)k*0x9E3779B97F4A7C15ULL;
-              h ^= h >> 29;
-              const double theta = 6.283185307179586*((double)(h & 0xFFFFFFFFULL)/4294967296.0);
-              for (int j = 0; j < 3; j++) mean[j] += bandJitter*meanEdge*(std::cos(theta)*u[j] + std::sin(theta)*w[j]);
-            }
-          }
-          double x[3] = {0.5*(x0[0] + mean[0]), 0.5*(x0[1] + mean[1]), 0.5*(x0[2] + mean[2])};
-          double size, thickness;
-          ll rim;
-          field.Local(x, size, thickness, rim);
-          const double delta = 0.05*thickness;
-          for (int step = 0; step < 3; step++)
-          {
-            const double f0 = field.Evaluate(x, fraction);
-            if (std::fabs(f0) < 1e-3*thickness) break;
-            double xp[3] = {x[0] + delta*n[0], x[1] + delta*n[1], x[2] + delta*n[2]};
-            const double slope = (field.Evaluate(xp, fraction) - f0)/delta;
-            if (!(std::fabs(slope) > 0.2)) break;
-            for (int j = 0; j < 3; j++) x[j] -= n[j]*f0/slope;
-          }
-          // no farther than half the local size from where it was
-          double dx[3];
-          Sub(x, x0, dx);
-          const double moved = Norm(dx);
-          if (!(moved > 0.0)) continue;
-          if (moved > 0.5*size) for (int j = 0; j < 3; j++) x[j] = x0[j] + dx[j]*(0.5*size/moved);
-          std::array<double, 3> xa = {x[0], x[1], x[2]};
-          moves.push_back(std::make_pair(v, xa));
-        }
-        for (size_t m = 0; m < moves.size(); m++)
-        {
-          const ll v = moves[m].first;
-          double old[3] = {out.points[(size_t)3*v], out.points[(size_t)3*v + 1], out.points[(size_t)3*v + 2]};
-          // the triangles around must keep facing the way they did, and
-          // none may lie down on a neighbour across any of its edges
-          const std::vector<ll> &tris = incident[(size_t)v];
-          std::vector<std::array<double, 3> > oldNormals(tris.size());
-          std::vector<double> oldAngles(tris.size());
-          for (size_t q = 0; q < tris.size(); q++) { double tn[3]; normalOf(&out.triangles[(size_t)3*tris[q]], tn); oldNormals[q] = {tn[0], tn[1], tn[2]}; oldAngles[q] = smallestAngle(&out.triangles[(size_t)3*tris[q]]); }
-          struct EdgePair { ll t, u, p, q; double before; };
-          std::vector<EdgePair> pairs;
-          {
-            std::vector<ll> others;
-            for (size_t q = 0; q < tris.size(); q++)
-            {
-              const ll *T = &out.triangles[(size_t)3*tris[q]];
-              for (int j = 0; j < 3; j++)
-              {
-                const ll p = T[j], r = T[(j + 1)%3];
-                acrossEdge(p, r, &tris[q], 1, others);
-                for (size_t m = 0; m < others.size(); m++)
-                {
-                  if (others[m] < tris[q] && std::find(tris.begin(), tris.end(), others[m]) != tris.end()) continue;   // the pair once
-                  pairs.push_back(EdgePair{tris[q], others[m], p, r, intoAngle(T, &out.triangles[(size_t)3*others[m]], p, r)});
-                }
-              }
-            }
-          }
-          // the triangles around leave the guard's cells before the point
-          // moves (their boxes change) and are tested and re-added after
-          guard.BeginOperation();
-          for (size_t q = 0; q < tris.size(); q++) { guard.Leave(tris[q]); guard.Remove(tris[q]); }
-          for (int j = 0; j < 3; j++) out.points[(size_t)3*v + j] = moves[m].second[j];
-          bool ok = true;
-          for (size_t q = 0; q < tris.size() && ok; q++)
-          {
-            double tn[3];
-            normalOf(&out.triangles[(size_t)3*tris[q]], tn);
-            const double *on = oldNormals[q].data();
-            // a triangle under 5 degrees has no normal to keep: the caps
-            // the zipper leaves stand off the surface with their apex on
-            // the neighbour's side of the long edge, and the move that
-            // pulls the apex back turns such a normal right over (2026-09-30,
-            // the user's model: 37 of the 42 band triangles left under 10
-            // degrees were caps whose every flip and move this refused)
-            if (oldAngles[q] >= 5.0 && !(tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0)) ok = false;
-            else if (smallestAngle(&out.triangles[(size_t)3*tris[q]]) < std::min(5.0, oldAngles[q])) ok = false;
-            else if (guard.Crosses(&out.triangles[(size_t)3*tris[q]])) ok = false;
-          }
-          for (size_t q = 0; q < pairs.size() && ok; q++)
-          {
-            const double after = intoAngle(&out.triangles[(size_t)3*pairs[q].t], &out.triangles[(size_t)3*pairs[q].u], pairs[q].p, pairs[q].q);
-            if (after < minEdgeAngle && after < pairs[q].before) ok = false;
-          }
-          if (!ok) for (int j = 0; j < 3; j++) out.points[(size_t)3*v + j] = old[j];
-          for (size_t q = 0; q < tris.size(); q++) guard.Add(tris[q]);
-          if (!ok) continue;
-          out.numBandPointsMoved++;
-        }
-      }
-      for (size_t m = 0; m < band.size(); m++)
-      {
-        const double a = smallestAngle(&out.triangles[(size_t)3*band[m]]);
-        out.bandSmallestAngleAfter = std::min(out.bandSmallestAngleAfter, a);
-        if (a < 10.0) out.numBandUnder10After++;
-      }
-    }
-    // What the relaxation broke is undone where it broke: the triangles
-    // that cross or fold now have their pieces' points put back and their
-    // flips undone (with the partners of those flips), a few times over;
-    // only if that does not bring the shell back to what it was is the
-    // whole relaxation undone.
-    for (int pass = 0; pass < 4; pass++)
-    {
-      std::vector<unsigned char> crossingAfter;
-      double atAfter[3];
-      const ll numCrossingAfter = svenvelope::CountCrossingTriangles(out.points, out.triangles, crossingAfter, atAfter);
-      std::vector<FoldedPair> foldedAfter;
-      double smallestFoldAfter = 180.0;
-      const ll numFoldedAfter = ListFoldedEdges(out.points, out.triangles, foldDegrees, (size_t)1 << 20, foldedAfter, smallestFoldAfter);
-      if (pass == 0) { out.relaxationCrossingsAfter = numCrossingAfter; out.relaxationFoldsAfter = numFoldedAfter; }
-      if (numCrossingAfter <= numCrossingBefore && numFoldedAfter <= numFoldedBefore) break;
-      if (pass == 3)
-      {
-        out.points.swap(pointsBefore);
-        out.triangles.swap(trianglesBefore);
-        out.relaxationReverted = true;
-        break;
-      }
-      std::set<ll> undo;
-      for (size_t i = 0; i < crossingAfter.size(); i++) if (crossingAfter[i]) undo.insert((ll)i);
-      for (size_t f = 0; f < foldedAfter.size(); f++) { undo.insert(foldedAfter[f].a); undo.insert(foldedAfter[f].b); }
-      // the flips' partners, transitively
-      std::vector<ll> stack(undo.begin(), undo.end());
-      while (!stack.empty())
-      {
-        const ll t = stack.back();
-        stack.pop_back();
-        std::map<ll, std::vector<ll> >::const_iterator at = flipPartners.find(t);
-        if (at == flipPartners.end()) continue;
-        for (size_t q = 0; q < at->second.size(); q++) if (undo.insert(at->second[q]).second) stack.push_back(at->second[q]);
-      }
-      for (std::set<ll>::const_iterator it = undo.begin(); it != undo.end(); ++it)
-      {
-        const ll t = *it;
-        if ((size_t)3*t + 2 >= trianglesBefore.size()) continue;
-        // the points first (of the triangle as it is now and as it was), then the triangle
-        for (int j = 0; j < 3; j++)
-        {
-          const ll v[2] = {out.triangles[(size_t)3*t + j], trianglesBefore[(size_t)3*t + j]};
-          for (int q = 0; q < 2; q++)
-          {
-            if (v[q] < numPrismPointsHere || (size_t)3*v[q] + 2 >= pointsBefore.size()) continue;
-            for (int m = 0; m < 3; m++) out.points[(size_t)3*v[q] + m] = pointsBefore[(size_t)3*v[q] + m];
-          }
-        }
-        for (int j = 0; j < 3; j++) out.triangles[(size_t)3*t + j] = trianglesBefore[(size_t)3*t + j];
-        out.numRelaxationUndone++;
-      }
-    }
+    std::vector<unsigned char> fixed(out.points.size()/3, 0);
+    for (ll i = 0; i < numPrismPoints && (size_t)i < fixed.size(); i++) fixed[(size_t)i] = 1;
+    RelaxJunctionBands(out, field, fractions, fixed, relaxation);
   }
   // the shell against itself: how many of its triangles pass through
   // another or lie on each other across an edge, and how many of each

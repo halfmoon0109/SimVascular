@@ -644,6 +644,10 @@ struct JunctionShell
   bool relaxationReverted = false;       // the relaxation made the shell cross itself or fold and was undone whole (after the local undo below failed)
   long long numRelaxationUndone = 0;     // triangles whose relaxation was undone locally (their points put back, their flips undone) for crossing or folding
   long long relaxationCrossingsAfter = 0, relaxationFoldsAfter = 0;   // what the relaxed shell had before the undo, against the shell's own counts before
+  long long numBandCollapses = 0;        // short edges of the bands collapsed (two triangles gone each)
+  long long numBandVerticesRemoved = 0;  // free points on three triangles taken out (two triangles gone each)
+  long long numBandTrianglesRemoved = 0;
+  bool collapseReverted = false;         // the collapses and removals made the shell cross or fold and were undone whole
   long long numCappedChains = 0;         // short boundary chains of the pieces that no zone loop takes (a tunnel's mouth where two walls nearly touch, or a hole left by the trim), closed with a fan of triangles each
   long long numCapTriangles = 0;
   long long numCrossingTriangles = 0;    // shell triangles passing through another (svenvelope::CountCrossingTriangles over the whole shell)
@@ -669,6 +673,18 @@ struct JunctionShell
  * is not handed the whole prism zone's points.
  * @return 0 on success, 1 with error set otherwise.
  */
+/// How BuildJunctionShell relaxes the bands (the layer surfaces' pieces
+/// and the zipper strips); see RelaxJunctionBands. Zero rounds leaves the
+/// bands as zipped; a zero fraction turns that operation off.
+struct BandRelaxation
+{
+  int rounds = 3;                 // rounds of edge flips and smoothing per level
+  double jitter = 0.15;           // the smoothing target moves in the surface by this fraction of the mean edge, hashed direction
+  double collapseFraction = 0.3;  // an edge under this fraction of its two triangles' other edges is collapsed (two free points)
+  bool removeDegree3 = true;      // a free point on three triangles, one of them under 10 degrees, is taken out
+  bool freeThinCaps = true;       // a triangle under 5 degrees keeps neither its normal nor its creases when its point moves
+};
+
 /**
  * @brief Widens the junction zone around the given interface points: the
  * junction region they touch (junction triangles connected through shared
@@ -691,7 +707,18 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
 int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
     int erosionRings, int earPasses, JunctionShell &out, std::string &error, bool innerLevels = true,
-    double bandJitter = 0.15);
+    const BandRelaxation &relaxation = BandRelaxation());
+
+/**
+ * The relaxation of a junction shell's bands (its layer surfaces' pieces
+ * and zipper strips), as BuildJunctionShell runs it: rounds of edge flips
+ * and a smoothing of the points onto their levels, with the points flagged
+ * fixed (the prism mesh's) kept. On a compacted shell flag the points whose
+ * prismPoint is not -1. Fills the shell's numBand* and relaxation* fields.
+ * @return 0, or 1 when the flags do not match the points.
+ */
+int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::vector<double> &fractions,
+    const std::vector<unsigned char> &fixed, const BandRelaxation &options);
 
 /**
  * @brief The angle below which TetGen refuses two facets on one edge as

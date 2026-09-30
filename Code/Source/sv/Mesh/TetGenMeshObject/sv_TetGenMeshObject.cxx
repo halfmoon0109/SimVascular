@@ -3177,6 +3177,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
             (long long)junction.numBandTriangles, (long long)junction.numBandFlips, (long long)junction.numBandPointsMoved,
             (long long)junction.numBandUnder10Before, (long long)junction.numBandUnder10After, junction.bandSmallestAngleBefore, junction.bandSmallestAngleAfter,
             junction.relaxationReverted ? " (undone whole: the relaxed shell crossed or folded)" : "");
+        fprintf(stdout,"      %lld short band edges collapsed and %lld free points on three triangles taken out (%lld triangles gone)%s\n",
+            (long long)junction.numBandCollapses, (long long)junction.numBandVerticesRemoved, (long long)junction.numBandTrianglesRemoved,
+            junction.collapseReverted ? " (undone: the shell crossed or folded)" : "");
         if (junction.numRelaxationUndone > 0 || junction.relaxationCrossingsAfter > 0 || junction.relaxationFoldsAfter > 0)
         {
           fprintf(stdout,"      the relaxed bands had %lld crossing triangles and %lld folded edges; %lld triangles had their relaxation undone locally\n",
