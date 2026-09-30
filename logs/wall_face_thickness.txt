@@ -1,0 +1,31 @@
+# ModelFaceID -> wall thickness of the AsAtoCoW_remodel job (logs/AsAtoCoW_remodel.msh), recovered 2026-09-30:
+# localSize equals localWallThickness per face in that job, so each face's MeshSizingFunction median in
+# wall_offset_diagnostics.vtp names its thickness; the two ambiguous groups (0.36/0.38/0.4 and 0.8/0.85) were
+# ordered by median to match the job's face counts. Verified: the thickness ramp on this table reproduces
+# run-gui_20260929_1015 exactly (3383 points raised, largest 0.34735 at (13.114, -34.898, 75.44)).
+3 0.1
+4 0.85
+5 0.1
+6 0.3
+7 0.5
+8 1.2
+9 0.5
+10 0.38
+11 0.36
+13 0.27
+14 0.36
+15 0.8
+16 0.67
+17 0.3
+18 0.27
+19 0.85
+23 0.4
+25 0.3
+26 0.38
+28 0.67
+29 0.18
+30 0.1
+31 0.3
+32 0.27
+34 0.1
+36 0.19

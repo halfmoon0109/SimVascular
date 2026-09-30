@@ -5536,7 +5536,7 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
     // compressed; two edges over-eroded the synthetic junction) and their
     // boundaries have their ears taken off in two passes, as the core's
     // test has them. The shell is
-    // built again with a wider junction zone, up to five times, when it
+    // built again with a wider junction zone, up to sixteen times, when it
     // comes back with triangles passing through one another where a
     // prism's layer surface passes through a piece (those prisms' triangles
     // and a ring around them go to the junction zone: their tops are not
@@ -5546,7 +5546,7 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
     // when a zone boundary loop found no piece chain of its own (the piece
     // too narrow there; two rings around the loop), or when a piece has a
     // hole (the prisms owning or passing through it, with a ring).
-    const int erosionRings = 1, earPasses = 2, wideningRings = 2, maxWidenings = 10;
+    const int erosionRings = 1, earPasses = 2, wideningRings = 2, maxWidenings = 16;
     for (int attempt = 0; ; attempt++)
     {
       hybrid.prisms = svoffset::PrismMesh();

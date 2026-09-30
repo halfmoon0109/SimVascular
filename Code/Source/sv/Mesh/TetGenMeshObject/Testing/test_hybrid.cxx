@@ -440,7 +440,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
     }
     else if (!shell.failedLoopPoints.empty()) { seedPoints = shell.failedLoopPoints; rings = 2; }
     else if (!shell.failedTriangles.empty()) { seedTriangles = shell.failedTriangles; rings = 1; }
-    if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= 10) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
+    if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= 16) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
     ll widened = WidenJunctionZone(iface, seedPoints, seedTriangles, rings, structured);
     if (built) printf("  attempt %d: the shell has %lld crossing triangles and %lld folded edges; the junction zone widened by %lld triangles at %zu prisms and around %zu loop points\n", attempt + 1, shell.numCrossingTriangles, shell.numFoldedEdges, widened, seedTriangles.size(), seedPoints.size());
     else printf("  attempt %d: %s; the junction zone widened by %lld triangles\n", attempt + 1, err.c_str(), widened);
