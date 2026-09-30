@@ -690,7 +690,8 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
 
 int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
-    int erosionRings, int earPasses, JunctionShell &out, std::string &error, bool innerLevels = true);
+    int erosionRings, int earPasses, JunctionShell &out, std::string &error, bool innerLevels = true,
+    double bandJitter = 0.15);
 
 /**
  * @brief The angle below which TetGen refuses two facets on one edge as

@@ -4495,7 +4495,7 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
 //--------------------
 int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
-    int erosionRings, int earPasses, JunctionShell &out, std::string &error, bool innerLevels)
+    int erosionRings, int earPasses, JunctionShell &out, std::string &error, bool innerLevels, double bandJitter)
 {
   // the erosion of the pieces is by distance from the lifted loops, in
   // loop edges: the rings asked for, one edge each
@@ -5094,7 +5094,6 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
           double mean[3] = {0.0, 0.0, 0.0};
           for (std::set<ll>::const_iterator q = it->second.begin(); q != it->second.end(); ++q) for (int j = 0; j < 3; j++) mean[j] += out.points[(size_t)3*(*q) + j]/(double)it->second.size();
           const double *x0 = &out.points[(size_t)3*v];
-          double x[3] = {0.5*(x0[0] + mean[0]), 0.5*(x0[1] + mean[1]), 0.5*(x0[2] + mean[2])};
           // the surface normal at the point, from its band triangles
           double n[3] = {0.0, 0.0, 0.0};
           const std::vector<ll> &tris = around[v];
@@ -5102,6 +5101,32 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
           const double nl = Norm(n);
           if (!(nl > 0.0)) continue;
           for (int j = 0; j < 3; j++) n[j] /= nl;
+          // The target is the neighbours' mean moved in the surface by the
+          // jitter fraction of the mean edge here, in a direction hashed
+          // from the point and the level: the levels are cut from one
+          // Delaunay and smoothed alike, so their triangulations come out
+          // aligned, and four points of two aligned edges on neighbouring
+          // levels lie in one plane - the mesher's sliver (96 of the 186
+          // zone tetrahedra under 5 degrees on the user's model had two
+          // parallel edges on neighbouring levels, 2026-09-30).
+          if (bandJitter > 0.0)
+          {
+            double meanEdge = 0.0;
+            for (std::set<ll>::const_iterator q = it->second.begin(); q != it->second.end(); ++q) meanEdge += Distance(x0, &out.points[(size_t)3*(*q)])/(double)it->second.size();
+            const int axis = (std::fabs(n[0]) <= std::fabs(n[1]) && std::fabs(n[0]) <= std::fabs(n[2])) ? 0 : ((std::fabs(n[1]) <= std::fabs(n[2])) ? 1 : 2);
+            double e[3] = {0.0, 0.0, 0.0}, u[3], w[3];
+            e[axis] = 1.0;
+            Cross(n, e, u);
+            if (Normalize(u))
+            {
+              Cross(n, u, w);
+              unsigned long long h = (unsigned long long)(v + 1)*11400714819323198485ULL + (unsigned long long)k*0x9E3779B97F4A7C15ULL;
+              h ^= h >> 29;
+              const double theta = 6.283185307179586*((double)(h & 0xFFFFFFFFULL)/4294967296.0);
+              for (int j = 0; j < 3; j++) mean[j] += bandJitter*meanEdge*(std::cos(theta)*u[j] + std::sin(theta)*w[j]);
+            }
+          }
+          double x[3] = {0.5*(x0[0] + mean[0]), 0.5*(x0[1] + mean[1]), 0.5*(x0[2] + mean[2])};
           double size, thickness;
           ll rim;
           field.Local(x, size, thickness, rim);
