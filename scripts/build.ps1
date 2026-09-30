@@ -33,15 +33,39 @@ Copy-Item -Path (Join-Path $WorkRoot "wall_offset_diagnostics.vtp") -Destination
 
 Push-Location $RepoRoot
 try {
-    git add logs
-    git diff --cached --quiet
-    if ($LASTEXITCODE -eq 0) {
-        Write-Host "새로 바뀐 로그가 없습니다 -- 커밋 생략"
-        exit 0
+    $Branch = (git rev-parse --abbrev-ref HEAD).Trim()
+
+    # 다른 세션(웹의 Claude 등)이 먼저 푸시한 커밋 위로 올라선다. 복사해 둔 로그의
+    # 변경은 autostash로 보존된다. 이걸 빼먹으면 push가 "fetch first"로 거부되고,
+    # 다음 실행은 새 로그가 없다며 커밋도 푸시도 건너뛰어 로그 커밋이 로컬에 갇힌다
+    # (2026-09-30 21:44 실행).
+    git pull --rebase --autostash origin $Branch
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "git pull --rebase 실패: 충돌을 풀고(git status) 다시 실행하세요" -ForegroundColor Red
+        exit 1
     }
 
-    git commit -m "[Windows] chore: build log $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
-    git push
+    git add logs
+    git diff --cached --quiet
+    if ($LASTEXITCODE -ne 0) {
+        git commit -m "[Windows] chore: build log $(Get-Date -Format 'yyyy-MM-dd HH:mm')"
+    }
+    else {
+        Write-Host "새로 바뀐 로그가 없습니다 -- 커밋 생략"
+    }
+
+    # 이번 커밋뿐 아니라 지난 실행에서 푸시가 거부돼 남은 커밋도 함께: 원격보다 앞서 있으면 푸시한다
+    $Ahead = (git rev-list --count "origin/$Branch..HEAD").Trim()
+    if ($Ahead -ne "0") {
+        git push -u origin $Branch
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "git push 실패: 스크립트를 다시 실행하면 pull --rebase 뒤 재시도합니다" -ForegroundColor Red
+            exit 1
+        }
+    }
+    else {
+        Write-Host "원격과 같습니다 -- 푸시 생략"
+    }
 }
 finally {
     Pop-Location

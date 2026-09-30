@@ -26,12 +26,21 @@ cp -f "$WORK_ROOT"/wall_*_crossings*.vtp "$DEST_LOGS"/ 2>/dev/null || true
 cp -f "$WORK_ROOT"/wall_offset_diagnostics.vtp "$DEST_LOGS"/ 2>/dev/null || true
 
 cd "$REPO_ROOT"
-git add logs
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 
+# build.ps1과 같이: 다른 세션이 먼저 푸시한 커밋 위로 올라선 뒤 커밋하고, 지난 실행에서
+# 푸시가 거부돼 남은 커밋까지 원격보다 앞서 있으면 푸시한다
+git pull --rebase --autostash origin "$BRANCH"
+
+git add logs
 if git diff --cached --quiet; then
   echo "새로 바뀐 로그가 없습니다 -- 커밋 생략"
-  exit 0
+else
+  git commit -m "[Windows] chore: build log $(date +%Y-%m-%d\ %H:%M)"
 fi
 
-git commit -m "[Windows] chore: build log $(date +%Y-%m-%d\ %H:%M)"
-git push
+if [ "$(git rev-list --count "origin/$BRANCH..HEAD")" != "0" ]; then
+  git push -u origin "$BRANCH"
+else
+  echo "원격과 같습니다 -- 푸시 생략"
+fi
