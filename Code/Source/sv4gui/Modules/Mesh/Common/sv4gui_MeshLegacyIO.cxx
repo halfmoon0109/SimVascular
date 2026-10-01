@@ -350,14 +350,33 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
     }
 
     // A face id on the mesh that is no face of the model is one the mesher
-    // made: the solid wall mesh tags its free outer surface with an id past
-    // the model's, because the model has no face there. It is written under
-    // its own name so the solid domain has a boundary file for it too. The
-    // name is wall_outer, with the id appended when there are several or
-    // when a model face already took the name, so nothing written above is
-    // overwritten.
+    // made for the solid wall: K + a wall face's id for the outer wall over
+    // that face, 2K + a cap's id for the wall end closing against that cap,
+    // with K the smallest power of ten above the model's face ids (the
+    // mesher computes it the same way). Each is written under the model
+    // face's name, wall_outer_<face> or wall_end_<cap>, and the outer parts
+    // and the ends are also written whole as wall_outer.vtp and
+    // wall_ends.vtp. An id that decodes to no model face (an older mesh, or
+    // a wall tagged without face ids) is written as wall_outer_<id>.
     //
     {
+      int maxIdent = 0;
+      std::map<int, std::string> nameByIdent;
+      for (int i = 0; i < faces.size(); i++) {
+        auto face = faces[i];
+        if (face == nullptr) {
+          continue;
+        }
+        int ident = modelElement->GetFaceIdentifierFromInnerSolid(face->id);
+        nameByIdent[ident] = face->name;
+        if (ident > maxIdent) {
+          maxIdent = ident;
+        }
+      }
+      int K = 1;
+      while (K <= maxIdent) {
+        K *= 10;
+      }
       std::set<int> extraFaceIdents;
       auto faceIds = vtkIntArray::SafeDownCast(surfaceMesh->GetCellData()->GetArray("ModelFaceID"));
       if (faceIds != nullptr) {
@@ -369,20 +388,36 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
         }
       }
 
+      auto outerAppender = vtkSmartPointer<vtkAppendPolyData>::New();
+      auto endAppender = vtkSmartPointer<vtkAppendPolyData>::New();
+      outerAppender->UserManagedInputsOff();
+      endAppender->UserManagedInputsOff();
+      int numOuterParts = 0, numEndParts = 0;
+      auto uniqueName = [&](QString name) {
+        while (writtenNames.count(name.toStdString()) > 0) {
+          name += "_";
+        }
+        writtenNames.insert(name.toStdString());
+        return name;
+      };
       for (auto ident : extraFaceIdents) {
         auto facepd = vtkSmartPointer<vtkPolyData>::New();
         PlyDtaUtils_GetFacePolyData(surfaceMesh.GetPointer(), &ident, facepd);
         ResetFaceSurfaceIds(facepd, node_map, elem_map, volumeMesh.GetPointer(), std::string("face id ") + std::to_string(ident));
 
-        QString name = (extraFaceIdents.size() == 1) ? QString("wall_outer") :
-            QString("wall_outer_") + QString::number(ident);
-        if (writtenNames.count(name.toStdString()) > 0) {
-          name = QString("wall_outer_") + QString::number(ident);
-          while (writtenNames.count(name.toStdString()) > 0) {
-            name += "_";
-          }
+        QString name;
+        if (ident > 2*K && nameByIdent.count(ident - 2*K) > 0) {
+          name = QString("wall_end_") + QString::fromStdString(nameByIdent[ident - 2*K]);
+          endAppender->AddInputData(facepd);
+          numEndParts++;
+        } else if (ident > K && nameByIdent.count(ident - K) > 0) {
+          name = QString("wall_outer_") + QString::fromStdString(nameByIdent[ident - K]);
+          outerAppender->AddInputData(facepd);
+          numOuterParts++;
+        } else {
+          name = (extraFaceIdents.size() == 1) ? QString("wall_outer") : QString("wall_outer_") + QString::number(ident);
         }
-        writtenNames.insert(name.toStdString());
+        name = uniqueName(name);
         vtpFilePath = meshDir + "/mesh-surfaces/" + name + ".vtp";
         vtpFilePath = QDir::toNativeSeparators(vtpFilePath);
         vtpWriter->SetInputData(facepd);
@@ -390,6 +425,24 @@ bool sv4guiMeshLegacyIO::WriteFiles(vtkSmartPointer<vtkPolyData> surfaceMesh, vt
         vtpWriter->Write();
         fprintf(stdout, "[sv4guiMeshLegacyIO::WriteFiles] Face id %d is not a face of the model; written as mesh-surfaces/%s.vtp\n",
             ident, name.toStdString().c_str());
+      }
+      if (numOuterParts > 0) {
+        outerAppender->Update();
+        QString name = uniqueName(QString("wall_outer"));
+        vtpFilePath = QDir::toNativeSeparators(meshDir + "/mesh-surfaces/" + name + ".vtp");
+        vtpWriter->SetInputData(outerAppender->GetOutput());
+        vtpWriter->SetFileName(vtpFilePath.toStdString().c_str());
+        vtpWriter->Write();
+        fprintf(stdout, "[sv4guiMeshLegacyIO::WriteFiles] The %d outer wall parts together: mesh-surfaces/%s.vtp\n", numOuterParts, name.toStdString().c_str());
+      }
+      if (numEndParts > 0) {
+        endAppender->Update();
+        QString name = uniqueName(QString("wall_ends"));
+        vtpFilePath = QDir::toNativeSeparators(meshDir + "/mesh-surfaces/" + name + ".vtp");
+        vtpWriter->SetInputData(endAppender->GetOutput());
+        vtpWriter->SetFileName(vtpFilePath.toStdString().c_str());
+        vtpWriter->Write();
+        fprintf(stdout, "[sv4guiMeshLegacyIO::WriteFiles] The %d wall ends together: mesh-surfaces/%s.vtp\n", numEndParts, name.toStdString().c_str());
       }
     }
 

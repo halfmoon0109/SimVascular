@@ -3607,8 +3607,20 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     // wall face would otherwise share its id with the outer wall, and the
     // export that writes one file per model face would put the outer wall in
     // that cap's file.
+    // The outer wall and the wall ends are split by the model face they
+    // stand on, so that the solid domain has one boundary file per vessel
+    // face and per cap (2026-10-01): an outer triangle gets K + the id of
+    // the wall face under it, a wall end 2K + the id of the cap it closes
+    // against, with K the smallest power of ten above the model's face ids,
+    // so none of the new ids collides with a model face or with each other
+    // and the export can read the face back out of the id. Without face
+    // ids the outer wall gets one id past the model's and the ends 9999.
     auto surfaceFaceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
     int outerWallFaceId = outerSurfaceCellId;
+    int faceIdBase = 0;
+    vtkSmartPointer<vtkPolyData> capSurface;
+    vtkSmartPointer<vtkCellLocator> capLocator;
+    vtkIntArray *capFaceIds = nullptr;
     if (surfaceFaceIds != nullptr)
     {
       double faceIdRange[2];
@@ -3627,6 +3639,52 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         fprintf(stdout,"  the model's face ids could not be read, so the outer wall face id %d clears only the wall faces and may coincide with a cap\n",
             outerWallFaceId);
       }
+      faceIdBase = 1;
+      while (faceIdBase <= outerWallFaceId - 1)
+      {
+        faceIdBase *= 10;
+      }
+      // the model's caps alone, for the wall ends: the faces of the model
+      // that are not on the wall surface
+      std::set<int> wallFaceIdSet;
+      for (vtkIdType c = 0; c < surfaceFaceIds->GetNumberOfTuples(); c++)
+      {
+        wallFaceIdSet.insert(surfaceFaceIds->GetValue(c));
+      }
+      vtkIntArray *originalFaceIds = (originalpolydata_ != nullptr) ?
+          vtkIntArray::SafeDownCast(originalpolydata_->GetCellData()->GetArray("ModelFaceID")) : nullptr;
+      if (originalFaceIds != nullptr)
+      {
+        capSurface = vtkSmartPointer<vtkPolyData>::New();
+        capSurface->SetPoints(originalpolydata_->GetPoints());
+        capSurface->Allocate();
+        auto capIdArray = vtkSmartPointer<vtkIntArray>::New();
+        capIdArray->SetName("ModelFaceID");
+        for (vtkIdType c = 0; c < originalpolydata_->GetNumberOfCells(); c++)
+        {
+          const int id = originalFaceIds->GetValue(c);
+          if (wallFaceIdSet.count(id))
+          {
+            continue;
+          }
+          vtkIdType npts;
+          const vtkIdType *cpts;
+          originalpolydata_->GetCellPoints(c, npts, cpts);
+          capSurface->InsertNextCell(originalpolydata_->GetCellType(c), npts, cpts);
+          capIdArray->InsertNextValue(id);
+        }
+        capSurface->GetCellData()->AddArray(capIdArray);
+        if (capSurface->GetNumberOfCells() > 0)
+        {
+          capLocator = vtkSmartPointer<vtkCellLocator>::New();
+          capLocator->SetDataSet(capSurface);
+          capLocator->BuildLocator();
+          capFaceIds = capIdArray;
+        }
+      }
+      fprintf(stdout,"  the outer wall is tagged %d + the model face under it and a wall end %d + the cap it closes against (%lld cap triangles in the model%s)\n",
+          faceIdBase, 2*faceIdBase, capSurface ? (long long)capSurface->GetNumberOfCells() : 0LL,
+          capLocator ? "" : "; none found, so the ends are tagged 9999");
     }
     else
     {
@@ -3637,6 +3695,31 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     faceLocator->SetDataSet(surface);
     faceLocator->BuildLocator();
     auto faceCell = vtkSmartPointer<vtkGenericCell>::New();
+    auto capCell = vtkSmartPointer<vtkGenericCell>::New();
+    // the model face nearest a point on the wall surface, and the cap nearest a point
+    auto baseFaceAt = [&](const double centroid[3]) -> int
+    {
+      if (surfaceFaceIds == nullptr) return -1;
+      double closest[3];
+      vtkIdType closestCell = -1;
+      int subId = 0;
+      double distanceSquared = 0.0;
+      faceLocator->FindClosestPoint(centroid, closest, faceCell, closestCell, subId, distanceSquared);
+      return closestCell >= 0 ? surfaceFaceIds->GetValue(closestCell) : -1;
+    };
+    auto capFaceAt = [&](const double centroid[3]) -> int
+    {
+      if (!capLocator || capFaceIds == nullptr) return -1;
+      double closest[3];
+      vtkIdType closestCell = -1;
+      int subId = 0;
+      double distanceSquared = 0.0;
+      capLocator->FindClosestPoint(centroid, closest, capCell, closestCell, subId, distanceSquared);
+      return closestCell >= 0 ? capFaceIds->GetValue(closestCell) : -1;
+    };
+    auto outerIdFor = [&](int baseFace) -> int { return (faceIdBase > 0 && baseFace >= 0) ? faceIdBase + baseFace : outerWallFaceId; };
+    auto endIdFor = [&](int capFace) -> int { return (faceIdBase > 0 && capFace >= 0) ? 2*faceIdBase + capFace : sidewallCellEntityId; };
+    std::map<int, int> outerFaceCount, endFaceCount;   // tagged outer and end triangles by id, for the log
 
     // The shell's points by position and its triangles by their three points,
     // for the check and for the winding: a boundary face on a shell triangle's
@@ -3763,47 +3846,40 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       }
       int entityId = sidewallCellEntityId;
       int modelFaceId = sidewallCellEntityId;
+      // the face's centroid, for the lookups by position: the shell only
+      // holds the triangles of the wall surface, and a lookup by cell index
+      // would put the two out of step the moment it held anything else
+      double centroid[3] = {0.0, 0.0, 0.0};
+      for (int j = 0; j < 3; j++)
+      {
+        double p[3];
+        wallmesh_->GetPoint(pts[j], p);
+        for (int k = 0; k < 3; k++)
+        {
+          centroid[k] += p[k]/3.0;
+        }
+      }
       if (role == innerSurfaceCellId)
       {
         entityId = innerSurfaceCellId;
         numInnerCells++;
-
-        // The face of the interface triangle is the face of the wall surface
-        // under it. It is looked up by position rather than by cell index
-        // because the shell only holds the triangles of that surface, and a
-        // surface that held anything else would put the two out of step.
-        modelFaceId = outerWallFaceId;
-        if (surfaceFaceIds != nullptr)
-        {
-          double centroid[3] = {0.0, 0.0, 0.0};
-          for (int j = 0; j < 3; j++)
-          {
-            double p[3];
-            wallmesh_->GetPoint(pts[j], p);
-            for (int k = 0; k < 3; k++)
-            {
-              centroid[k] += p[k]/3.0;
-            }
-          }
-          double closest[3];
-          vtkIdType closestCell = -1;
-          int subId = 0;
-          double distanceSquared = 0.0;
-          faceLocator->FindClosestPoint(centroid, closest, faceCell, closestCell, subId, distanceSquared);
-          if (closestCell >= 0)
-          {
-            modelFaceId = surfaceFaceIds->GetValue(closestCell);
-          }
-        }
+        // the face of the interface triangle is the face of the wall surface under it
+        const int baseFace = baseFaceAt(centroid);
+        modelFaceId = baseFace >= 0 ? baseFace : outerWallFaceId;
       }
       else if (role == outerSurfaceCellId)
       {
         entityId = outerSurfaceCellId;
-        modelFaceId = outerWallFaceId;
+        // the outer wall over the nearest point of the wall surface: its face
+        modelFaceId = outerIdFor(baseFaceAt(centroid));
+        outerFaceCount[modelFaceId]++;
         numOuterCells++;
       }
       else
       {
+        // a wall end: the cap it closes against (the end lies in the cap's plane)
+        modelFaceId = endIdFor(capFaceAt(centroid));
+        endFaceCount[modelFaceId]++;
         numSideCells++;
       }
 
@@ -3858,6 +3934,34 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         cellEntityIds->InsertNextValue(entityId);
         modelFaceIds->InsertNextValue(modelFaceId);
       };
+      // the interface point under each prism point, so that a top's face is
+      // read off the interface triangle under it exactly
+      const long long numInterfacePoints = (long long)(interfacePoints.size()/3);
+      std::vector<long long> interfaceOfPrismPoint(prisms.points.size()/3, -1);
+      for (long long i = 0; i < numInterfacePoints && (size_t)i < interfaceOfPrismPoint.size(); i++)
+      {
+        interfaceOfPrismPoint[(size_t)i] = i;   // the prism mesh's first points are the interface's
+      }
+      for (size_t m = 0; m < prisms.layerPoint.size() && numInterfacePoints > 0; m++)
+      {
+        const long long id = prisms.layerPoint[m];
+        if (id >= 0 && (size_t)id < interfaceOfPrismPoint.size())
+        {
+          interfaceOfPrismPoint[(size_t)id] = (long long)(m % (size_t)numInterfacePoints);
+        }
+      }
+      auto interfaceCentroidUnder = [&](const long long *prismCorners, double centroid[3]) -> bool
+      {
+        for (int k = 0; k < 3; k++) centroid[k] = 0.0;
+        for (int j = 0; j < 3; j++)
+        {
+          const long long p = prismCorners[j];
+          const long long i = ((size_t)p < interfaceOfPrismPoint.size()) ? interfaceOfPrismPoint[(size_t)p] : -1;
+          if (i < 0) return false;
+          for (int k = 0; k < 3; k++) centroid[k] += interfacePoints[(size_t)3*i + k]/3.0;
+        }
+        return true;
+      };
       for (size_t t = 0; t < hybridWall.structured.size() && 3*t + 2 < interfaceTriangles.size(); t++)
       {
         if (!hybridWall.structured[t])
@@ -3865,38 +3969,44 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
           continue;
         }
         const long long *corners = &interfaceTriangles[3*t];
-        int modelFaceId = outerWallFaceId;
-        if (surfaceFaceIds != nullptr)
+        double centroid[3] = {0.0, 0.0, 0.0};
+        for (int j = 0; j < 3; j++)
         {
-          double centroid[3] = {0.0, 0.0, 0.0};
-          for (int j = 0; j < 3; j++)
+          for (int k = 0; k < 3; k++)
           {
-            for (int k = 0; k < 3; k++)
-            {
-              centroid[k] += interfacePoints[(size_t)3*corners[j] + k]/3.0;
-            }
-          }
-          double closest[3];
-          vtkIdType closestCell = -1;
-          int subId = 0;
-          double distanceSquared = 0.0;
-          faceLocator->FindClosestPoint(centroid, closest, faceCell, closestCell, subId, distanceSquared);
-          if (closestCell >= 0)
-          {
-            modelFaceId = surfaceFaceIds->GetValue(closestCell);
+            centroid[k] += interfacePoints[(size_t)3*corners[j] + k]/3.0;
           }
         }
-        insertPrismFace(corners, true, innerSurfaceCellId, modelFaceId);
+        const int baseFace = baseFaceAt(centroid);
+        insertPrismFace(corners, true, innerSurfaceCellId, baseFace >= 0 ? baseFace : outerWallFaceId);
         numPrismInner++;
       }
       for (size_t i = 0; i + 2 < prisms.topTriangles.size(); i += 3)
       {
-        insertPrismFace(&prisms.topTriangles[i], false, outerSurfaceCellId, outerWallFaceId);
+        double centroid[3];
+        int baseFace = -1;
+        if (interfaceCentroidUnder(&prisms.topTriangles[i], centroid))
+        {
+          baseFace = baseFaceAt(centroid);
+        }
+        const int modelFaceId = outerIdFor(baseFace);
+        outerFaceCount[modelFaceId]++;
+        insertPrismFace(&prisms.topTriangles[i], false, outerSurfaceCellId, modelFaceId);
         numPrismOuter++;
       }
       for (size_t i = 0; i + 2 < prisms.rimTriangles.size(); i += 3)
       {
-        insertPrismFace(&prisms.rimTriangles[i], false, sidewallCellEntityId, sidewallCellEntityId);
+        double centroid[3] = {0.0, 0.0, 0.0};
+        for (int j = 0; j < 3; j++)
+        {
+          for (int k = 0; k < 3; k++)
+          {
+            centroid[k] += prisms.points[(size_t)3*prisms.rimTriangles[i + j] + k]/3.0;
+          }
+        }
+        const int modelFaceId = endIdFor(capFaceAt(centroid));
+        endFaceCount[modelFaceId]++;
+        insertPrismFace(&prisms.rimTriangles[i], false, sidewallCellEntityId, modelFaceId);
         numPrismSide++;
       }
       fprintf(stdout,"  the prism layers add %d interface, %d outer and %d side wall triangles to the wall boundary; the whole interface is on %d triangles (the surface has %lld)\n",
@@ -3906,9 +4016,20 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     wallmesh_->GetCellData()->AddArray(cellEntityIds);
     wallmesh_->GetCellData()->AddArray(modelFaceIds);
 
-    fprintf(stdout,"  wall boundary tagged from %lld TetGen boundary faces: %d interface, %d outer, %d side wall triangles (shell had %lld, %lld, %lld), %d faces of layer surfaces inside the wall left out (shell had %lld); the outer wall is ModelFaceID %d\n",
+    fprintf(stdout,"  wall boundary tagged from %lld TetGen boundary faces: %d interface, %d outer, %d side wall triangles (shell had %lld, %lld, %lld), %d faces of layer surfaces inside the wall left out (shell had %lld)\n",
         (long long)wallSurfaceMesh->GetNumberOfCells(), numInnerCells, numOuterCells, numSideCells,
-        (long long)numShellInner, (long long)numShellOuter, (long long)numShellSide, numLayerFaces, (long long)numShellLayer, outerWallFaceId);
+        (long long)numShellInner, (long long)numShellOuter, (long long)numShellSide, numLayerFaces, (long long)numShellLayer);
+    fprintf(stdout,"  outer wall triangles by ModelFaceID (%d + the face under them):", faceIdBase);
+    for (std::map<int, int>::const_iterator it = outerFaceCount.begin(); it != outerFaceCount.end(); ++it)
+    {
+      fprintf(stdout," %d:%d", it->first, it->second);
+    }
+    fprintf(stdout,"\n  wall end triangles by ModelFaceID (%d + the cap):", 2*faceIdBase);
+    for (std::map<int, int>::const_iterator it = endFaceCount.begin(); it != endFaceCount.end(); ++it)
+    {
+      fprintf(stdout," %d:%d", it->first, it->second);
+    }
+    fprintf(stdout,"\n");
   }
 
   discardFill();
