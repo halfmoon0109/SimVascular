@@ -3607,20 +3607,19 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     // wall face would otherwise share its id with the outer wall, and the
     // export that writes one file per model face would put the outer wall in
     // that cap's file.
-    // The outer wall and the wall ends are split by the model face they
-    // stand on, so that the solid domain has one boundary file per vessel
-    // face and per cap (2026-10-01): an outer triangle gets K + the id of
-    // the wall face under it, a wall end 2K + the id of the cap it closes
-    // against, with K the smallest power of ten above the model's face ids,
-    // so none of the new ids collides with a model face or with each other
-    // and the export can read the face back out of the id. Without face
-    // ids the outer wall gets one id past the model's and the ends 9999.
+    // The outer wall is split by the model face it stands over, so that the
+    // solid domain has one boundary file per vessel face (2026-10-01): an
+    // outer triangle gets K + the id of the wall face under it, with K the
+    // smallest power of ten above the model's face ids, so none of the new
+    // ids collides with a model face and the export can read the face back
+    // out of the id. A wall end keeps 9999: when the meshes are joined
+    // (VMTKUtils_CreateBoundaryLayerSurfaceAndCaps) every 9999 face takes
+    // the id of the cap it closes against, so the ends come out per cap
+    // under the cap's own name already. Without face ids the outer wall
+    // gets one id past the model's.
     auto surfaceFaceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
     int outerWallFaceId = outerSurfaceCellId;
     int faceIdBase = 0;
-    vtkSmartPointer<vtkPolyData> capSurface;
-    vtkSmartPointer<vtkCellLocator> capLocator;
-    vtkIntArray *capFaceIds = nullptr;
     if (surfaceFaceIds != nullptr)
     {
       double faceIdRange[2];
@@ -3644,47 +3643,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       {
         faceIdBase *= 10;
       }
-      // the model's caps alone, for the wall ends: the faces of the model
-      // that are not on the wall surface
-      std::set<int> wallFaceIdSet;
-      for (vtkIdType c = 0; c < surfaceFaceIds->GetNumberOfTuples(); c++)
-      {
-        wallFaceIdSet.insert(surfaceFaceIds->GetValue(c));
-      }
-      vtkIntArray *originalFaceIds = (originalpolydata_ != nullptr) ?
-          vtkIntArray::SafeDownCast(originalpolydata_->GetCellData()->GetArray("ModelFaceID")) : nullptr;
-      if (originalFaceIds != nullptr)
-      {
-        capSurface = vtkSmartPointer<vtkPolyData>::New();
-        capSurface->SetPoints(originalpolydata_->GetPoints());
-        capSurface->Allocate();
-        auto capIdArray = vtkSmartPointer<vtkIntArray>::New();
-        capIdArray->SetName("ModelFaceID");
-        for (vtkIdType c = 0; c < originalpolydata_->GetNumberOfCells(); c++)
-        {
-          const int id = originalFaceIds->GetValue(c);
-          if (wallFaceIdSet.count(id))
-          {
-            continue;
-          }
-          vtkIdType npts;
-          const vtkIdType *cpts;
-          originalpolydata_->GetCellPoints(c, npts, cpts);
-          capSurface->InsertNextCell(originalpolydata_->GetCellType(c), npts, cpts);
-          capIdArray->InsertNextValue(id);
-        }
-        capSurface->GetCellData()->AddArray(capIdArray);
-        if (capSurface->GetNumberOfCells() > 0)
-        {
-          capLocator = vtkSmartPointer<vtkCellLocator>::New();
-          capLocator->SetDataSet(capSurface);
-          capLocator->BuildLocator();
-          capFaceIds = capIdArray;
-        }
-      }
-      fprintf(stdout,"  the outer wall is tagged %d + the model face under it and a wall end %d + the cap it closes against (%lld cap triangles in the model%s)\n",
-          faceIdBase, 2*faceIdBase, capSurface ? (long long)capSurface->GetNumberOfCells() : 0LL,
-          capLocator ? "" : "; none found, so the ends are tagged 9999");
+      fprintf(stdout,"  the outer wall is tagged %d + the model face under it; a wall end is tagged 9999 and takes the id of the cap it closes against when the meshes are joined\n", faceIdBase);
     }
     else
     {
@@ -3695,8 +3654,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     faceLocator->SetDataSet(surface);
     faceLocator->BuildLocator();
     auto faceCell = vtkSmartPointer<vtkGenericCell>::New();
-    auto capCell = vtkSmartPointer<vtkGenericCell>::New();
-    // the model face nearest a point on the wall surface, and the cap nearest a point
+    // the model face nearest a point on the wall surface
     auto baseFaceAt = [&](const double centroid[3]) -> int
     {
       if (surfaceFaceIds == nullptr) return -1;
@@ -3707,19 +3665,8 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       faceLocator->FindClosestPoint(centroid, closest, faceCell, closestCell, subId, distanceSquared);
       return closestCell >= 0 ? surfaceFaceIds->GetValue(closestCell) : -1;
     };
-    auto capFaceAt = [&](const double centroid[3]) -> int
-    {
-      if (!capLocator || capFaceIds == nullptr) return -1;
-      double closest[3];
-      vtkIdType closestCell = -1;
-      int subId = 0;
-      double distanceSquared = 0.0;
-      capLocator->FindClosestPoint(centroid, closest, capCell, closestCell, subId, distanceSquared);
-      return closestCell >= 0 ? capFaceIds->GetValue(closestCell) : -1;
-    };
     auto outerIdFor = [&](int baseFace) -> int { return (faceIdBase > 0 && baseFace >= 0) ? faceIdBase + baseFace : outerWallFaceId; };
-    auto endIdFor = [&](int capFace) -> int { return (faceIdBase > 0 && capFace >= 0) ? 2*faceIdBase + capFace : sidewallCellEntityId; };
-    std::map<int, int> outerFaceCount, endFaceCount;   // tagged outer and end triangles by id, for the log
+    std::map<int, int> outerFaceCount;   // tagged outer triangles by id, for the log
 
     // The shell's points by position and its triangles by their three points,
     // for the check and for the winding: a boundary face on a shell triangle's
@@ -3877,9 +3824,6 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       }
       else
       {
-        // a wall end: the cap it closes against (the end lies in the cap's plane)
-        modelFaceId = endIdFor(capFaceAt(centroid));
-        endFaceCount[modelFaceId]++;
         numSideCells++;
       }
 
@@ -3996,17 +3940,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       }
       for (size_t i = 0; i + 2 < prisms.rimTriangles.size(); i += 3)
       {
-        double centroid[3] = {0.0, 0.0, 0.0};
-        for (int j = 0; j < 3; j++)
-        {
-          for (int k = 0; k < 3; k++)
-          {
-            centroid[k] += prisms.points[(size_t)3*prisms.rimTriangles[i + j] + k]/3.0;
-          }
-        }
-        const int modelFaceId = endIdFor(capFaceAt(centroid));
-        endFaceCount[modelFaceId]++;
-        insertPrismFace(&prisms.rimTriangles[i], false, sidewallCellEntityId, modelFaceId);
+        insertPrismFace(&prisms.rimTriangles[i], false, sidewallCellEntityId, sidewallCellEntityId);
         numPrismSide++;
       }
       fprintf(stdout,"  the prism layers add %d interface, %d outer and %d side wall triangles to the wall boundary; the whole interface is on %d triangles (the surface has %lld)\n",
@@ -4021,11 +3955,6 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         (long long)numShellInner, (long long)numShellOuter, (long long)numShellSide, numLayerFaces, (long long)numShellLayer);
     fprintf(stdout,"  outer wall triangles by ModelFaceID (%d + the face under them):", faceIdBase);
     for (std::map<int, int>::const_iterator it = outerFaceCount.begin(); it != outerFaceCount.end(); ++it)
-    {
-      fprintf(stdout," %d:%d", it->first, it->second);
-    }
-    fprintf(stdout,"\n  wall end triangles by ModelFaceID (%d + the cap):", 2*faceIdBase);
-    for (std::map<int, int>::const_iterator it = endFaceCount.begin(); it != endFaceCount.end(); ++it)
     {
       fprintf(stdout," %d:%d", it->first, it->second);
     }
