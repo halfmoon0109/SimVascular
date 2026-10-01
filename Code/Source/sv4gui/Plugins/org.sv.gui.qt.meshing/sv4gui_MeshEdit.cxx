@@ -223,6 +223,8 @@ void sv4guiMeshEdit::SetupGUI(QWidget *parent )
     //for regional table
     connect(ui->checkBoxSphere, SIGNAL(toggled(bool)), this, SLOT(ShowSphereInteractor(bool)));
     connect(ui->btnAddSphere, SIGNAL(clicked()), this, SLOT(AddSphere()) );
+    connect(ui->checkBoxWallTetGenShell, SIGNAL(toggled(bool)), this, SLOT(UpdateWallMeshWidgets(bool)));
+    UpdateWallMeshWidgets(ui->checkBoxWallTetGenShell->isChecked());
 
     m_TableModelRegion = new QStandardItemModel(this);
     ui->tableViewRegion->setModel(m_TableModelRegion);
@@ -1438,6 +1440,7 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
     ui->sbWallSmoothingT->setValue(5);
     ui->dsbWallCurvatureT->setValue(0.8);
     ui->checkBoxWallTetGenShell->setChecked(false);
+    UpdateWallMeshWidgets(false);
 
     ui->checkBoxRadiusBasedT->setChecked(false);
 
@@ -2245,6 +2248,23 @@ void sv4guiMeshEdit::AddSubDomain()
 
     item = new QStandardItem(coordinates);
     m_TableModelDomains->setItem(regionRowIndex, 2, item);
+}
+
+//-----------------------
+// UpdateWallMeshWidgets
+//-----------------------
+// The two wedge-extrusion settings are greyed out while the wall is to be
+// filled with TetGen tetrahedra: that fill does not clamp the thickness to
+// the concave curvature nor smooth it (its own ramp toward thicker faces
+// does that), and the mesher logs them as ignored. Their values are kept
+// and still written to the job, so switching back loses nothing.
+void sv4guiMeshEdit::UpdateWallMeshWidgets(bool tetgenShell)
+{
+    ui->widget_wallSmoothing->setEnabled(!tetgenShell);
+    ui->widget_wallCurvature->setEnabled(!tetgenShell);
+    const QString note = tetgenShell ? QString("Not used by the TetGen fill of the wall") : QString("");
+    ui->label_wallSmoothing->setToolTip(note);
+    ui->label_wallCurvature->setToolTip(note);
 }
 
 void sv4guiMeshEdit::ShowSphereInteractor(bool checked)

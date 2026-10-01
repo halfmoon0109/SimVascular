@@ -81,6 +81,11 @@ public slots:
 
     void SetEstimatedEdgeSize();
 
+    // The junction smoothing iterations and the concave curvature factor
+    // belong to the wedge extrusion; the TetGen fill of the wall ignores
+    // them, so they are greyed out while that fill is selected.
+    void UpdateWallMeshWidgets(bool tetgenShell);
+
     void TableFaceListSelectionChanged( const QItemSelection & selected, const QItemSelection & deselected );
 
     void SetLocal( bool checked = false );

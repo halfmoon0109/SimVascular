@@ -2114,7 +2114,7 @@ Click the button to add it to the left table.</string>
                 <item>
                  <widget class="QSpinBox" name="sbWallSmoothingT">
                   <property name="toolTip">
-                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Number of smoothing iterations applied to the wall thickness values so the thickness transitions gradually where faces with different thicknesses meet. Valid range is 0 to 50; set to 0 to disable smoothing.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Number of smoothing iterations applied to the wall thickness values so the thickness transitions gradually where faces with different thicknesses meet. Valid range is 0 to 50; set to 0 to disable smoothing. Applies to the wedge extrusion only: the TetGen fill of the wall ignores it.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                   </property>
                   <property name="minimum">
                    <number>0</number>
@@ -2158,7 +2158,7 @@ Click the button to add it to the left table.</string>
                 <item>
                  <widget class="QDoubleSpinBox" name="dsbWallCurvatureT">
                   <property name="toolTip">
-                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Limits the wall thickness in concave regions (such as vessel junctions) to this fraction of the local concave radius of curvature, reducing the chance that the extruded outer wall folds over and self-intersects. The estimate is local, so the generated mesh quality should still be checked. Valid range is 0 to 1; set to 0 to disable the limit.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Limits the wall thickness in concave regions (such as vessel junctions) to this fraction of the local concave radius of curvature, reducing the chance that the extruded outer wall folds over and self-intersects. The estimate is local, so the generated mesh quality should still be checked. Valid range is 0 to 1; set to 0 to disable the limit. Applies to the wedge extrusion only: the TetGen fill of the wall ignores it.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
                   </property>
                   <property name="minimum">
                    <double>0.000000000000000</double>

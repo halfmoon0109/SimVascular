@@ -2395,6 +2395,7 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   }
   if (meshoptions_.walltetgenshell)
   {
+    fprintf(stdout,"  CurvatureFactor and SmoothingIterations are wedge-extrusion options: the TetGen fill ignores them (its ramp toward thicker neighbours, slope %g, grades the thickness)\n", gWallThicknessMaxSlope);
     fprintf(stdout,"  the wall is filled with TetGen tetrahedra in %d layer(s) through the thickness: %d offset surface(s) at fractions of the thickness go into the shell as facets the mesher keeps, so each layer is one tetrahedron thick; SmoothingIterations and CurvatureFactor act on the thickness field only\n",
         std::max(1, meshoptions_.numwallsublayers), std::max(1, meshoptions_.numwallsublayers) - 1);
   }
@@ -2483,8 +2484,12 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // points (the fluid/wall interface) never move, and the cap-boundary normals
   // set by SetCapBoundaryNormals are pinned. It runs before the clamp and the
   // fold-prevention pass so those act on the smoothed extrusion directions.
+  // The shell fill builds its directions from the distance field and the
+  // prisms from the interface normals as they are; smoothed normals would
+  // only move its prism tops off the levels (2026-10-01).
   const double warpVectorRelaxation = 0.5;
-  if (TGenUtils_SmoothWarpVectorsInConcaveRegions(surface, "Normals",
+  if (extrudeWedges &&
+      TGenUtils_SmoothWarpVectorsInConcaveRegions(surface, "Normals",
         meshoptions_.wallthicknesssmoothingiterations, warpVectorRelaxation) != SV_OK)
   {
     fprintf(stderr,"Problem smoothing the wall extrusion warp vectors\n");
@@ -2531,7 +2536,7 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // surface. Only the thickness values are smoothed; the surface points
   // (the fluid/wall interface) never move. Without local overrides, the
   // curvature clamp the thickness is uniform and smoothing is a no-op.
-  if (!localWallThickness_.empty() || meshoptions_.wallthicknesscurvaturefactor > 0.0)
+  if (extrudeWedges && (!localWallThickness_.empty() || meshoptions_.wallthicknesscurvaturefactor > 0.0))
   {
     if (TGenUtils_SmoothPointArray(surface, thicknessArray,
           meshoptions_.wallthicknesssmoothingiterations) != SV_OK)
