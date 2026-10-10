@@ -5683,8 +5683,31 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       double c[3] = {0.0, 0.0, 0.0};
       for (size_t m = 0; m < lifted[a].size(); m++) for (int j = 0; j < 3; j++) c[j] += out.points[(size_t)3*lifted[a][m] + j]/(double)lifted[a].size();
       double nearest = std::numeric_limits<double>::max();
-      for (size_t b = 0; b < chains.size(); b++) nearest = std::min(nearest, meanDistance[a][b]);
-      error = "a zone boundary loop of " + std::to_string(lifted[a].size()) + " points around (" + std::to_string(c[0]) + ", " + std::to_string(c[1]) + ", " + std::to_string(c[2]) + ") at layer " + std::to_string(k) + " has no boundary chain of the layer surface's piece within " + std::to_string(reach*loopEdge[a]) + " (the nearest one is " + std::to_string(nearest) + " away on average)";
+      size_t nearestChain = chains.size();
+      for (size_t b = 0; b < chains.size(); b++)
+      {
+        if (meanDistance[a][b] < nearest) { nearest = meanDistance[a][b]; nearestChain = b; }
+      }
+      // why that chain is not the loop's: open (it ends at a rim or a hole),
+      // or taken by another loop nearer to it - two zone regions on two
+      // vessels against each other whose layer surfaces have merged into
+      // one piece with one chain around both (the user's model, 2026-10-06)
+      std::string why;
+      size_t taker = loops.size();
+      if (nearestChain < chains.size())
+      {
+        why = ", a chain of " + std::to_string(chains[nearestChain].size()) + " points";
+        if (!closed[nearestChain]) why += " that is open";
+        for (size_t a2 = 0; a2 < loops.size(); a2++)
+        {
+          if (chainOfLoop[a2] != (ll)nearestChain) continue;
+          taker = a2;
+          double c2[3] = {0.0, 0.0, 0.0};
+          for (size_t m = 0; m < lifted[a2].size(); m++) for (int j = 0; j < 3; j++) c2[j] += out.points[(size_t)3*lifted[a2][m] + j]/(double)lifted[a2].size();
+          why += " taken by the loop of " + std::to_string(lifted[a2].size()) + " points around (" + std::to_string(c2[0]) + ", " + std::to_string(c2[1]) + ", " + std::to_string(c2[2]) + ") at " + std::to_string(meanDistance[a2][nearestChain]) + " on average";
+        }
+      }
+      error = "a zone boundary loop of " + std::to_string(lifted[a].size()) + " points around (" + std::to_string(c[0]) + ", " + std::to_string(c[1]) + ", " + std::to_string(c[2]) + ") at layer " + std::to_string(k) + " has no boundary chain of the layer surface's piece within " + std::to_string(reach*loopEdge[a]) + " (the nearest one is " + std::to_string(nearest) + " away on average" + why + ")";
       // The loop, and the loops of the neighbouring regions within a few of
       // its edges: the piece over two thin vessels against each other is
       // bounded by both vessels' loops, and widening one region alone left
@@ -5706,6 +5729,17 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
           }
           if (close) out.failedLoopPoints.insert(out.failedLoopPoints.end(), loops[b2].begin(), loops[b2].end());
         }
+      }
+      // The loop that took the chain, whether or not it is that close: the
+      // chain of 222 to 308 points ran around both loops of 101 to 136 (the
+      // user's model, 2026-10-06, two vessels 0.15 thick against each other
+      // at (-2.1, -48.6, 96.0)), and widening the two regions by two rings
+      // at a time moved the pair along the vessels for sixteen attempts
+      // without ending it.
+      if (taker < loops.size())
+      {
+        out.failedLoopChainTaken = true;
+        out.failedLoopPoints.insert(out.failedLoopPoints.end(), loops[taker].begin(), loops[taker].end());
       }
       return 1;
     }

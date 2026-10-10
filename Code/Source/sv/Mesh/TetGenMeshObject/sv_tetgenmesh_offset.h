@@ -671,6 +671,7 @@ struct JunctionShell
   long long numJunctionTriangles = 0;    // interface triangles of the zone
   long long numJunctionOnRims = 0;       // of them, on a cap rim: not handled yet, the build refuses them
   std::vector<long long> failedLoopPoints;   // when the build fails for a zone boundary loop without a piece chain: the loop's interface points, for WidenJunctionZone
+  bool failedLoopChainTaken = false;         // and the chain nearest that loop is another loop's: two zone regions on two vessels against each other, whose layer surfaces merged into one piece with one chain around both (the loops' points are in failedLoopPoints together; the caller widens by more rings each time, so that the regions wrap around their vessels and the piece ends in one chain per loop)
   std::vector<long long> crossingStructuredTriangles;   // structured interface triangles whose layer surface passed through a piece at some level (the piece's triangles there were dropped, which can leave a hole in it)
   std::vector<long long> holeOwnerTriangles;   // structured interface triangles owning a triangle of a hole in a piece (a dropped patch enclosed by kept ones) at some level
   std::vector<long long> overPrismStructuredTriangles;   // structured interface triangles whose prisms held a point of a piece triangle dropped for hanging over the prism zone, at some level

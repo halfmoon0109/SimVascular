@@ -5552,7 +5552,13 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
     // when a zone boundary loop found no piece chain of its own (the piece
     // too narrow there; two rings around the loop), or when a piece has a
     // hole (the prisms owning or passing through it, with a ring).
-    const int erosionRings = 1, earPasses = 2, wideningRings = 2, maxWidenings = 16;
+    const int erosionRings = 1, earPasses = 2, wideningRings = 2, maxWidenings = 16, mostRings = 16;
+    // A loop whose chain another loop took is two zone regions on two
+    // vessels against each other with one piece between them: two rings at
+    // a time moved the pair along the vessels (sixteen attempts without an
+    // end on the user's model, 2026-10-06), so the rings double on each such
+    // failure in a row, and the regions wrap around their vessels in a few.
+    int chainTakenInARow = 0;
     for (int attempt = 0; ; attempt++)
     {
       hybrid.prisms = svoffset::PrismMesh();
@@ -5595,7 +5601,8 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       else if (!hybrid.shell.failedLoopPoints.empty())
       {
         seedPoints = hybrid.shell.failedLoopPoints;
-        rings = wideningRings;
+        chainTakenInARow = hybrid.shell.failedLoopChainTaken ? chainTakenInARow + 1 : 0;
+        rings = std::min(mostRings, wideningRings << chainTakenInARow);
       }
       else if (!hybrid.shell.failedTriangles.empty())
       {
@@ -5622,9 +5629,18 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       }
       else
       {
+        char how[160];
+        if (!seedPoints.empty())
+        {
+          snprintf(how, sizeof(how), "by %d rings around that loop%s", rings,
+              hybrid.shell.failedLoopChainTaken ? " and the loop that took its chain (the rings double while that repeats)" : "");
+        }
+        else
+        {
+          snprintf(how, sizeof(how), "at the prisms owning or passing through the piece there, with a ring around them");
+        }
         fprintf(stdout,"  junction shell attempt %d: %s; the junction zone is widened %s (%lld more triangles) and the shell built again\n",
-            attempt + 1, error.c_str(), !seedPoints.empty() ? "by two rings around that loop" : "at the prisms owning or passing through the piece there, with a ring around them",
-            widened);
+            attempt + 1, error.c_str(), how, widened);
       }
       fflush(stdout);
     }

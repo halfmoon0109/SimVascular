@@ -422,6 +422,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   ClassifyPrismZone(iface, field, numLayers, zo, structured, zr, err);
   PrismMesh pm; JunctionShell shell;
   // a loop whose piece has no chain of its own widens its junction region by two rings, up to three times (as the glue does)
+  int chainTakenInARow = 0;   // as the glue: the rings double while a loop's chain is taken by another loop (two regions on two vessels against each other)
   for (int attempt = 0; ; attempt++)
   {
     pm = PrismMesh(); shell = JunctionShell();
@@ -438,12 +439,12 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
       for (size_t z = 0; z < shell.zips.size(); z++) if (shell.zips[z].crossingTriangles > 0 || shell.zips[z].foldedEdges > 0) seedPoints.insert(seedPoints.end(), shell.zips[z].loop.begin(), shell.zips[z].loop.end());
       rings = 2;
     }
-    else if (!shell.failedLoopPoints.empty()) { seedPoints = shell.failedLoopPoints; rings = 2; }
+    else if (!shell.failedLoopPoints.empty()) { seedPoints = shell.failedLoopPoints; chainTakenInARow = shell.failedLoopChainTaken ? chainTakenInARow + 1 : 0; rings = std::min(16, 2 << chainTakenInARow); }
     else if (!shell.failedTriangles.empty()) { seedTriangles = shell.failedTriangles; rings = 1; }
     if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= 16) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
     ll widened = WidenJunctionZone(iface, seedPoints, seedTriangles, rings, structured);
     if (built) printf("  attempt %d: the shell has %lld crossing triangles and %lld folded edges; the junction zone widened by %lld triangles at %zu prisms and around %zu loop points\n", attempt + 1, shell.numCrossingTriangles, shell.numFoldedEdges, widened, seedTriangles.size(), seedPoints.size());
-    else printf("  attempt %d: %s; the junction zone widened by %lld triangles\n", attempt + 1, err.c_str(), widened);
+    else printf("  attempt %d: %s; the junction zone widened by %lld triangles (%d rings)\n", attempt + 1, err.c_str(), widened, rings);
   }
   ll nb, nn, nm; CountEdges(shell.triangles, nb, nn, nm);
   std::vector<unsigned char> cr; double at[3]; ll crossings = svenvelope::CountCrossingTriangles(shell.points, shell.triangles, cr, at);
