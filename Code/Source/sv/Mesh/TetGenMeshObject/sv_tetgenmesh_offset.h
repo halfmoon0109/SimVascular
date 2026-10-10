@@ -156,6 +156,17 @@ struct Options
   // triangle near it, by the judgement of svenvelope::TrianglesCross. The
   // contour as marched is free of crossings, so the surface stays so.
   bool guardCrossings = true;
+  // The contour of a level is the boundary of the part of space within the
+  // level's distance of the interface: one sheet around the wall, and a
+  // closed bubble around every pocket that two walls closing on each other
+  // leave between them. A bubble smaller across than this many local sizes
+  // (the interface's own edge) is taken out before the decimation, which
+  // would collapse it to a tetrahedron and then onto itself (the user's
+  // model, 2026-10-09: the second of three layer surfaces, between two
+  // vessels 1 and 1.2 thick, a bubble half an edge across folded to two
+  // triangles on one spot, which the volume mesher refuses). Zero keeps
+  // every piece.
+  double bubbleFactor = 3.0;
 };
 
 /**
@@ -199,6 +210,10 @@ struct Report
   long long numContourTriangles = 0;
   long long numContourPointsOffLevel = 0;  // whose last evaluated position was still off the level by more than snapTolerance (the field jumps along the edge, or the steps ran out)
   long long numDegenerateContourTriangles = 0; // left out of the contour: naming a point twice, or emitted twice around points on the level
+  long long numBubblesDropped = 0;       // closed pieces of the contour smaller than Options::bubbleFactor local sizes across, taken out before the decimation
+  long long numBubbleTriangles = 0;      // their triangles
+  double largestBubble = 0.0;            // the largest of them across
+  double largestBubbleAt[3] = {0.0, 0.0, 0.0};   // its centre
   long long numCollapsed = 0;            // edges collapsed by the decimation
   long long numRefusedForCrossing = 0;   // decimation operations refused because a triangle they would make passes through a live triangle near it
   long long numUnfolded = 0;             // edges whose two triangles lay on each other within a degree, flipped, collapsed or taken out with the spike point they stand on by the decimation's last pass
@@ -757,6 +772,32 @@ struct FoldedPair
  */
 long long ListFoldedEdges(const std::vector<double> &points, const std::vector<long long> &triangles,
     double maxDegrees, size_t maxPairs, std::vector<FoldedPair> &pairs, double &smallestDegrees);
+
+/**
+ * @brief Closed pieces of a surface too small for the mesh, taken out.
+ *
+ * The contour of a level is the boundary of the part of space within the
+ * level's distance of the interface: one sheet around the wall, and a closed
+ * bubble around every pocket that two walls closing on each other leave
+ * between them. A piece is taken out when it is closed (every edge on two
+ * triangles), not the largest piece, and smaller across (its box's diagonal)
+ * than factor times the mean of size over its triangles' corners; its points
+ * stay in points, unused. The user's model, 2026-10-09: the second of three
+ * layer surfaces, between two vessels 1 and 1.2 thick at (-33, -35, -150)
+ * where the interface's edges are 0.9, had a bubble that the decimation
+ * collapsed to a tetrahedron and then to two triangles on one spot, which
+ * the volume mesher refuses (three edges whose triangles lie on each other).
+ * @param points Three per point.
+ * @param triangles Three ids per triangle; the dropped ones are removed.
+ * @param size The size wanted at each point, one per point.
+ * @param factor The extent across, in sizes, under which a closed piece goes.
+ * @param numDropped Set to the number of pieces taken out.
+ * @param largestDropped Set to the extent across of the largest piece taken out.
+ * @param largestDroppedAt Set to the centre of that piece's box.
+ * @return The number of triangles taken out.
+ */
+long long DropSmallClosedPieces(const std::vector<double> &points, std::vector<long long> &triangles,
+    const std::vector<double> &size, double factor, long long &numDropped, double &largestDropped, double largestDroppedAt[3]);
 
 /**
  * @brief The decimation's crossing guard: the live triangles of a surface in

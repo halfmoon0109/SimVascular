@@ -5390,6 +5390,12 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
     fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another, %lld edges whose two triangles lie on each other within %.2g degree (%lld unfolded by the decimation; the smallest angle between two triangles on an edge is %.3g degrees)\n",
         report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing,
         report.numFoldedEdges, svoffset::foldDegrees, report.numUnfolded, report.smallestFoldDegrees);
+    if (report.numBubblesDropped > 0)
+    {
+      fprintf(stdout,"  %lld closed piece(s) of the contour taken out before the decimation as smaller across than %g times the local size (bubbles around pockets where the level closes over a gap between walls): %lld triangles, the largest %.3g across at (%.5g, %.5g, %.5g)\n",
+          report.numBubblesDropped, options.bubbleFactor, report.numBubbleTriangles, report.largestBubble,
+          report.largestBubbleAt[0], report.largestBubbleAt[1], report.largestBubbleAt[2]);
+    }
     if (!report.firstFault.empty())
     {
       fprintf(stdout,"  the first fault is %s at (%.5g, %.5g, %.5g)\n", report.firstFault.c_str(),

@@ -2158,6 +2158,18 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       field.Local(&pts[(size_t)3*v], target[(size_t)v], thick[(size_t)v], rim);
       thick[(size_t)v] *= fraction;
     }
+    // Pockets: the contour is the boundary of the part of space within the
+    // level's distance of the interface, and where two walls close on each
+    // other it has, besides the sheet around the wall, a closed bubble
+    // around every pocket left between them. One smaller than the mesh can
+    // hold goes here, before the collapses shrink it to a tetrahedron and
+    // fold that onto itself (DropSmallClosedPieces).
+    if (options.bubbleFactor > 0.0)
+    {
+      report.numBubbleTriangles = DropSmallClosedPieces(pts, tris, target, options.bubbleFactor,
+          report.numBubblesDropped, report.largestBubble, report.largestBubbleAt);
+      nt = (ll)(tris.size()/3);
+    }
     std::vector<std::vector<ll> > incident((size_t)nv);
     std::vector<unsigned char> dead((size_t)nt, 0);
     for (ll t = 0; t < nt; t++)
@@ -2269,6 +2281,32 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       int common = 0;
       for (int q = 0; q < nu; q++) for (int r = 0; r < nvv; r++) if (ringU[q] == ringV[r]) common++;
       if (common != 2) return false;
+      // Nor may a triangle on u land on one already on v: when the common
+      // neighbours c and d share a triangle with u and one with v, the four
+      // points are a closed tetrahedron (the last of a bubble the collapses
+      // shrank), and the collapse would leave its two remaining triangles on
+      // one spot, which the volume mesher refuses (the user's model,
+      // 2026-10-09, a pocket between two walls at the second layer surface).
+      for (size_t m = 0; m < incident[(size_t)u].size(); m++)
+      {
+        ll t = incident[(size_t)u][m];
+        if (dead[(size_t)t] || t == shared[0] || t == shared[1]) continue;
+        ll x = -1, y = -1;
+        for (int j = 0; j < 3; j++)
+        {
+          ll w = tris[(size_t)3*t + j];
+          if (w == u) continue;
+          if (x < 0) x = w; else y = w;
+        }
+        for (size_t q = 0; q < incident[(size_t)v].size(); q++)
+        {
+          ll s = incident[(size_t)v][q];
+          if (dead[(size_t)s]) continue;
+          int hits = 0;
+          for (int j = 0; j < 3; j++) if (tris[(size_t)3*s + j] == x || tris[(size_t)3*s + j] == y) hits++;
+          if (hits == 2) return false;
+        }
+      }
       // The edges that appear, from v to every neighbour w of u, may be no
       // longer than the local size allows; one that is already longer than
       // that (u-w, which v-w replaces) may grow by a tenth at most, so that a
@@ -3229,6 +3267,115 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
   std::vector<double>().swap(cloud);
   std::vector<double>().swap(value);
   return 0;
+}
+
+//-----------------------
+// DropSmallClosedPieces
+//-----------------------
+long long DropSmallClosedPieces(const std::vector<double> &points, std::vector<long long> &triangles,
+    const std::vector<double> &size, double factor, long long &numDropped, double &largestDropped, double largestDroppedAt[3])
+{
+  numDropped = 0;
+  largestDropped = 0.0;
+  for (int k = 0; k < 3; k++) largestDroppedAt[k] = 0.0;
+  const ll np = (ll)(points.size()/3), nt = (ll)(triangles.size()/3);
+  if (nt == 0 || !(factor > 0.0) || size.size() != (size_t)np) return 0;
+  // the pieces: the points, joined by the triangles (union-find)
+  std::vector<ll> parent((size_t)np);
+  for (ll v = 0; v < np; v++) parent[(size_t)v] = v;
+  auto root = [&](ll v)
+  {
+    while (parent[(size_t)v] != v)
+    {
+      parent[(size_t)v] = parent[(size_t)parent[(size_t)v]];
+      v = parent[(size_t)v];
+    }
+    return v;
+  };
+  for (ll t = 0; t < nt; t++)
+  {
+    const ll a = root(triangles[(size_t)3*t]);
+    for (int j = 1; j < 3; j++)
+    {
+      const ll r = root(triangles[(size_t)3*t + j]);
+      if (r != a) parent[(size_t)r] = a;
+    }
+  }
+  std::unordered_map<ll, ll> pieceOfRoot;
+  std::vector<ll> pieceOf((size_t)nt), count;
+  for (ll t = 0; t < nt; t++)
+  {
+    const ll r = root(triangles[(size_t)3*t]);
+    std::unordered_map<ll, ll>::iterator it = pieceOfRoot.find(r);
+    if (it == pieceOfRoot.end())
+    {
+      it = pieceOfRoot.insert(std::make_pair(r, (ll)count.size())).first;
+      count.push_back(0);
+    }
+    pieceOf[(size_t)t] = it->second;
+    count[(size_t)it->second]++;
+  }
+  if (count.size() < 2) return 0;
+  ll largest = 0;
+  for (size_t p = 1; p < count.size(); p++) if (count[p] > count[(size_t)largest]) largest = (ll)p;
+  // every other piece: closed, and how far across against the size wanted there
+  std::vector<std::vector<ll> > members(count.size());
+  for (ll t = 0; t < nt; t++)
+  {
+    if (pieceOf[(size_t)t] != largest) members[(size_t)pieceOf[(size_t)t]].push_back(t);
+  }
+  std::vector<unsigned char> drop(count.size(), 0);
+  for (size_t p = 0; p < count.size(); p++)
+  {
+    if ((ll)p == largest || members[p].empty()) continue;
+    std::map<EdgeKey, int> edgeCount;
+    double lo[3], hi[3], sizeSum = 0.0;
+    ll corners = 0;
+    for (int k = 0; k < 3; k++) { lo[k] = std::numeric_limits<double>::max(); hi[k] = -std::numeric_limits<double>::max(); }
+    for (size_t m = 0; m < members[p].size(); m++)
+    {
+      const ll *tri = &triangles[(size_t)3*members[p][m]];
+      for (int j = 0; j < 3; j++)
+      {
+        edgeCount[EdgeKey(tri[j], tri[(j+1)%3])]++;
+        for (int k = 0; k < 3; k++)
+        {
+          lo[k] = std::min(lo[k], points[(size_t)3*tri[j] + k]);
+          hi[k] = std::max(hi[k], points[(size_t)3*tri[j] + k]);
+        }
+        sizeSum += size[(size_t)tri[j]];
+        corners++;
+      }
+    }
+    bool closed = true;
+    for (std::map<EdgeKey, int>::const_iterator it = edgeCount.begin(); it != edgeCount.end() && closed; ++it)
+    {
+      if (it->second != 2) closed = false;
+    }
+    if (!closed) continue;
+    double across = 0.0;
+    for (int k = 0; k < 3; k++) across += (hi[k] - lo[k])*(hi[k] - lo[k]);
+    across = std::sqrt(across);
+    const double meanSize = sizeSum/(double)corners;
+    if (!(across < factor*meanSize)) continue;
+    drop[p] = 1;
+    numDropped++;
+    if (across > largestDropped)
+    {
+      largestDropped = across;
+      for (int k = 0; k < 3; k++) largestDroppedAt[k] = 0.5*(lo[k] + hi[k]);
+    }
+  }
+  if (numDropped == 0) return 0;
+  ll kept = 0;
+  for (ll t = 0; t < nt; t++)
+  {
+    if (drop[(size_t)pieceOf[(size_t)t]]) continue;
+    for (int j = 0; j < 3; j++) triangles[(size_t)3*kept + j] = triangles[(size_t)3*t + j];
+    kept++;
+  }
+  triangles.resize((size_t)3*kept);
+  return nt - kept;
 }
 
 //-------------

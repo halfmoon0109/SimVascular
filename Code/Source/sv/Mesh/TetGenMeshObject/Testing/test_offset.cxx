@@ -632,6 +632,64 @@ static void TestCrossingGuard()
   Check(!guard.Crosses(through), "a dead triangle is not tested against");
 }
 
+// 0c. Small closed pieces: the contour of a level has, besides the sheet
+// around the wall, a bubble around every pocket that two walls closing on
+// each other leave between them; one smaller than the mesh can hold is taken
+// out before the decimation folds it onto itself. An octahedron two across
+// (the sheet), a tetrahedron 0.17 across far from it (a bubble) and a lone
+// triangle (open), at a size of 1 everywhere.
+static void TestBubbles()
+{
+  printf("test 0c: small closed pieces of a surface are taken out\n");
+  std::vector<double> pts = {1,0,0,  -1,0,0,  0,1,0,  0,-1,0,  0,0,1,  0,0,-1,
+                             5,5,5,  5.1,5,5,  5,5.1,5,  5,5,5.1,
+                             9,9,9,  9.1,9,9,  9,9.1,9};
+  const std::vector<ll> octa = {0,2,4,  2,1,4,  1,3,4,  3,0,4,  2,0,5,  1,2,5,  3,1,5,  0,3,5};
+  const std::vector<ll> tetra = {6,8,7,  6,7,9,  6,9,8,  7,8,9};
+  const std::vector<ll> lone = {10,11,12};
+  std::vector<double> size(13, 1.0);
+  auto joined = [&](bool withOcta, bool withTetra, bool withLone)
+  {
+    std::vector<ll> tris;
+    if (withOcta) tris.insert(tris.end(), octa.begin(), octa.end());
+    if (withTetra) tris.insert(tris.end(), tetra.begin(), tetra.end());
+    if (withLone) tris.insert(tris.end(), lone.begin(), lone.end());
+    return tris;
+  };
+  ll numDropped = 0;
+  double largest = 0.0, at[3];
+  std::vector<ll> tris = joined(true, true, true);
+  ll n = svoffset::DropSmallClosedPieces(pts, tris, size, 3.0, numDropped, largest, at);
+  printf("  sheet, bubble and lone triangle at factor 3: %lld pieces, %lld triangles taken out, the largest %.3f across at (%.2f, %.2f, %.2f); %zu triangles left\n",
+      numDropped, n, largest, at[0], at[1], at[2], tris.size()/3);
+  Check(n == 4 && numDropped == 1 && std::abs(largest - 0.1*std::sqrt(3.0)) < 1e-9 && std::abs(at[0] - 5.05) < 1e-9 && tris.size() == 27,
+      "the bubble goes, the sheet and the open piece stay");
+  bool sheetIntact = true;
+  for (size_t i = 0; i < octa.size(); i++) if (tris[i] != octa[i]) sheetIntact = false;
+  for (size_t i = 0; i < lone.size(); i++) if (tris[octa.size() + i] != lone[i]) sheetIntact = false;
+  Check(sheetIntact, "the pieces kept are left as they were, in order");
+  tris = joined(true, true, true);
+  n = svoffset::DropSmallClosedPieces(pts, tris, size, 0.1, numDropped, largest, at);
+  printf("  at factor 0.1: %lld taken out\n", n);
+  Check(n == 0 && numDropped == 0 && tris.size() == 39, "a bubble wider than the factor allows stays");
+  for (int v = 6; v < 10; v++) size[(size_t)v] = 0.05;
+  tris = joined(true, true, true);
+  n = svoffset::DropSmallClosedPieces(pts, tris, size, 3.0, numDropped, largest, at);
+  printf("  with the size 0.05 at the bubble: %lld taken out\n", n);
+  Check(n == 0, "the extent is judged against the size wanted at the piece itself");
+  for (int v = 6; v < 10; v++) size[(size_t)v] = 1.0;
+  tris = joined(false, true, true);
+  n = svoffset::DropSmallClosedPieces(pts, tris, size, 3.0, numDropped, largest, at);
+  printf("  bubble and lone triangle only: %lld taken out\n", n);
+  Check(n == 0 && tris.size() == 15, "the largest piece is never taken out, however small");
+  tris = joined(false, true, false);
+  n = svoffset::DropSmallClosedPieces(pts, tris, size, 3.0, numDropped, largest, at);
+  Check(n == 0 && tris.size() == 12, "nor a surface of one piece");
+  tris = joined(true, true, true);
+  n = svoffset::DropSmallClosedPieces(pts, tris, size, 0.0, numDropped, largest, at);
+  Check(n == 0 && tris.size() == 39, "a factor of zero keeps every piece");
+}
+
 // 5. Layers: offsets at 1/3, 2/3 and 1 of the thickness of a tube, each
 // trimmed at the cap planes, must nest without crossing one another or the
 // interface, each a layer thick from the interface, at one size (the chord
@@ -707,6 +765,7 @@ int main()
 {
   TestFoldCount();
   TestCrossingGuard();
+  TestBubbles();
   TestTube();
   TestThinTube();
   TestSeptum();
