@@ -2353,7 +2353,7 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
       auto refinedWall = vtkSmartPointer<vtkPolyData>::New();
       int numLevels = 0;
       if (TGenUtils_RefineWallFacesToThickness(boundarylayermesh_, originalsurfpd->GetNumberOfPoints(), localWallThickness_,
-            meshoptions_.wallthickness, meshoptions_.wallrefineratio, 3, refinedWall, numLevels) != SV_OK)
+            meshoptions_.wallthickness, meshoptions_.wallrefineratio, 3, originalpolydata_, refinedWall, numLevels) != SV_OK)
       {
         fprintf(stderr,"Problem refining the wall faces to the wall thickness\n");
         return SV_ERROR;

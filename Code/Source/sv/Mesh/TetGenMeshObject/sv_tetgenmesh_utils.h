@@ -197,13 +197,18 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyDat
  * and only the first sublayer is touched. Point data is interpolated at the
  * midpoints and cell data inherited.
  * @param blMesh The boundary layer mesh, tetrahedra and triangles only; refined in place.
+ * @param model The model surface the wall faces were meshed from, or null: a
+ * midpoint on the wall is moved to the closest point of it (a straight
+ * midpoint lies inside a convex vessel by about edge^2 / (8 radius)), when
+ * the move is under a quarter of the edge and every boundary layer
+ * tetrahedron on the point keeps at least a tenth of its volume.
  * @param refinedWall Set to the refined wall triangles as a surface with a 'ModelFaceID' cell array (no normals, no sizing).
  * @param numLevels Set to the deepest refinement applied (0: nothing was changed).
  * @return SV_OK, or SV_ERROR when the mesh has other cell types, no 'ModelFaceID', or comes out non-conforming.
  */
 SV_EXPORT_TETGEN_MESH int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType numWallPoints,
     const std::map<int, double> &thicknessByFace, double defaultThickness, double ratio, int maxDepth,
-    vtkPolyData *refinedWall, int &numLevels);
+    vtkPolyData *model, vtkPolyData *refinedWall, int &numLevels);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_RaiseThicknessTowardNeighbours(vtkPolyData *surface, vtkDoubleArray *array,
     double maxSlope, const char *label);

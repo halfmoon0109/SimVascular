@@ -3073,7 +3073,7 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
 //--------------------------------------
 int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType numWallPoints,
     const std::map<int, double> &thicknessByFace, double defaultThickness, double ratio, int maxDepth,
-    vtkPolyData *refinedWall, int &numLevels)
+    vtkPolyData *model, vtkPolyData *refinedWall, int &numLevels)
 {
   numLevels = 0;
   if (blMesh == nullptr || refinedWall == nullptr) return SV_ERROR;
@@ -3170,10 +3170,86 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
     return SV_ERROR;
   }
   numLevels = deepest;
+  const vtkIdType numNewPoints = (vtkIdType)(mesh.points.size()/3);
+  // The midpoints on the wall put back on the model surface. A wall point
+  // is an input surface point or a midpoint of two wall points; its move
+  // is refused when it is longer than a quarter of the edge it halves or
+  // when a boundary layer tetrahedron on it would lose more than nine
+  // tenths of its volume (the first sublayer is thin, and a point moved
+  // sideways could fold it).
+  if (model != nullptr && model->GetNumberOfCells() > 0)
+  {
+    std::vector<unsigned char> onWall((size_t)numNewPoints, 0);
+    for (vtkIdType p = 0; p < numPoints; p++) onWall[(size_t)p] = (p < numWallPoints) ? 1 : 0;
+    for (vtkIdType p = numPoints; p < numNewPoints; p++)
+    {
+      const long long pa = mesh.parents[(size_t)2*(p - numPoints)], pb = mesh.parents[(size_t)2*(p - numPoints) + 1];
+      onWall[(size_t)p] = (onWall[(size_t)pa] && onWall[(size_t)pb]) ? 1 : 0;
+    }
+    std::vector<std::vector<long long> > tetsOf((size_t)numNewPoints);
+    for (size_t t = 0; t + 3 < mesh.tetrahedra.size(); t += 4)
+    {
+      for (int j = 0; j < 4; j++) tetsOf[(size_t)mesh.tetrahedra[t + (size_t)j]].push_back((long long)(t/4));
+    }
+    auto volumeOf = [&](long long t)
+    {
+      const long long *q = &mesh.tetrahedra[(size_t)4*t];
+      const double *a = &mesh.points[(size_t)3*q[0]], *b = &mesh.points[(size_t)3*q[1]], *c = &mesh.points[(size_t)3*q[2]], *d = &mesh.points[(size_t)3*q[3]];
+      double u[3], v[3], w[3];
+      for (int k = 0; k < 3; k++) { u[k] = b[k] - a[k]; v[k] = c[k] - a[k]; w[k] = d[k] - a[k]; }
+      return (u[0]*(v[1]*w[2] - v[2]*w[1]) - u[1]*(v[0]*w[2] - v[2]*w[0]) + u[2]*(v[0]*w[1] - v[1]*w[0]))/6.0;
+    };
+    auto locator = vtkSmartPointer<vtkCellLocator>::New();
+    locator->SetDataSet(model);
+    locator->BuildLocator();
+    long long numProjected = 0, numRefusedFar = 0, numRefusedFold = 0;
+    double longestMove = 0.0, sumMove = 0.0;
+    for (vtkIdType p = numPoints; p < numNewPoints; p++)
+    {
+      if (!onWall[(size_t)p]) continue;
+      double *x = &mesh.points[(size_t)3*p];
+      const long long pa = mesh.parents[(size_t)2*(p - numPoints)], pb = mesh.parents[(size_t)2*(p - numPoints) + 1];
+      const double edge = std::sqrt(vtkMath::Distance2BetweenPoints(&mesh.points[(size_t)3*pa], &mesh.points[(size_t)3*pb]));
+      double closest[3], distance2 = 0.0;
+      vtkIdType cellId = -1;
+      int subId = 0;
+      locator->FindClosestPoint(x, closest, cellId, subId, distance2);
+      if (cellId < 0) continue;
+      const double move = std::sqrt(distance2);
+      if (!(move > 0.0)) continue;
+      if (move > 0.25*edge) { numRefusedFar++; continue; }
+      const std::vector<long long> &around = tetsOf[(size_t)p];
+      std::vector<double> before(around.size());
+      for (size_t m = 0; m < around.size(); m++) before[m] = volumeOf(around[m]);
+      double old[3] = {x[0], x[1], x[2]};
+      for (int k = 0; k < 3; k++) x[k] = closest[k];
+      bool ok = true;
+      for (size_t m = 0; m < around.size() && ok; m++)
+      {
+        const double after = volumeOf(around[m]);
+        if (!(after > 0.0) || after < 0.1*before[m]) ok = false;
+      }
+      if (!ok)
+      {
+        for (int k = 0; k < 3; k++) x[k] = old[k];
+        numRefusedFold++;
+        continue;
+      }
+      numProjected++;
+      sumMove += move;
+      longestMove = std::max(longestMove, move);
+    }
+    fprintf(stdout,"  %lld wall midpoints moved onto the model surface (mean %.3g, the longest %.3g); %lld left where they were as farther off than a quarter of their edge, %lld as the move would fold a boundary layer tetrahedron\n",
+        numProjected, numProjected > 0 ? sumMove/(double)numProjected : 0.0, longestMove, numRefusedFar, numRefusedFold);
+    if (!svrefine::CheckConforming(mesh, error))
+    {
+      fprintf(stderr,"The boundary layer mesh is not conforming after the midpoints were moved onto the model: %s\n", error.c_str());
+      return SV_ERROR;
+    }
+  }
   // The refined mesh: the points, the original point data interpolated at
   // the midpoints (a midpoint's parents come before it, so one pass does
   // it), the cells with their data copied from their ancestors.
-  const vtkIdType numNewPoints = (vtkIdType)(mesh.points.size()/3);
   auto newPoints = vtkSmartPointer<vtkPoints>::New();
   newPoints->SetDataTypeToDouble();
   newPoints->SetNumberOfPoints(numNewPoints);
