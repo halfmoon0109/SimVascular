@@ -91,6 +91,13 @@ class SV_EXPORT_TETGEN_MESH cvTetGenMeshObject : public cvMeshObject {
     // The solver constrains only the inner (fluid interface) nodes, so both
     // fills are equally valid there.
     int walltetgenshell;
+    // With the TetGen shell fill: split the fluid mesh's wall face triangles
+    // in four until their mean edge is under this ratio times the face's wall
+    // thickness (the prism layers' tetrahedra have a smallest dihedral near
+    // atan((t/N)/h)), cutting only the boundary layer cells on the split
+    // edges, so the fluid can be meshed coarser than the wall needs. Zero
+    // or less leaves the faces as meshed.
+    double wallrefineratio;
     double wallthickness;
     int numwallsublayers;
     int wallthicknesssmoothingiterations;

@@ -65,6 +65,7 @@
 #ifdef SV_USE_VMTK
   #include "sv_vmtk_utils.h"
   #include "vtkvmtkPolyDataToUnstructuredGridFilter.h"
+  #include "vtkvmtkUnstructuredGridTetraFilter.h"
 #endif
 
 #ifdef SV_USE_MMG
@@ -158,6 +159,7 @@ cvTetGenMeshObject::cvTetGenMeshObject() : cvMeshObject()
   meshoptions_.boundarylayerdirection=1;
   meshoptions_.wallmeshflag=0;
   meshoptions_.walltetgenshell=0;
+  meshoptions_.wallrefineratio=0.0;
   meshoptions_.wallthickness=0.0;
   meshoptions_.numwallsublayers=2;
   meshoptions_.wallthicknesssmoothingiterations=5;
@@ -1075,6 +1077,14 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
     {
       meshoptions_.walltetgenshell=(values[0] != 0.0);
     }
+  }
+  else if (!strncmp(flags,"WallRefineRatio",15)) {
+    if (numValues < 1)
+    {
+      fprintf(stderr,"WallRefineRatio needs a value (the wall face edge over the wall thickness to refine to; 0 turns it off)\n");
+      return SV_ERROR;
+    }
+    meshoptions_.wallrefineratio=values[0];
   }
   else if (!strncmp(flags,"LocalWallThickness",18)) {
     if (numValues < 2)
@@ -2326,7 +2336,53 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
   //
   if (meshoptions_.wallmeshflag)
   {
-    if (GenerateWallMesh(originalsurfpd, markerListName) != SV_OK)
+    // The wall faces refined to the wall thickness, when asked for (see
+    // meshoptions_.wallrefineratio): the boundary layer is made tetrahedra
+    // now (the later tetrahedralization passes an all-simplex mesh through),
+    // its wall triangles are split with the fluid cells on their edges, and
+    // the solid wall is built on the split surface, so the two still share
+    // every interface node.
+    vtkSmartPointer<vtkPolyData> wallInput = originalsurfpd;
+    if (meshoptions_.walltetgenshell && meshoptions_.wallrefineratio > 0.0)
+    {
+      auto tetrahedralizer = vtkSmartPointer<vtkvmtkUnstructuredGridTetraFilter>::New();
+      tetrahedralizer->SetInputData(boundarylayermesh_);
+      tetrahedralizer->Update();
+      boundarylayermesh_->DeepCopy(tetrahedralizer->GetOutput());
+      VMTKUtils_ReorderTetElements(boundarylayermesh_);
+      auto refinedWall = vtkSmartPointer<vtkPolyData>::New();
+      int numLevels = 0;
+      if (TGenUtils_RefineWallFacesToThickness(boundarylayermesh_, originalsurfpd->GetNumberOfPoints(), localWallThickness_,
+            meshoptions_.wallthickness, meshoptions_.wallrefineratio, 3, refinedWall, numLevels) != SV_OK)
+      {
+        fprintf(stderr,"Problem refining the wall faces to the wall thickness\n");
+        return SV_ERROR;
+      }
+      if (numLevels > 0)
+      {
+        // the same preparation the surface had before the boundary layer:
+        // consistent outward normals, the sizing function, cap normals
+        auto refinedNormaler = vtkSmartPointer<vtkPolyDataNormals>::New();
+        refinedNormaler->SetInputData(refinedWall);
+        refinedNormaler->SetConsistency(1);
+        refinedNormaler->SetAutoOrientNormals(1);
+        refinedNormaler->SetFlipNormals(0);
+        refinedNormaler->SetComputeCellNormals(0);
+        refinedNormaler->SplittingOff();
+        refinedNormaler->Update();
+        auto refinedSurface = vtkSmartPointer<vtkPolyData>::New();
+        refinedSurface->DeepCopy(refinedNormaler->GetOutput());
+        if (VMTKUtils_ComputeSizingFunction(refinedSurface, NULL, "MeshSizingFunction") != SV_OK)
+        {
+          fprintf(stderr,"Problem computing the sizing function of the refined wall surface\n");
+          return SV_ERROR;
+        }
+        SetCapBoundaryNormals(refinedSurface);
+        TGenUtils_ReportSurfaceTriangleQuality(refinedSurface, "refined fluid/wall interface surface");
+        wallInput = refinedSurface;
+      }
+    }
+    if (GenerateWallMesh(wallInput, markerListName) != SV_OK)
     {
       fprintf(stderr,"Problem with vessel wall meshing\n");
       return SV_ERROR;
@@ -2395,6 +2451,11 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   }
   if (meshoptions_.walltetgenshell)
   {
+    if (meshoptions_.wallrefineratio > 0.0)
+    {
+      fprintf(stdout,"  WallRefineRatio %g: the wall faces were split to a mean edge under %g times their thickness before this (the fluid cells on the split edges cut with them)\n",
+          meshoptions_.wallrefineratio, meshoptions_.wallrefineratio);
+    }
     fprintf(stdout,"  CurvatureFactor and SmoothingIterations are wedge-extrusion options: the TetGen fill ignores them (its ramp toward thicker neighbours, slope %g, grades the thickness)\n", gWallThicknessMaxSlope);
     fprintf(stdout,"  the wall is filled with TetGen tetrahedra in %d layer(s) through the thickness: %d offset surface(s) at fractions of the thickness go into the shell as facets the mesher keeps, so each layer is one tetrahedron thick; SmoothingIterations and CurvatureFactor act on the thickness field only\n",
         std::max(1, meshoptions_.numwallsublayers), std::max(1, meshoptions_.numwallsublayers) - 1);

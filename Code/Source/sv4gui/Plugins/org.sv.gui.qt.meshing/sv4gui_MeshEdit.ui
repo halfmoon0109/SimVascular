@@ -2188,6 +2188,56 @@ Click the button to add it to the left table.</string>
               </widget>
              </item>
              <item>
+              <widget class="QWidget" name="widget_wallRefine" native="true">
+               <layout class="QHBoxLayout" name="horizontalLayout_wallRefine">
+                <property name="spacing">
+                 <number>5</number>
+                </property>
+                <property name="leftMargin">
+                 <number>0</number>
+                </property>
+                <property name="topMargin">
+                 <number>0</number>
+                </property>
+                <property name="rightMargin">
+                 <number>0</number>
+                </property>
+                <property name="bottomMargin">
+                 <number>0</number>
+                </property>
+                <item>
+                 <widget class="QCheckBox" name="checkBoxWallRefine">
+                  <property name="toolTip">
+                   <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;With the TetGen fill: split each wall face's triangles in four until their mean edge is under the ratio times the face's wall thickness, cutting only the fluid boundary layer cells on the split edges. The wall's prism layers then keep their shape (their smallest dihedral is near atan((thickness / layers) / edge)) while the fluid mesh can stay as coarse as the flow needs. The fluid and wall still share every interface node. Off, or a ratio of 0, leaves the faces as meshed; a ratio of 1 reproduces a fluid mesh sized to the thickness.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+                  </property>
+                  <property name="text">
+                   <string>Refine Wall Faces to Thickness, edge/thickness ratio:</string>
+                  </property>
+                 </widget>
+                </item>
+                <item>
+                 <widget class="QDoubleSpinBox" name="dsbWallRefineRatio">
+                  <property name="decimals">
+                   <number>2</number>
+                  </property>
+                  <property name="minimum">
+                   <double>0.100000000000000</double>
+                  </property>
+                  <property name="maximum">
+                   <double>10.000000000000000</double>
+                  </property>
+                  <property name="singleStep">
+                   <double>0.100000000000000</double>
+                  </property>
+                  <property name="value">
+                   <double>1.000000000000000</double>
+                  </property>
+                 </widget>
+                </item>
+               </layout>
+              </widget>
+             </item>
+             <item>
               <widget class="QLabel" name="label_wallThicknessTable">
                <property name="text">
                 <string>Per-face wall thickness (overrides global for wall faces):</string>

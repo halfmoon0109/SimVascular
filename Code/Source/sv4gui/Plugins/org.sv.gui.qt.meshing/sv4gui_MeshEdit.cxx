@@ -936,6 +936,10 @@ std::vector<std::string> sv4guiMeshEdit::CreateCmdsT()
       if (ui->checkBoxWallTetGenShell->isChecked())
       {
         cmds.push_back("option WallMeshTetGenShell");
+        if (ui->checkBoxWallRefine->isChecked())
+        {
+          cmds.push_back("option WallRefineRatio "+QString::number(ui->dsbWallRefineRatio->value()).toStdString());
+        }
       }
 
       for(int i=0;i<m_TableModelWallThickness->rowCount();i++)
@@ -1834,6 +1838,11 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
         {
           ui->checkBoxWallTetGenShell->setChecked(true);
         }
+        else if (flag == "WallRefineRatio")
+        {
+          ui->checkBoxWallRefine->setChecked(values[0] > 0.0);
+          if (values[0] > 0.0) ui->dsbWallRefineRatio->setValue(values[0]);
+        }
         else if (flag == "WallThicknessSmoothingIterations")
         {
           ui->sbWallSmoothingT->setValue(values[0]);
@@ -2262,6 +2271,7 @@ void sv4guiMeshEdit::UpdateWallMeshWidgets(bool tetgenShell)
 {
     ui->widget_wallSmoothing->setEnabled(!tetgenShell);
     ui->widget_wallCurvature->setEnabled(!tetgenShell);
+    ui->widget_wallRefine->setEnabled(tetgenShell);
     const QString note = tetgenShell ? QString("Not used by the TetGen fill of the wall") : QString("");
     ui->label_wallSmoothing->setToolTip(note);
     ui->label_wallCurvature->setToolTip(note);

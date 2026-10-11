@@ -426,6 +426,12 @@ bool sv4guiMeshTetGen::ParseCommand(std::string cmd, std::string& flag, double v
           values[0]=1;
           option=true;
         }
+        else if(paramSize==2 && params[0]=="wallrefineratio")
+        {
+          flag="WallRefineRatio";
+          values[0]=std::stod(params[1]);
+          option=true;
+        }
         else if(paramSize==2 && params[0]=="wallthicknesssmoothingiterations")
         {
           flag="WallThicknessSmoothingIterations";

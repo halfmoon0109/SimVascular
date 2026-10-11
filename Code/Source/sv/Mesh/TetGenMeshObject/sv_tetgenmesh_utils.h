@@ -59,6 +59,7 @@
 #include "simvascular_tetgen.h"
 #include "sv_tetgenmesh_offset.h"
 
+#include <map>
 #include <utility>
 #include <vector>
 #include <string>
@@ -183,6 +184,27 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyDat
     const char *label);
 
 /// Raises every point that stands more than maxSlope times the edge length below a neighbour, up to that floor: the thin side of a step ramps up to the thick side, which keeps what it asked for.
+/**
+ * @brief Refine the wall faces of a tetrahedralized boundary layer mesh to
+ * the wall thickness, by bisecting their edges (sv_tetgenmesh_refine).
+ *
+ * The wall triangles are the surface cells whose points are all input
+ * surface points (the first numWallPoints points of the mesh, as the vmtk
+ * boundary layer generator lays them out). Each model face's triangles are
+ * split in four ceil(log2(h / (ratio t))) times, h the face's mean edge and
+ * t its wall thickness, at most maxDepth times; every tetrahedron and
+ * triangle on a bisected edge is cut in two, so the mesh stays conforming
+ * and only the first sublayer is touched. Point data is interpolated at the
+ * midpoints and cell data inherited.
+ * @param blMesh The boundary layer mesh, tetrahedra and triangles only; refined in place.
+ * @param refinedWall Set to the refined wall triangles as a surface with a 'ModelFaceID' cell array (no normals, no sizing).
+ * @param numLevels Set to the deepest refinement applied (0: nothing was changed).
+ * @return SV_OK, or SV_ERROR when the mesh has other cell types, no 'ModelFaceID', or comes out non-conforming.
+ */
+SV_EXPORT_TETGEN_MESH int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType numWallPoints,
+    const std::map<int, double> &thicknessByFace, double defaultThickness, double ratio, int maxDepth,
+    vtkPolyData *refinedWall, int &numLevels);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_RaiseThicknessTowardNeighbours(vtkPolyData *surface, vtkDoubleArray *array,
     double maxSlope, const char *label);
 

@@ -78,6 +78,7 @@
 #include "sv_vtk_utils.h"
 #include "sv_tetgenmesh_envelope.h"
 #include "sv_tetgenmesh_offset.h"
+#include "sv_tetgenmesh_refine.h"
 
 #ifdef _WIN32
 #include <direct.h>
@@ -3064,6 +3065,195 @@ int TGenUtils_ReportConcaveCurvatureVsThickness(vtkPolyData *surface, vtkDoubleA
         numOutside, numRegionsTotal - (int)regions.size());
   }
 
+  return SV_OK;
+}
+
+//--------------------------------------
+// TGenUtils_RefineWallFacesToThickness
+//--------------------------------------
+int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType numWallPoints,
+    const std::map<int, double> &thicknessByFace, double defaultThickness, double ratio, int maxDepth,
+    vtkPolyData *refinedWall, int &numLevels)
+{
+  numLevels = 0;
+  if (blMesh == nullptr || refinedWall == nullptr) return SV_ERROR;
+  auto faceIds = vtkIntArray::SafeDownCast(blMesh->GetCellData()->GetArray("ModelFaceID"));
+  if (faceIds == nullptr)
+  {
+    fprintf(stderr,"The boundary layer mesh has no 'ModelFaceID' cell array; the wall faces cannot be refined\n");
+    return SV_ERROR;
+  }
+  const vtkIdType numCells = blMesh->GetNumberOfCells(), numPoints = blMesh->GetNumberOfPoints();
+  // the integer cell arrays ride along as attributes the children inherit;
+  // the last attribute is the cell's original index, for every other array
+  std::vector<vtkIntArray *> intArrays;
+  for (int a = 0; a < blMesh->GetCellData()->GetNumberOfArrays(); a++)
+  {
+    auto arr = vtkIntArray::SafeDownCast(blMesh->GetCellData()->GetArray(a));
+    if (arr != nullptr && arr->GetNumberOfComponents() == 1) intArrays.push_back(arr);
+  }
+  svrefine::Mesh mesh;
+  mesh.points.resize((size_t)3*numPoints);
+  for (vtkIdType p = 0; p < numPoints; p++) blMesh->GetPoint(p, &mesh.points[(size_t)3*p]);
+  mesh.numOriginalPoints = numPoints;
+  const size_t numAttr = intArrays.size();
+  mesh.tetrahedronInts.resize(numAttr + 1);   // ... + origin
+  mesh.triangleInts.resize(numAttr + 3);      // ... + origin, wall flag, label for the depth
+  const size_t originTet = numAttr, originTri = numAttr, wallFlag = numAttr + 1, labelIndex = numAttr + 2;
+  vtkIdType numTets = 0, numTris = 0, numWallTris = 0;
+  for (vtkIdType c = 0; c < numCells; c++)
+  {
+    const int type = blMesh->GetCellType(c);
+    vtkIdType npts;
+    const vtkIdType *pts;
+    blMesh->GetCellPoints(c, npts, pts);
+    if (type == VTK_TETRA && npts == 4)
+    {
+      for (int j = 0; j < 4; j++) mesh.tetrahedra.push_back(pts[j]);
+      for (size_t a = 0; a < numAttr; a++) mesh.tetrahedronInts[a].push_back(intArrays[a]->GetValue(c));
+      mesh.tetrahedronInts[originTet].push_back((int)c);
+      numTets++;
+    }
+    else if (type == VTK_TRIANGLE && npts == 3)
+    {
+      for (int j = 0; j < 3; j++) mesh.triangles.push_back(pts[j]);
+      for (size_t a = 0; a < numAttr; a++) mesh.triangleInts[a].push_back(intArrays[a]->GetValue(c));
+      mesh.triangleInts[originTri].push_back((int)c);
+      const bool wall = pts[0] < numWallPoints && pts[1] < numWallPoints && pts[2] < numWallPoints;
+      mesh.triangleInts[wallFlag].push_back(wall ? 1 : 0);
+      mesh.triangleInts[labelIndex].push_back(wall ? faceIds->GetValue(c) : -1);
+      if (wall) numWallTris++;
+      numTris++;
+    }
+    else
+    {
+      fprintf(stderr,"The boundary layer mesh has a cell of VTK type %d; only tetrahedra and triangles can be refined\n", type);
+      return SV_ERROR;
+    }
+  }
+  std::string error;
+  if (!svrefine::CheckConforming(mesh, error))
+  {
+    fprintf(stderr,"The boundary layer mesh is not conforming before the wall faces are refined: %s\n", error.c_str());
+    return SV_ERROR;
+  }
+  std::vector<int> skip(1, -1);
+  std::vector<svrefine::DepthRow> table;
+  std::vector<int> depth = svrefine::DepthOfTriangles(mesh, labelIndex, thicknessByFace, defaultThickness, ratio, maxDepth, skip, table);
+  fprintf(stdout,"Wall faces refined to the wall thickness (ratio %g: a face's triangles are split in four until their mean edge is under %g times its thickness, at most %d times; only the fluid cells on the split edges, the first boundary layer sublayer, are cut):\n",
+      ratio, ratio, maxDepth);
+  fprintf(stdout,"  the boundary layer mesh: %lld tetrahedra, %lld triangles of which %lld on the wall (%lld wall points)\n",
+      (long long)numTets, (long long)numTris, (long long)numWallTris, (long long)numWallPoints);
+  int deepest = 0;
+  for (size_t r = 0; r < table.size(); r++)
+  {
+    if (table[r].label < 0) continue;
+    fprintf(stdout,"  face %d: %lld triangles, mean edge %.4g, thickness %.4g, edge/thickness %.3g -> %d level(s)\n",
+        table[r].label, table[r].numTriangles, table[r].meanEdge, table[r].thickness,
+        table[r].thickness > 0.0 ? table[r].meanEdge/table[r].thickness : 0.0, table[r].depth);
+    deepest = std::max(deepest, table[r].depth);
+  }
+  if (deepest == 0)
+  {
+    fprintf(stdout,"  no face needs refining; the mesh is left as it is\n");
+    return SV_OK;
+  }
+  svrefine::Report report;
+  svrefine::RefineTriangles(mesh, depth, report);
+  fprintf(stdout,"  %lld edges bisected over %zu level(s) (", report.numEdgesBisected, report.edgesPerLevel.size());
+  for (size_t l = 0; l < report.edgesPerLevel.size(); l++) fprintf(stdout,"%s%lld", l ? ", " : "", report.edgesPerLevel[l]);
+  fprintf(stdout," per level), %lld points added; tetrahedra %lld -> %lld, triangles %lld -> %lld\n",
+      report.numPointsAdded, report.numTetrahedraBefore, report.numTetrahedraAfter, report.numTrianglesBefore, report.numTrianglesAfter);
+  if (!svrefine::CheckConforming(mesh, error))
+  {
+    fprintf(stderr,"The boundary layer mesh is not conforming after the wall faces were refined: %s\n", error.c_str());
+    return SV_ERROR;
+  }
+  numLevels = deepest;
+  // The refined mesh: the points, the original point data interpolated at
+  // the midpoints (a midpoint's parents come before it, so one pass does
+  // it), the cells with their data copied from their ancestors.
+  const vtkIdType numNewPoints = (vtkIdType)(mesh.points.size()/3);
+  auto newPoints = vtkSmartPointer<vtkPoints>::New();
+  newPoints->SetDataTypeToDouble();
+  newPoints->SetNumberOfPoints(numNewPoints);
+  for (vtkIdType p = 0; p < numNewPoints; p++) newPoints->SetPoint(p, &mesh.points[(size_t)3*p]);
+  auto refined = vtkSmartPointer<vtkUnstructuredGrid>::New();
+  refined->SetPoints(newPoints);
+  for (int a = 0; a < blMesh->GetPointData()->GetNumberOfArrays(); a++)
+  {
+    vtkDataArray *in = blMesh->GetPointData()->GetArray(a);
+    if (in == nullptr) continue;
+    auto out = vtkSmartPointer<vtkDoubleArray>::New();
+    out->SetName(in->GetName());
+    const int nc = in->GetNumberOfComponents();
+    out->SetNumberOfComponents(nc);
+    out->SetNumberOfTuples(numNewPoints);
+    std::vector<double> tuple((size_t)nc), ta((size_t)nc), tb((size_t)nc);
+    for (vtkIdType p = 0; p < numPoints; p++)
+    {
+      in->GetTuple(p, &tuple[0]);
+      out->SetTuple(p, &tuple[0]);
+    }
+    const bool normals = in->GetName() != nullptr && std::string(in->GetName()) == "Normals" && nc == 3;
+    for (vtkIdType p = numPoints; p < numNewPoints; p++)
+    {
+      const long long pa = mesh.parents[(size_t)2*(p - numPoints)], pb = mesh.parents[(size_t)2*(p - numPoints) + 1];
+      out->GetTuple(pa, &ta[0]);
+      out->GetTuple(pb, &tb[0]);
+      for (int k = 0; k < nc; k++) tuple[(size_t)k] = 0.5*(ta[(size_t)k] + tb[(size_t)k]);
+      if (normals)
+      {
+        const double n = std::sqrt(tuple[0]*tuple[0] + tuple[1]*tuple[1] + tuple[2]*tuple[2]);
+        if (n > 0.0) for (int k = 0; k < 3; k++) tuple[(size_t)k] /= n;
+      }
+      out->SetTuple(p, &tuple[0]);
+    }
+    refined->GetPointData()->AddArray(out);
+  }
+  refined->GetCellData()->CopyAllocate(blMesh->GetCellData());
+  refined->Allocate((vtkIdType)(mesh.tetrahedra.size()/4 + mesh.triangles.size()/3));
+  for (size_t t = 0; t + 3 < mesh.tetrahedra.size(); t += 4)
+  {
+    vtkIdType ids[4] = {mesh.tetrahedra[t], mesh.tetrahedra[t + 1], mesh.tetrahedra[t + 2], mesh.tetrahedra[t + 3]};
+    const vtkIdType id = refined->InsertNextCell(VTK_TETRA, 4, ids);
+    refined->GetCellData()->CopyData(blMesh->GetCellData(), mesh.tetrahedronInts[originTet][t/4], id);
+  }
+  for (size_t t = 0; t + 2 < mesh.triangles.size(); t += 3)
+  {
+    vtkIdType ids[3] = {mesh.triangles[t], mesh.triangles[t + 1], mesh.triangles[t + 2]};
+    const vtkIdType id = refined->InsertNextCell(VTK_TRIANGLE, 3, ids);
+    refined->GetCellData()->CopyData(blMesh->GetCellData(), mesh.triangleInts[originTri][t/3], id);
+  }
+  blMesh->DeepCopy(refined);
+  // the refined wall triangles as a surface of their own, points compacted
+  auto wallPoints = vtkSmartPointer<vtkPoints>::New();
+  wallPoints->SetDataTypeToDouble();
+  auto wallCells = vtkSmartPointer<vtkCellArray>::New();
+  auto wallFaceIds = vtkSmartPointer<vtkIntArray>::New();
+  wallFaceIds->SetName("ModelFaceID");
+  std::vector<vtkIdType> newId((size_t)numNewPoints, -1);
+  vtkIdType numRefinedWall = 0;
+  for (size_t t = 0; t + 2 < mesh.triangles.size(); t += 3)
+  {
+    if (!mesh.triangleInts[wallFlag][t/3]) continue;
+    vtkIdType ids[3];
+    for (int j = 0; j < 3; j++)
+    {
+      const long long v = mesh.triangles[t + (size_t)j];
+      if (newId[(size_t)v] < 0) newId[(size_t)v] = wallPoints->InsertNextPoint(&mesh.points[(size_t)3*v]);
+      ids[j] = newId[(size_t)v];
+    }
+    wallCells->InsertNextCell(3, ids);
+    wallFaceIds->InsertNextValue(mesh.triangleInts[labelIndex][t/3]);
+    numRefinedWall++;
+  }
+  refinedWall->Initialize();
+  refinedWall->SetPoints(wallPoints);
+  refinedWall->SetPolys(wallCells);
+  refinedWall->GetCellData()->AddArray(wallFaceIds);
+  fprintf(stdout,"  the wall surface for the solid: %lld triangles on %lld points (was %lld on %lld)\n",
+      (long long)numRefinedWall, (long long)wallPoints->GetNumberOfPoints(), (long long)numWallTris, (long long)numWallPoints);
   return SV_OK;
 }
 
