@@ -32,7 +32,10 @@
 // A standalone test of the edge bisection core (sv_tetgenmesh_refine): no
 // VTK, no TetGen. Build and run from the TetGenMeshObject directory with
 //
-//   g++ -O2 -std=c++17 -I. Testing/test_refine.cxx sv_tetgenmesh_refine.cxx -o test_refine && ./test_refine
+//   g++ -O2 -std=c++17 -I. Testing/test_refine.cxx sv_tetgenmesh_refine.cxx sv_tetgenmesh_offset.cxx
+//       sv_tetgenmesh_envelope.cxx -o test_refine && ./test_refine
+//
+// (the offset core is linked for test 6, the prism layers on a refined tube)
 //
 // The mesh is a boundary layer as vmtk extrudes it: a wall surface of right
 // triangles on a grid (two model faces), two sublayers of prisms below it,
@@ -43,6 +46,7 @@
 // angles hold through the levels.
 
 #include "sv_tetgenmesh_refine.h"
+#include "sv_tetgenmesh_offset.h"
 
 #include <algorithm>
 #include <cmath>
@@ -224,6 +228,133 @@ static std::set<std::vector<ll> > SecondLayer(const svrefine::Mesh &m)
   return out;
 }
 
+// The smallest dihedral angle of a tetrahedron, in degrees.
+static double MinDihedral(const std::vector<double> &pts, const ll *q)
+{
+  static const int faces[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
+  double n[4][3];
+  for (int f = 0; f < 4; f++)
+  {
+    const double *a = &pts[3*q[faces[f][0]]], *b = &pts[3*q[faces[f][1]]], *c = &pts[3*q[faces[f][2]]];
+    double u[3], v[3];
+    for (int k = 0; k < 3; k++) { u[k] = b[k] - a[k]; v[k] = c[k] - a[k]; }
+    n[f][0] = u[1]*v[2] - u[2]*v[1]; n[f][1] = u[2]*v[0] - u[0]*v[2]; n[f][2] = u[0]*v[1] - u[1]*v[0];
+    double l = std::sqrt(n[f][0]*n[f][0] + n[f][1]*n[f][1] + n[f][2]*n[f][2]);
+    if (l > 0.0) for (int k = 0; k < 3; k++) n[f][k] /= l;
+  }
+  double smallest = 180.0;
+  for (int f = 0; f < 4; f++)
+  {
+    for (int g = f + 1; g < 4; g++)
+    {
+      // outward normals: the dihedral is 180 minus the angle between them
+      double d = -(n[f][0]*n[g][0] + n[f][1]*n[g][1] + n[f][2]*n[g][2]);
+      smallest = std::min(smallest, std::acos(std::max(-1.0, std::min(1.0, d)))*180.0/3.14159265358979323846);
+    }
+  }
+  return smallest;
+}
+
+// A tube of radius r, length L, wall t, meshed with 'around' points around
+// and a spacing of about h along; the normals point out of the lumen into
+// the wall and the triangles are wound to match.
+static svoffset::Interface MakeTube(double r, double L, double t, int around, double h)
+{
+  svoffset::Interface f;
+  const int along = std::max(1, (int)std::ceil(L/h));
+  for (int j = 0; j <= along; j++)
+  {
+    for (int i = 0; i < around; i++)
+    {
+      const double a = 2.0*3.14159265358979323846*i/around;
+      f.points.push_back(r*std::cos(a)); f.points.push_back(r*std::sin(a)); f.points.push_back(L*j/along);
+      f.normals.push_back(std::cos(a)); f.normals.push_back(std::sin(a)); f.normals.push_back(0.0);
+      f.thickness.push_back(t);
+    }
+  }
+  auto id = [&](int i, int j) { return (ll)j*around + (i % around); };
+  for (int j = 0; j < along; j++)
+  {
+    for (int i = 0; i < around; i++)
+    {
+      ll t1[3] = {id(i, j), id(i + 1, j), id(i + 1, j + 1)}, t2[3] = {id(i, j), id(i + 1, j + 1), id(i, j + 1)};
+      for (int w = 0; w < 2; w++)
+      {
+        ll *tri = w ? t2 : t1;
+        // wound so that the right-hand normal points outward (into the wall)
+        const double *a = &f.points[3*tri[0]], *b = &f.points[3*tri[1]], *c = &f.points[3*tri[2]];
+        double u[3], v[3], n[3];
+        for (int k = 0; k < 3; k++) { u[k] = b[k] - a[k]; v[k] = c[k] - a[k]; }
+        n[0] = u[1]*v[2] - u[2]*v[1]; n[1] = u[2]*v[0] - u[0]*v[2]; n[2] = u[0]*v[1] - u[1]*v[0];
+        if (n[0]*a[0] + n[1]*a[1] < 0.0) std::swap(tri[1], tri[2]);
+        for (int k = 0; k < 3; k++) f.triangles.push_back(tri[k]);
+      }
+    }
+  }
+  return f;
+}
+
+// The interface refined with the core: the triangles bisected to the
+// depth, the midpoints' normals and thickness from their parents, and the
+// midpoints put back on the cylinder when asked (as the glue projects them
+// onto the model surface).
+static svoffset::Interface RefineTube(const svoffset::Interface &in, double thickness, double ratio, bool project, double r, int &levels)
+{
+  svrefine::Mesh m;
+  m.points = in.points;
+  m.triangles = in.triangles;
+  m.triangleInts.resize(1);
+  m.triangleInts[0].assign(in.triangles.size()/3, 1);
+  m.numOriginalPoints = (ll)(in.points.size()/3);
+  std::map<int, double> th;
+  th[1] = thickness;
+  std::vector<int> skip;
+  std::vector<svrefine::DepthRow> table;
+  std::vector<int> depth = svrefine::DepthOfTriangles(m, 0, th, thickness, ratio, 3, skip, table);
+  levels = table.empty() ? 0 : table[0].depth;
+  svrefine::Report rep;
+  svrefine::RefineTriangles(m, depth, rep);
+  svoffset::Interface out;
+  out.points = m.points;
+  out.normals = in.normals;
+  out.thickness = in.thickness;
+  for (size_t p = (size_t)m.numOriginalPoints; p < m.points.size()/3; p++)
+  {
+    const ll a = m.parents[2*(p - (size_t)m.numOriginalPoints)], b = m.parents[2*(p - (size_t)m.numOriginalPoints) + 1];
+    double n[3], l = 0.0;
+    for (int k = 0; k < 3; k++) { n[k] = 0.5*(out.normals[3*a + k] + out.normals[3*b + k]); l += n[k]*n[k]; }
+    l = std::sqrt(l);
+    for (int k = 0; k < 3; k++) out.normals.push_back(l > 0.0 ? n[k]/l : 0.0);
+    out.thickness.push_back(0.5*(out.thickness[a] + out.thickness[b]));
+    if (project)
+    {
+      double *x = &out.points[3*p];
+      const double rr = std::sqrt(x[0]*x[0] + x[1]*x[1]);
+      if (rr > 0.0) { x[0] *= r/rr; x[1] *= r/rr; }
+    }
+  }
+  out.triangles = m.triangles;
+  return out;
+}
+
+static double PrismSmallestDihedral(const svoffset::Interface &f, int numLayers, ll &numTets, ll &under10)
+{
+  std::vector<unsigned char> structured(f.triangles.size()/3, 1);
+  svoffset::PrismMesh pm;
+  std::string err;
+  if (svoffset::BuildPrismLayers(f, structured, numLayers, pm, err) != 0) { printf("  prisms failed: %s\n", err.c_str()); numTets = 0; under10 = 0; return 0.0; }
+  numTets = (ll)(pm.tetrahedra.size()/4);
+  under10 = 0;
+  double smallest = 180.0;
+  for (ll t = 0; t < numTets; t++)
+  {
+    const double d = MinDihedral(pm.points, &pm.tetrahedra[4*t]);
+    smallest = std::min(smallest, d);
+    if (d < 10.0) under10++;
+  }
+  return smallest;
+}
+
 int main()
 {
   std::string error;
@@ -356,6 +487,36 @@ int main()
     int most = 0;
     for (size_t t = 0; t < depth.size(); t++) most = std::max(most, depth[t]);
     Check(most == 1, "a ratio of 3 asks one level of face 10 only (1.138 > 0.9) and none of the rest");
+  }
+  {
+    printf("test 6: the prism layers of a thin tube meshed coarser than its wall, before and after the refinement\n");
+    // r 1, wall 0.1, three layers: the fluid surface at a spacing of 0.3
+    // (three times the wall) gives prisms with a smallest dihedral near
+    // atan((0.1/3)/0.3) = 6.3 degrees; split to the wall thickness they
+    // should come back to the 18 degrees a fluid mesh at the thickness gives.
+    const double r = 1.0, t = 0.1;
+    svoffset::Interface coarse = MakeTube(r, 3.0, t, 20, 0.3);
+    svoffset::Interface fine = MakeTube(r, 3.0, t, 63, 0.1);
+    ll nCoarse, u10Coarse, nFine, u10Fine, nRef, u10Ref, nProj, u10Proj;
+    const double dCoarse = PrismSmallestDihedral(coarse, 3, nCoarse, u10Coarse);
+    const double dFine = PrismSmallestDihedral(fine, 3, nFine, u10Fine);
+    int levels = 0;
+    svoffset::Interface refined = RefineTube(coarse, t, 1.0, false, r, levels);
+    const double dRef = PrismSmallestDihedral(refined, 3, nRef, u10Ref);
+    int levels2 = 0;
+    svoffset::Interface projected = RefineTube(coarse, t, 1.0, true, r, levels2);
+    const double dProj = PrismSmallestDihedral(projected, 3, nProj, u10Proj);
+    printf("  coarse (spacing 0.3, %zu triangles): %lld prism tetrahedra, smallest dihedral %.2f degrees, under 10: %lld\n", coarse.triangles.size()/3, nCoarse, dCoarse, u10Coarse);
+    printf("  fine (spacing 0.1, %zu triangles): %lld, smallest %.2f, under 10: %lld\n", fine.triangles.size()/3, nFine, dFine, u10Fine);
+    printf("  coarse refined %d level(s) at ratio 1 (%zu triangles): %lld, smallest %.2f, under 10: %lld\n", levels, refined.triangles.size()/3, nRef, dRef, u10Ref);
+    printf("  the same with the midpoints put back on the cylinder: %lld, smallest %.2f, under 10: %lld\n", nProj, dProj, u10Proj);
+    Check(dCoarse < 8.0, "the coarse fluid surface gives flat prisms (under 8 degrees)");
+    Check(levels == 2, "a spacing of three thicknesses asks two levels at ratio 1");
+    Check(nRef == 16*nCoarse, "the prisms are sixteen per original triangle after two levels");
+    Check(dRef > 2.5*dCoarse, "the refined surface's prisms are at least two and a half times better in the smallest dihedral");
+    Check(dRef > 0.8*dFine, "and within 20 percent of a fluid surface meshed at the thickness");
+    Check(dProj > 0.8*dFine, "with the midpoints on the cylinder as well");
+    Check(u10Ref == 0 && u10Proj == 0, "no prism tetrahedron under 10 degrees after the refinement");
   }
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
