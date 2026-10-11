@@ -153,3 +153,21 @@ SimVascular의 TetGen 메셔(`Code/Source/sv/Mesh/TetGenMeshObject/`)에 이 벽
 2. 1번 코어 함수 + 합성 테스트(웹 세션, VTK 없음) → glue 연결 + 옵션 → docs §5 → 실측(유체 local size를 2t, 3t로).
 3. 실측에서 볼 수치: 유체 격자 수(전/후), 벽 이면각 분포(10° 미만 비율이 h=t 때와 같아야 함), 접합부 넓힘 횟수(세분된 면에서 등위면·조각 크기가 바뀌므로), 내보내기 face 분리 유지.
 4. 1번이 끝나면 N 줄이기(0번)와 조합해 사용자 모델에서 최소 격자 조합을 고른다.
+
+### 9.4 1번의 상세 설계 (2026-10-11, 사용자 결정: 무조건 ALE, 1번 착수)
+
+**현재 흐름(glue, `cvTetGenMeshObject`)**: `GenerateBoundaryLayerMesh`가 ① 모델 면(캡 제외, `originalsurfpd`: 점 법선·`MeshSizingFunction`·`ModelFaceID`)을 ug로 바꿔 VMTK `vtkvmtkBoundaryLayerGenerator`로 유체 경계층(BL)을 안쪽으로 뽑고(`boundarylayermesh_`: 웨지 + 입력 면 삼각형 + 사이드월; 점 0..N−1은 입력 면의 점 그대로, 그 뒤가 켜별 점; 면 셀은 `CellEntityIds`와 `ModelFaceID`를 가짐), ② BL 안쪽 면을 `polydatasolid_`로 삼아 TetGen 내부 격자의 표면으로 쓰고, ③ 같은 `originalsurfpd`로 `GenerateWallMesh`를 불러 고체 벽을 바깥으로 세운다. `GenerateMesh`가 TetGen 내부를 만들고 `AppendBoundaryLayerMesh` → `VMTKUtils_AppendData`가 BL을 사면체화(`vtkvmtkUnstructuredGridTetraFilter` + 재정렬)한 뒤 내부·BL·벽을 좌표 일치로 합쳐 GlobalNodeID를 매긴다. 즉 **벽과 BL이 공유하는 것은 입력 면의 삼각형뿐이고, TetGen 내부는 BL 안쪽 면에서 시작**한다.
+
+**설계**: 벽 면 삼각형을 두께에 맞춰 쪼개되, 그 변에 닿는 BL 첫 켜 사면체만 이등분한다. 내부 유체 격자와 BL 안쪽 면은 손대지 않는다.
+1. 면별 깊이: 면 f의 평균 변 h_f(그 면 삼각형 변 평균), 두께 t_f(면별 표, 없으면 전역), 목표비 c(옵션 `WallRefineRatio`, 0이면 끔). k_f = ceil(log2(h_f/(c·t_f))), 0 이상, 상한 3. 캡 면·`9999`·안쪽 면 셀은 깊이 0.
+2. 레벨 ℓ = 1..max k: 현재 벽 삼각형 중 k_f ≥ ℓ인 면의 삼각형이 가진 모든 변을 모아 **긴 변부터** 이등분한다(한 삼각형 안에서 가장 긴 변을 먼저 쪼개면 네 조각이 4T-LE 분할이 되어 각이 유지된다; 중앙 사각형의 대각선은 "처음 쪼갠 변의 중점–맞은편 꼭짓점"). 변 하나의 이등분 = 중점 삽입 + 그 변을 가진 모든 사면체를 둘로(중점과 맞은편 두 꼭짓점이 새 면) + 그 변을 가진 모든 2D 셀(벽 삼각형, 캡 테두리의 사이드월 삼각형)을 둘로. 국소 정합 연산이라 매달린 노드가 없고, k가 다른 면의 경계 변은 큰 쪽 깊이만큼 쪼개져 작은 쪽 삼각형이 둘로 갈라지며 정합을 유지한다. 중점의 점 데이터(법선 정규화 평균, sizing 평균, 그 외 선형 보간)와 셀 데이터(자식이 부모 값 상속).
+3. BL은 쪼개기 전에 사면체화한다(사이드월 사각형은 삼각형 둘로; `VMTKUtils_AppendData`의 사면체화는 이미 사면체인 격자를 그대로 통과시키는지 확인 — 아니면 그 단계에서 건너뛰는 플래그).
+4. 벽 입력 면: 쪼갠 BL ug의 벽 면 2D 셀(ModelFaceID가 모델 면인 것)을 뽑아 polydata로 만들어 `GenerateWallMesh`에 준다 → 벽 안쪽 면 노드 = BL 벽 면 노드(같은 ug에서 나오므로 좌표가 비트 단위로 같다). 그 뒤 오프셋·혼합 벽·내보내기는 변경 없음(decimation 목표 = 인터페이스 자기 변 길이라 가는 혈관만 촘촘해진다 — 지금 사용자가 손으로 h=t를 맞춘 것과 같은 상태).
+5. 캡: BL 입력 면은 캡에서 열려 있어 테두리 변의 이등분은 벽 삼각형과 사이드월 삼각형만 가른다. TetGen 내부의 캡 면 경계(BL 안쪽 면 테두리)는 그대로라 유체 캡 면 = 쪼개진 사이드월 + 내부 캡으로 정합. 벽 끝면(`_domain-2/cap_*.vtp`)은 쪼개진 테두리 위에 선다.
+6. 비용(원래 벽 삼각형 1개당, BL 3켜 기준): BL 사면체 9 → 9 + 첫 켜 증가(k=1: 약 +6, k=2: 약 +24); 벽 프리즘 사면체 9·4^k. 내부 유체 격자 변화 없음. 전체 면을 쪼개는 방식(BL 9·4^k, 내부도 촘촘)과 비교해 k=2에서 유체가 대략 1/5~1/9.
+
+**구현 단계와 검증**
+- (a) 코어 `sv_tetgenmesh_refine.{h,cxx}`(VTK 없음, 네임스페이스 `svrefine`): 입력 = 점, 사면체(4 id), 2D 셀(3 id + 정수 라벨), 점별 스칼라 묶음; 함수 `BisectEdges(mesh, edges)`(중점 삽입·사면체·삼각형 분할·보간, 긴 변 먼저)와 `RefineFacesToDepth(mesh, depthOfLabel)`(레벨 반복). 테스트 `Testing/test_refine.cxx`: 삼각형 두 개 위에 쌓은 프리즘 2켜(사면체 6×2) + 사이드월에서 ① 한 변·세 변·두 레벨 이등분 뒤 정합(내부 면은 정확히 사면체 2개, 경계 면은 1개 + 2D 셀 1개), ② 부피 합 보존·음부피 0, ③ 2D 셀 라벨 상속·개수(4^k), ④ 변 길이 ≤ 목표, ⑤ 둘째 켜의 사면체는 그대로(수·점 불변), ⑥ 4T-LE: 정삼각형을 두 레벨 쪼개면 최소각 60° 유지, 가늘고 긴 삼각형은 최소각이 줄지 않음.
+- (b) glue: `TGenUtils_RefineWallFacesToThickness(blMesh, localWallThickness, wallThickness, ratio, report)` — 면별 h·t·k 표와 변·사면체·삼각형 전후 수를 로그로; `GenerateBoundaryLayerMesh`에서 VMTK 뒤·`GenerateWallMesh` 앞에 호출, 벽 입력 면을 쪼갠 ug에서 뽑는다. 옵션 `WallRefineRatio <c>`(mesher 플래그 파싱, `sv4gui_MeshTetGen` 명령 파싱, `sv4gui_MeshEdit` Wall Mesh 페이지의 체크박스 + 비율 스핀박스, 기본 off; TetGen-shell 경로 전용).
+- (c) 실측: 유체 local size를 두께의 2배·3배로 잡고 ① 유체 격자 수(전/후), ② 벽 이면각 분포(10° 미만 비율이 h=t 때와 같은지), ③ 접합부 넓힘 횟수·완주, ④ 내보내기 면 분리·캡 면 정합(`mesh-surfaces/<cap>.vtp`가 닫힌 면인지), ⑤ svFSI 입력 읽기(노드 일치 투영이 통과하는지).
+- 열린 점: 중점을 모델 곡면에 투영할지(처음엔 직선 중점; 곡률이 큰 가는 혈관에서 벽 안쪽 면이 다면체로 남는 것은 지금과 같음), k 상한 3이 충분한지, BL이 꺼진 설정(BL 없이 벽만)에서는 TetGen 내부 사면체가 벽 면에 직접 닿으므로 그 사면체를 이등분해야 함 — 같은 코어 함수로 `volumemesh_`에 적용(2단계에서).
