@@ -110,37 +110,88 @@ std::vector<int> DepthOfTriangles(const Mesh &mesh, size_t labelIndex, const std
   std::vector<int> depth((size_t)nt, 0);
   if (labelIndex >= mesh.triangleInts.size() || (ll)mesh.triangleInts[labelIndex].size() != nt || !(ratio > 0.0)) return depth;
   const std::vector<int> &labels = mesh.triangleInts[labelIndex];
-  std::map<int, std::pair<ll, double> > edgeSum;   // label -> (triangles, sum of mean edges)
+  std::map<int, DepthRow> rows;
   for (ll t = 0; t < nt; t++)
   {
     const ll *tri = &mesh.triangles[(size_t)3*t];
     double mean = 0.0;
     for (int j = 0; j < 3; j++) mean += Distance(&mesh.points[(size_t)3*tri[j]], &mesh.points[(size_t)3*tri[(j+1)%3]])/3.0;
-    std::pair<ll, double> &s = edgeSum[labels[(size_t)t]];
-    s.first++;
-    s.second += mean;
-  }
-  std::map<int, int> depthOfLabel;
-  for (std::map<int, std::pair<ll, double> >::const_iterator it = edgeSum.begin(); it != edgeSum.end(); ++it)
-  {
-    DepthRow row;
-    row.label = it->first;
-    row.numTriangles = it->second.first;
-    row.meanEdge = it->second.second/(double)it->second.first;
-    std::map<int, double>::const_iterator th = thicknessOfLabel.find(row.label);
-    row.thickness = (th != thicknessOfLabel.end()) ? th->second : defaultThickness;
-    row.depth = 0;
-    const bool skip = std::find(skipLabels.begin(), skipLabels.end(), row.label) != skipLabels.end();
-    if (!skip && row.thickness > 0.0 && row.meanEdge > ratio*row.thickness)
+    const int label = labels[(size_t)t];
+    std::map<int, DepthRow>::iterator it = rows.find(label);
+    if (it == rows.end())
     {
-      row.depth = (int)std::ceil(std::log2(row.meanEdge/(ratio*row.thickness)) - 1.0e-9);
-      row.depth = std::max(0, std::min(maxDepth, row.depth));
+      DepthRow row;
+      row.label = label;
+      std::map<int, double>::const_iterator th = thicknessOfLabel.find(label);
+      row.thickness = (th != thicknessOfLabel.end()) ? th->second : defaultThickness;
+      row.depthMin = maxDepth + 1;
+      row.depthMax = 0;
+      it = rows.insert(std::make_pair(label, row)).first;
     }
-    depthOfLabel[row.label] = row.depth;
+    DepthRow &row = it->second;
+    row.numTriangles++;
+    row.meanEdge += mean;
+    int d = 0;
+    const bool skip = std::find(skipLabels.begin(), skipLabels.end(), label) != skipLabels.end();
+    if (!skip && row.thickness > 0.0 && mean > ratio*row.thickness)
+    {
+      d = (int)std::ceil(std::log2(mean/(ratio*row.thickness)) - 1.0e-9);
+      d = std::max(0, std::min(maxDepth, d));
+    }
+    depth[(size_t)t] = d;
+    row.depthMin = std::min(row.depthMin, d);
+    row.depthMax = std::max(row.depthMax, d);
+  }
+  for (std::map<int, DepthRow>::iterator it = rows.begin(); it != rows.end(); ++it)
+  {
+    DepthRow row = it->second;
+    row.meanEdge /= (double)row.numTriangles;
+    if (row.depthMin > row.depthMax) row.depthMin = row.depthMax;
     table.push_back(row);
   }
-  for (ll t = 0; t < nt; t++) depth[(size_t)t] = depthOfLabel[labels[(size_t)t]];
   return depth;
+}
+
+//---------------
+// BalanceDepths
+//---------------
+long long BalanceDepths(const Mesh &mesh, size_t labelIndex, const std::vector<int> &skipLabels, std::vector<int> &depth)
+{
+  const ll nt = (ll)(mesh.triangles.size()/3);
+  if (depth.size() != (size_t)nt || labelIndex >= mesh.triangleInts.size() || (ll)mesh.triangleInts[labelIndex].size() != nt) return 0;
+  const std::vector<int> &labels = mesh.triangleInts[labelIndex];
+  std::vector<unsigned char> fixed((size_t)nt, 0);
+  for (ll t = 0; t < nt; t++)
+  {
+    if (std::find(skipLabels.begin(), skipLabels.end(), labels[(size_t)t]) != skipLabels.end()) fixed[(size_t)t] = 1;
+  }
+  // the pairs of triangles on each edge
+  std::map<std::pair<ll, ll>, std::pair<ll, ll> > onEdge;
+  for (ll t = 0; t < nt; t++)
+  {
+    if (fixed[(size_t)t]) continue;
+    const ll *tri = &mesh.triangles[(size_t)3*t];
+    for (int j = 0; j < 3; j++)
+    {
+      const std::pair<ll, ll> key(std::min(tri[j], tri[(j+1)%3]), std::max(tri[j], tri[(j+1)%3]));
+      std::map<std::pair<ll, ll>, std::pair<ll, ll> >::iterator it = onEdge.find(key);
+      if (it == onEdge.end()) onEdge[key] = std::make_pair(t, (ll)-1);
+      else if (it->second.second < 0) it->second.second = t;
+    }
+  }
+  long long raised = 0;
+  for (bool changed = true; changed;)
+  {
+    changed = false;
+    for (std::map<std::pair<ll, ll>, std::pair<ll, ll> >::const_iterator it = onEdge.begin(); it != onEdge.end(); ++it)
+    {
+      const ll a = it->second.first, b = it->second.second;
+      if (a < 0 || b < 0) continue;
+      if (depth[(size_t)a] > depth[(size_t)b] + 1) { depth[(size_t)b] = depth[(size_t)a] - 1; raised++; changed = true; }
+      else if (depth[(size_t)b] > depth[(size_t)a] + 1) { depth[(size_t)a] = depth[(size_t)b] - 1; raised++; changed = true; }
+    }
+  }
+  return raised;
 }
 
 //-------------
@@ -235,10 +286,11 @@ long long BisectEdges(Mesh &mesh, const std::vector<Edge> &edges, Report &report
 //-----------------
 // RefineTriangles
 //-----------------
-long long RefineTriangles(Mesh &mesh, std::vector<int> &depth, Report &report)
+long long RefineTriangles(Mesh &mesh, std::vector<int> &depth, Report &report, size_t labelIndex, const std::vector<int> &skipLabels)
 {
   const ll before = (ll)(mesh.tetrahedra.size()/4), trianglesBefore = (ll)(mesh.triangles.size()/3);
   if (depth.size() != (size_t)trianglesBefore) return 0;
+  if (labelIndex < mesh.triangleInts.size()) report.numTrianglesRaised = BalanceDepths(mesh, labelIndex, skipLabels, depth);
   int maxDepth = 0;
   for (size_t t = 0; t < depth.size(); t++) maxDepth = std::max(maxDepth, depth[t]);
   ll total = 0;
@@ -286,19 +338,22 @@ long long RefineTriangles(Mesh &mesh, std::vector<int> &depth, Report &report)
 bool CheckConforming(const Mesh &mesh, std::string &error)
 {
   const ll np = (ll)(mesh.points.size()/3);
+  if (np > 2147483647LL) { error = "more points than the face census can index"; return false; }
   struct Key
   {
-    ll a, b, c;
+    int a, b, c;
     bool operator<(const Key &o) const { return a != o.a ? a < o.a : (b != o.b ? b < o.b : c < o.c); }
+    bool operator==(const Key &o) const { return a == o.a && b == o.b && c == o.c; }
   };
   auto keyOf = [](ll x, ll y, ll z)
   {
     ll v[3] = {x, y, z};
     std::sort(v, v + 3);
-    Key k; k.a = v[0]; k.b = v[1]; k.c = v[2];
+    Key k; k.a = (int)v[0]; k.b = (int)v[1]; k.c = (int)v[2];
     return k;
   };
-  std::map<Key, int> faces;
+  std::vector<Key> faces;
+  faces.reserve(mesh.tetrahedra.size());
   static const int faceOf[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
   for (size_t t = 0; t + 3 < mesh.tetrahedra.size(); t += 4)
   {
@@ -308,11 +363,12 @@ bool CheckConforming(const Mesh &mesh, std::string &error)
       if (T[j] < 0 || T[j] >= np) { error = "a tetrahedron names a point that is not there"; return false; }
     }
     if (!(SignedVolume(mesh.points, T) > 0.0)) { error = "a tetrahedron of non-positive volume at index " + std::to_string(t/4); return false; }
-    for (int f = 0; f < 4; f++) faces[keyOf(T[faceOf[f][0]], T[faceOf[f][1]], T[faceOf[f][2]])]++;
+    for (int f = 0; f < 4; f++) faces.push_back(keyOf(T[faceOf[f][0]], T[faceOf[f][1]], T[faceOf[f][2]]));
   }
-  for (std::map<Key, int>::const_iterator it = faces.begin(); it != faces.end(); ++it)
+  std::sort(faces.begin(), faces.end());
+  for (size_t i = 0; i + 2 < faces.size(); i++)
   {
-    if (it->second > 2) { error = "a face on more than two tetrahedra"; return false; }
+    if (faces[i] == faces[i + 1] && faces[i] == faces[i + 2]) { error = "a face on more than two tetrahedra"; return false; }
   }
   for (size_t t = 0; t + 2 < mesh.triangles.size(); t += 3)
   {
@@ -324,9 +380,10 @@ bool CheckConforming(const Mesh &mesh, std::string &error)
     if (T[0] == T[1] || T[1] == T[2] || T[0] == T[2]) { error = "a triangle naming a point twice"; return false; }
     if (!mesh.tetrahedra.empty())
     {
-      std::map<Key, int>::const_iterator it = faces.find(keyOf(T[0], T[1], T[2]));
-      if (it == faces.end()) { error = "a surface triangle that is not a face of a tetrahedron, at index " + std::to_string(t/3); return false; }
-      if (it->second != 1) { error = "a surface triangle on a face between two tetrahedra, at index " + std::to_string(t/3); return false; }
+      const Key k = keyOf(T[0], T[1], T[2]);
+      std::vector<Key>::const_iterator it = std::lower_bound(faces.begin(), faces.end(), k);
+      if (it == faces.end() || !(*it == k)) { error = "a surface triangle that is not a face of a tetrahedron, at index " + std::to_string(t/3); return false; }
+      if (it + 1 != faces.end() && *(it + 1) == k) { error = "a surface triangle on a face between two tetrahedra, at index " + std::to_string(t/3); return false; }
     }
   }
   for (size_t q = 0; q < mesh.tetrahedronInts.size(); q++)

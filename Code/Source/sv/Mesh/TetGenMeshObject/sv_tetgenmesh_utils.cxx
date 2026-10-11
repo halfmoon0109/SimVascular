@@ -3131,6 +3131,12 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
       return SV_ERROR;
     }
   }
+  if (numWallTris == 0)
+  {
+    fprintf(stderr,"No wall triangle of the boundary layer mesh has all its points among the first %lld (the input surface's): the mesh is not laid out as the vmtk boundary layer generator lays it out, so the wall faces cannot be refined\n",
+        (long long)numWallPoints);
+    return SV_ERROR;
+  }
   std::string error;
   if (!svrefine::CheckConforming(mesh, error))
   {
@@ -3148,10 +3154,10 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
   for (size_t r = 0; r < table.size(); r++)
   {
     if (table[r].label < 0) continue;
-    fprintf(stdout,"  face %d: %lld triangles, mean edge %.4g, thickness %.4g, edge/thickness %.3g -> %d level(s)\n",
+    fprintf(stdout,"  face %d: %lld triangles, mean edge %.4g, thickness %.4g, edge/thickness %.3g -> %d to %d level(s) by triangle\n",
         table[r].label, table[r].numTriangles, table[r].meanEdge, table[r].thickness,
-        table[r].thickness > 0.0 ? table[r].meanEdge/table[r].thickness : 0.0, table[r].depth);
-    deepest = std::max(deepest, table[r].depth);
+        table[r].thickness > 0.0 ? table[r].meanEdge/table[r].thickness : 0.0, table[r].depthMin, table[r].depthMax);
+    deepest = std::max(deepest, table[r].depthMax);
   }
   if (deepest == 0)
   {
@@ -3159,8 +3165,9 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
     return SV_OK;
   }
   svrefine::Report report;
-  svrefine::RefineTriangles(mesh, depth, report);
-  fprintf(stdout,"  %lld edges bisected over %zu level(s) (", report.numEdgesBisected, report.edgesPerLevel.size());
+  svrefine::RefineTriangles(mesh, depth, report, labelIndex, skip);
+  fprintf(stdout,"  %lld wall triangles raised so that no two on one edge differ by more than one level; %lld edges bisected over %zu level(s) (",
+      report.numTrianglesRaised, report.numEdgesBisected, report.edgesPerLevel.size());
   for (size_t l = 0; l < report.edgesPerLevel.size(); l++) fprintf(stdout,"%s%lld", l ? ", " : "", report.edgesPerLevel[l]);
   fprintf(stdout," per level), %lld points added; tetrahedra %lld -> %lld, triangles %lld -> %lld\n",
       report.numPointsAdded, report.numTetrahedraBefore, report.numTetrahedraAfter, report.numTrianglesBefore, report.numTrianglesAfter);
@@ -3199,8 +3206,33 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
       for (int k = 0; k < 3; k++) { u[k] = b[k] - a[k]; v[k] = c[k] - a[k]; w[k] = d[k] - a[k]; }
       return (u[0]*(v[1]*w[2] - v[2]*w[1]) - u[1]*(v[0]*w[2] - v[2]*w[0]) + u[2]*(v[0]*w[1] - v[1]*w[0]))/6.0;
     };
+    // the model's wall faces only: a rim midpoint lies in the cap plane,
+    // and against the whole model its closest point would be itself
+    vtkSmartPointer<vtkPolyData> wallModel = model;
+    auto modelFaceIds = vtkIntArray::SafeDownCast(model->GetCellData()->GetArray("ModelFaceID"));
+    if (modelFaceIds != nullptr)
+    {
+      std::set<int> wallFaces;
+      for (size_t t = 0; t + 2 < mesh.triangles.size(); t += 3)
+      {
+        if (mesh.triangleInts[wallFlag][t/3]) wallFaces.insert(mesh.triangleInts[labelIndex][t/3]);
+      }
+      auto subset = vtkSmartPointer<vtkPolyData>::New();
+      subset->SetPoints(model->GetPoints());
+      auto cells = vtkSmartPointer<vtkCellArray>::New();
+      for (vtkIdType c = 0; c < model->GetNumberOfCells(); c++)
+      {
+        if (model->GetCellType(c) != VTK_TRIANGLE || wallFaces.find(modelFaceIds->GetValue(c)) == wallFaces.end()) continue;
+        vtkIdType npts;
+        const vtkIdType *pts;
+        model->GetCellPoints(c, npts, pts);
+        cells->InsertNextCell(npts, pts);
+      }
+      subset->SetPolys(cells);
+      if (subset->GetNumberOfCells() > 0) wallModel = subset;
+    }
     auto locator = vtkSmartPointer<vtkCellLocator>::New();
-    locator->SetDataSet(model);
+    locator->SetDataSet(wallModel);
     locator->BuildLocator();
     long long numProjected = 0, numRefusedFar = 0, numRefusedFold = 0;
     double longestMove = 0.0, sumMove = 0.0;
@@ -3239,13 +3271,9 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
       sumMove += move;
       longestMove = std::max(longestMove, move);
     }
-    fprintf(stdout,"  %lld wall midpoints moved onto the model surface (mean %.3g, the longest %.3g); %lld left where they were as farther off than a quarter of their edge, %lld as the move would fold a boundary layer tetrahedron\n",
+    fprintf(stdout,"  %lld wall midpoints moved onto the model's wall faces (mean %.3g, the longest %.3g); %lld left where they were as farther off than a quarter of their edge, %lld as the move would fold a boundary layer tetrahedron\n",
         numProjected, numProjected > 0 ? sumMove/(double)numProjected : 0.0, longestMove, numRefusedFar, numRefusedFold);
-    if (!svrefine::CheckConforming(mesh, error))
-    {
-      fprintf(stderr,"The boundary layer mesh is not conforming after the midpoints were moved onto the model: %s\n", error.c_str());
-      return SV_ERROR;
-    }
+    // the moves change no cell, and every move kept its tetrahedra positive
   }
   // The refined mesh: the points, the original point data interpolated at
   // the midpoints (a midpoint's parents come before it, so one pass does

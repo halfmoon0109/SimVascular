@@ -1444,6 +1444,8 @@ void sv4guiMeshEdit::UpdateTetGenGUI()
     ui->sbWallSmoothingT->setValue(5);
     ui->dsbWallCurvatureT->setValue(0.8);
     ui->checkBoxWallTetGenShell->setChecked(false);
+    ui->checkBoxWallRefine->setChecked(false);
+    ui->dsbWallRefineRatio->setValue(1.0);
     UpdateWallMeshWidgets(false);
 
     ui->checkBoxRadiusBasedT->setChecked(false);

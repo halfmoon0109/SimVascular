@@ -311,7 +311,7 @@ static svoffset::Interface RefineTube(const svoffset::Interface &in, double thic
   std::vector<int> skip;
   std::vector<svrefine::DepthRow> table;
   std::vector<int> depth = svrefine::DepthOfTriangles(m, 0, th, thickness, ratio, 3, skip, table);
-  levels = table.empty() ? 0 : table[0].depth;
+  levels = table.empty() ? 0 : table[0].depthMax;
   svrefine::Report rep;
   svrefine::RefineTriangles(m, depth, rep);
   svoffset::Interface out;
@@ -435,8 +435,39 @@ int main()
     Check(std::abs(LongestEdge(m, 11, 0) - std::sqrt(2.0)/4.0) < 1e-12, "the longest edge is quartered");
     // the first sublayer's tetrahedra: 3 per wall triangle before; the wall triangles are 16 each now and every one is a face of a tetrahedron (checked above)
     ll first = 0;
-    for (size_t t = 0; t < m.tetrahedronInts[0].size(); t++) if (m.tetrahedronInts[0][t] == 1) first++;
-    printf("  first sublayer: %lld tetrahedra for %lld wall triangles (%.2f each)\n", first, CountLabel(m, 10, 0) + CountLabel(m, 11, 0), (double)first/(double)(CountLabel(m, 10, 0) + CountLabel(m, 11, 0)));
+    double smallestFirst = 180.0, smallestSecond = 180.0;
+    for (size_t t = 0; t < m.tetrahedronInts[0].size(); t++)
+    {
+      const double d = MinDihedral(m.points, &m.tetrahedra[4*t]);
+      if (m.tetrahedronInts[0][t] == 1) { first++; smallestFirst = std::min(smallestFirst, d); }
+      else smallestSecond = std::min(smallestSecond, d);
+    }
+    printf("  first sublayer: %lld tetrahedra for %lld wall triangles (%.2f each), smallest dihedral %.2f degrees (the untouched second sublayer: %.2f)\n",
+        first, CountLabel(m, 10, 0) + CountLabel(m, 11, 0), (double)first/(double)(CountLabel(m, 10, 0) + CountLabel(m, 11, 0)), smallestFirst, smallestSecond);
+    // the transition's cost, measured: the wedge's tetrahedron with one wall
+    // edge is fanned 2^k ways on its lower edge; at a sublayer a tenth of
+    // the edge thick its smallest dihedral is a few degrees to begin with
+    Check(smallestFirst > 0.2*smallestSecond, "the first sublayer's smallest dihedral after two levels is above a fifth of the untouched sublayer's (measured 1.9 against 8.5 degrees)");
+  }
+  {
+    printf("test 3b: the depth of the first sublayer's slivers over the levels (the reason for the depth cap)\n");
+    for (int k = 1; k <= 3; k++)
+    {
+      svrefine::Mesh m = BuildLayer(4);
+      std::vector<int> depth(m.triangles.size()/3, 0);
+      for (size_t t = 0; t < depth.size(); t++) depth[t] = (m.triangleInts[0][t] == 10 || m.triangleInts[0][t] == 11) ? k : 0;
+      svrefine::Report rep;
+      svrefine::RefineTriangles(m, depth, rep);
+      double smallest = 180.0, before = 180.0;
+      ll under1 = 0, first = 0;
+      for (size_t t = 0; t < m.tetrahedronInts[0].size(); t++)
+      {
+        const double d = MinDihedral(m.points, &m.tetrahedra[4*t]);
+        if (m.tetrahedronInts[0][t] == 1) { first++; smallest = std::min(smallest, d); if (d < 1.0) under1++; }
+        else before = std::min(before, d);
+      }
+      printf("  %d level(s): first sublayer %lld tetrahedra, smallest dihedral %.2f degrees (untouched %.2f), under 1 degree: %lld\n", k, first, smallest, before, under1);
+    }
   }
   {
     printf("test 4: a thin triangle's angles over the levels\n");
@@ -475,8 +506,9 @@ int main()
     std::map<int, int> byLabel;
     for (size_t r = 0; r < table.size(); r++)
     {
-      printf("  label %d: %lld triangles, mean edge %.4f, thickness %.3g, depth %d\n", table[r].label, table[r].numTriangles, table[r].meanEdge, table[r].thickness, table[r].depth);
-      byLabel[table[r].label] = table[r].depth;
+      printf("  label %d: %lld triangles, mean edge %.4f, thickness %.3g, depth %d..%d\n", table[r].label, table[r].numTriangles, table[r].meanEdge, table[r].thickness, table[r].depthMin, table[r].depthMax);
+      byLabel[table[r].label] = table[r].depthMax;
+      Check(table[r].depthMin == table[r].depthMax, "on a uniform grid every triangle of a label gets the same depth");
     }
     // the mean edge of a right isosceles grid triangle is (1 + 1 + sqrt 2)/3 = 1.138
     Check(byLabel[10] == 2 && byLabel[11] == 1, "1.138 against 0.3 wants two levels, against 1.0 one");
@@ -487,6 +519,80 @@ int main()
     int most = 0;
     for (size_t t = 0; t < depth.size(); t++) most = std::max(most, depth[t]);
     Check(most == 1, "a ratio of 3 asks one level of face 10 only (1.138 > 0.9) and none of the rest");
+  }
+  {
+    printf("test 7: neighbouring faces three levels apart are balanced to one level\n");
+    svrefine::Mesh m = BuildLayer(4);
+    std::vector<int> depth(m.triangles.size()/3, 0);
+    for (size_t t = 0; t < depth.size(); t++) depth[t] = (m.triangleInts[0][t] == 10) ? 3 : 0;
+    std::vector<int> skip;
+    skip.push_back(9999);
+    skip.push_back(1);
+    // without the balancing: face 11's triangles on the shared edges are fanned eight ways
+    svrefine::Mesh raw = m;
+    std::vector<int> rawDepth = depth;
+    svrefine::Report rawRep;
+    svrefine::RefineTriangles(raw, rawDepth, rawRep);
+    const double rawAngle = SmallestAngle(raw, 11, 0);
+    svrefine::Report rep;
+    svrefine::RefineTriangles(m, depth, rep, 0, skip);
+    const double angle = SmallestAngle(m, 11, 0);
+    printf("  face 11's smallest angle: %.2f degrees without the balancing, %.2f with it (%lld triangles raised); face 10 %.2f\n", rawAngle, angle, rep.numTrianglesRaised, SmallestAngle(m, 10, 0));
+    const bool conforming7 = svrefine::CheckConforming(m, error);
+    Check(conforming7, ("conforming: " + error).c_str());
+    Check(rawAngle < 5.0, "unbalanced, the eight-way fan leaves angles under 5 degrees");
+    Check(angle > 15.0, "balanced, face 11 keeps its angles above 15 degrees (one green cut per child at most: a right isosceles child cut from a leg's midpoint has 18.4)");
+    Check(rep.numTrianglesRaised > 0, "triangles were raised");
+    // the raised triangles: within one level of every neighbour
+    bool within = true;
+    std::map<std::pair<ll, ll>, int> edgeDepth;
+    for (size_t t = 0; t + 2 < m.triangles.size(); t += 3)
+    {
+      if (m.triangleInts[0][t/3] != 10 && m.triangleInts[0][t/3] != 11) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        const ll a = m.triangles[t + j], b = m.triangles[t + (j+1)%3];
+        std::pair<ll, ll> key(std::min(a, b), std::max(a, b));
+        std::map<std::pair<ll, ll>, int>::iterator it = edgeDepth.find(key);
+        if (it == edgeDepth.end()) edgeDepth[key] = depth[t/3];
+        else if (std::abs(it->second - depth[t/3]) > 1) within = false;
+      }
+    }
+    Check(within, "after the refinement no two wall triangles on one edge differ by more than one level");
+    Check(CountLabel(m, 9999, 0) > 64, "the sidewalls on the rim edges were cut but not balanced (they keep depth 0)");
+  }
+  {
+    printf("test 8: the conformity check rejects what it must\n");
+    svrefine::Mesh m = BuildLayer(2);
+    const bool ok0 = svrefine::CheckConforming(m, error);
+    Check(ok0, "the layer passes");
+    // a hanging node: cut one tetrahedron's wall edge without its neighbours
+    svrefine::Mesh h = m;
+    {
+      ll t = 0;
+      for (size_t q = 0; q < h.tetrahedronInts[0].size(); q++) if (h.tetrahedronInts[0][q] == 1) { t = (ll)q; break; }
+      const ll a = h.tetrahedra[4*t], b = h.tetrahedra[4*t + 1];
+      const ll mid = (ll)(h.points.size()/3);
+      for (int k = 0; k < 3; k++) h.points.push_back(0.5*(h.points[3*a + k] + h.points[3*b + k]));
+      ll child[4] = {mid, h.tetrahedra[4*t + 1], h.tetrahedra[4*t + 2], h.tetrahedra[4*t + 3]};
+      h.tetrahedra[4*t + 1] = mid;
+      for (int j = 0; j < 4; j++) h.tetrahedra.push_back(child[j]);
+      h.tetrahedronInts[0].push_back(1);
+    }
+    const bool okH = svrefine::CheckConforming(h, error);
+    printf("  hanging node: %s\n", error.c_str());
+    Check(!okH, "a tetrahedron cut without its neighbours is rejected");
+    // a surface triangle that is no face: swap one corner of a wall triangle
+    svrefine::Mesh s = m;
+    s.triangles[2] = s.triangles[5];
+    const bool okS = svrefine::CheckConforming(s, error);
+    printf("  stray triangle: %s\n", error.c_str());
+    Check(!okS, "a surface triangle that is not a face of a tetrahedron is rejected");
+    // an inverted tetrahedron
+    svrefine::Mesh v = m;
+    std::swap(v.tetrahedra[0], v.tetrahedra[1]);
+    const bool okV = svrefine::CheckConforming(v, error);
+    Check(!okV, "a tetrahedron of negative volume is rejected");
   }
   {
     printf("test 6: the prism layers of a thin tube meshed coarser than its wall, before and after the refinement\n");

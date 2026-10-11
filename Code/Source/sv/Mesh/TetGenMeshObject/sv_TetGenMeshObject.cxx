@@ -2353,11 +2353,13 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
       auto refinedWall = vtkSmartPointer<vtkPolyData>::New();
       int numLevels = 0;
       if (TGenUtils_RefineWallFacesToThickness(boundarylayermesh_, originalsurfpd->GetNumberOfPoints(), localWallThickness_,
-            meshoptions_.wallthickness, meshoptions_.wallrefineratio, 3, originalpolydata_, refinedWall, numLevels) != SV_OK)
+            meshoptions_.wallthickness, meshoptions_.wallrefineratio, 2, originalpolydata_, refinedWall, numLevels) != SV_OK)
       {
         fprintf(stderr,"Problem refining the wall faces to the wall thickness\n");
         return SV_ERROR;
       }
+      fprintf(stdout,"WallRefineRatio %g: %s\n", meshoptions_.wallrefineratio,
+          numLevels > 0 ? "the wall faces were split (above) and the solid wall is built on the split surface" : "no wall face needed splitting; the solid wall is built on the surface as meshed");
       if (numLevels > 0)
       {
         // the same preparation the surface had before the boundary layer:
@@ -2451,11 +2453,6 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   }
   if (meshoptions_.walltetgenshell)
   {
-    if (meshoptions_.wallrefineratio > 0.0)
-    {
-      fprintf(stdout,"  WallRefineRatio %g: the wall faces were split to a mean edge under %g times their thickness before this (the fluid cells on the split edges cut with them)\n",
-          meshoptions_.wallrefineratio, meshoptions_.wallrefineratio);
-    }
     fprintf(stdout,"  CurvatureFactor and SmoothingIterations are wedge-extrusion options: the TetGen fill ignores them (its ramp toward thicker neighbours, slope %g, grades the thickness)\n", gWallThicknessMaxSlope);
     fprintf(stdout,"  the wall is filled with TetGen tetrahedra in %d layer(s) through the thickness: %d offset surface(s) at fractions of the thickness go into the shell as facets the mesher keeps, so each layer is one tetrahedron thick; SmoothingIterations and CurvatureFactor act on the thickness field only\n",
         std::max(1, meshoptions_.numwallsublayers), std::max(1, meshoptions_.numwallsublayers) - 1);
@@ -2470,6 +2467,10 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // folding; there is nothing for those passes to prevent and handing them
   // the field first would only thin it for a problem the fill does not have.
   const bool extrudeWedges = !meshoptions_.walltetgenshell;
+  if (extrudeWedges && meshoptions_.wallrefineratio > 0.0)
+  {
+    fprintf(stdout,"  WallRefineRatio %g is set but the wall is extruded as wedges: the option applies to the TetGen fill only and is ignored here\n", meshoptions_.wallrefineratio);
+  }
 
   // Create a point data array giving the wall thickness at each node
   // of the surface.
