@@ -70,6 +70,9 @@
 #include <QMessageBox>
 #include <QInputDialog>
 #include <QFileDialog>
+#include <QFile>
+#include <QTextStream>
+#include <QMap>
 #include <QRegularExpression>
 
 #include <iostream>
@@ -215,10 +218,27 @@ void sv4guiMeshEdit::SetupGUI(QWidget *parent )
     QAction* clearLocalTAction=m_TableMenuLocal->addAction("Clear Local Size");
     connect( setLocalTAction, SIGNAL( triggered(bool) ) , this, SLOT( SetLocal(bool) ) );
     connect( clearLocalTAction, SIGNAL( triggered(bool) ) , this, SLOT( ClearLocal(bool) ) );
+    m_TableMenuLocal->addSeparator();
+    QAction* importLocalCsvAction=m_TableMenuLocal->addAction("Import Face Values from CSV...");
+    QAction* exportLocalCsvAction=m_TableMenuLocal->addAction("Export Face Values to CSV...");
+    connect( importLocalCsvAction, SIGNAL( triggered(bool) ) , this, SLOT( ImportFaceCsvFromLocal(bool) ) );
+    connect( exportLocalCsvAction, SIGNAL( triggered(bool) ) , this, SLOT( ExportFaceCsv(bool) ) );
 
     //for per-face wall thickness table
     m_TableModelWallThickness = new QStandardItemModel(this);
     ui->tableViewWallThickness->setModel(m_TableModelWallThickness);
+    connect( ui->tableViewWallThickness, SIGNAL(customContextMenuRequested(const QPoint&))
+      , this, SLOT(TableViewWallThicknessContextMenuRequested(const QPoint&)) );
+    m_TableMenuWallThickness=new QMenu(ui->tableViewWallThickness);
+    QAction* setWallTAction=m_TableMenuWallThickness->addAction("Set Wall Thickness");
+    QAction* clearWallTAction=m_TableMenuWallThickness->addAction("Clear Wall Thickness");
+    connect( setWallTAction, SIGNAL( triggered(bool) ) , this, SLOT( SetWallThickness(bool) ) );
+    connect( clearWallTAction, SIGNAL( triggered(bool) ) , this, SLOT( ClearWallThickness(bool) ) );
+    m_TableMenuWallThickness->addSeparator();
+    QAction* importWallCsvAction=m_TableMenuWallThickness->addAction("Import Face Values from CSV...");
+    QAction* exportWallCsvAction=m_TableMenuWallThickness->addAction("Export Face Values to CSV...");
+    connect( importWallCsvAction, SIGNAL( triggered(bool) ) , this, SLOT( ImportFaceCsvFromWall(bool) ) );
+    connect( exportWallCsvAction, SIGNAL( triggered(bool) ) , this, SLOT( ExportFaceCsv(bool) ) );
 
     //for regional table
     connect(ui->checkBoxSphere, SIGNAL(toggled(bool)), this, SLOT(ShowSphereInteractor(bool)));
@@ -405,6 +425,228 @@ void sv4guiMeshEdit::ClearLocal(bool)
 void sv4guiMeshEdit::TableViewLocalContextMenuRequested( const QPoint & pos )
 {
     m_TableMenuLocal->popup(QCursor::pos());
+}
+
+void sv4guiMeshEdit::TableViewWallThicknessContextMenuRequested( const QPoint & pos )
+{
+    m_TableMenuWallThickness->popup(QCursor::pos());
+}
+
+//------------------
+// SetWallThickness
+//------------------
+// The selected rows of the wall thickness table to one value, as SetLocal
+// does for the local size.
+void sv4guiMeshEdit::SetWallThickness(bool)
+{
+    if(m_TableModelWallThickness==nullptr) return;
+    QModelIndexList rows = ui->tableViewWallThickness->selectionModel()->selectedRows();
+    if(rows.size() < 1) return;
+    bool ok=false;
+    double thickness=QInputDialog::getDouble(m_Parent, "Set Wall Thickness", "Wall Thickness:", 0.0, 0, 100, 4, &ok);
+    if(!ok) return;
+    for (QModelIndexList::iterator it = rows.begin(); it != rows.end(); it++)
+    {
+        QStandardItem* item= m_TableModelWallThickness->item((*it).row(),3);
+        if(item) item->setText(QString::number(thickness));
+    }
+}
+
+void sv4guiMeshEdit::ClearWallThickness(bool)
+{
+    if(m_TableModelWallThickness==nullptr) return;
+    QModelIndexList rows = ui->tableViewWallThickness->selectionModel()->selectedRows();
+    for (QModelIndexList::iterator it = rows.begin(); it != rows.end(); it++)
+    {
+        QStandardItem* item= m_TableModelWallThickness->item((*it).row(),3);
+        if(item) item->setText("");
+    }
+}
+
+int sv4guiMeshEdit::LocalSizeColumn() const
+{
+    if(m_MeshType=="TetGen") return 3;
+    if(m_MeshType=="MeshSim") return 5;
+    return -1;
+}
+
+void sv4guiMeshEdit::ImportFaceCsvFromLocal(bool) { ImportFaceCsv(0); }
+void sv4guiMeshEdit::ImportFaceCsvFromWall(bool) { ImportFaceCsv(1); }
+
+//---------------
+// ImportFaceCsv
+//---------------
+// A CSV (comma, semicolon or tab) with a header naming the columns: the
+// face by "face" or "name", the local size by a header containing "local"
+// or "size", the wall thickness by one containing "wall" or "thick". Every
+// column present is filled; a cell left empty leaves the table's cell as
+// it is. Without a header, two columns are the face and the value for the
+// table the menu was opened from (fromTable 0: local size, 1: wall
+// thickness). Faces are matched by name, exactly first and then ignoring
+// case; names not in the model are reported.
+void sv4guiMeshEdit::ImportFaceCsv(int fromTable)
+{
+    if(m_TableModelLocal==nullptr || m_TableModelWallThickness==nullptr) return;
+    QString fileName = QFileDialog::getOpenFileName(m_Parent, "Import Face Values from CSV", QString(), "CSV files (*.csv *.txt);;All files (*)");
+    if(fileName.isEmpty()) return;
+    QFile file(fileName);
+    if(!file.open(QIODevice::ReadOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(m_Parent, "Import Face Values", "The file could not be opened:\n"+fileName);
+        return;
+    }
+    QTextStream in(&file);
+    QList<QStringList> rows;
+    while(!in.atEnd())
+    {
+        QString line=in.readLine().trimmed();
+        if(line.isEmpty() || line.startsWith("#")) continue;
+        QChar sep=',';
+        if(!line.contains(',')) sep = line.contains(';') ? ';' : '\t';
+        QStringList cells=line.split(sep);
+        for(int i=0;i<cells.size();i++) cells[i]=cells[i].trimmed().remove('"');
+        rows.push_back(cells);
+    }
+    file.close();
+    if(rows.isEmpty())
+    {
+        QMessageBox::warning(m_Parent, "Import Face Values", "The file has no rows.");
+        return;
+    }
+    // the header: a first row with at least two cells that are not numbers
+    // (a bare "name,value" row has one, the name)
+    int nameCol=0, localCol=-1, wallCol=-1;
+    bool hasHeader=false;
+    {
+        const QStringList& first=rows[0];
+        int nonNumeric=0;
+        for(int i=0;i<first.size();i++) { bool numeric=false; first[i].toDouble(&numeric); if(!numeric && !first[i].isEmpty()) nonNumeric++; }
+        hasHeader = nonNumeric>=2;
+        if(hasHeader)
+        {
+            nameCol=-1;
+            for(int i=0;i<first.size();i++)
+            {
+                QString h=first[i].toLower();
+                if(nameCol<0 && (h.contains("face") || h.contains("name"))) nameCol=i;
+                else if(localCol<0 && (h.contains("local") || h.contains("size"))) localCol=i;
+                else if(wallCol<0 && (h.contains("wall") || h.contains("thick"))) wallCol=i;
+            }
+            if(nameCol<0) nameCol=0;
+            if(localCol<0 && wallCol<0)
+            {
+                QMessageBox::warning(m_Parent, "Import Face Values", "The header names no value column: use 'local_size' and/or 'wall_thickness' (a header containing 'local'/'size' or 'wall'/'thick').");
+                return;
+            }
+            rows.removeFirst();
+        }
+        else
+        {
+            if(fromTable==0) localCol=1; else wallCol=1;
+        }
+    }
+    const int localSizeCol=LocalSizeColumn();
+    if(localCol>=0 && localSizeCol<0) localCol=-1;
+    // the faces by name
+    QMap<QString,int> localRowOfName, wallRowOfName;
+    QMap<QString,QString> lowerToName;
+    for(int i=0;i<m_TableModelLocal->rowCount();i++)
+    {
+        QStandardItem* item=m_TableModelLocal->item(i,1);
+        if(item==nullptr) continue;
+        localRowOfName[item->text()]=i;
+        lowerToName[item->text().toLower()]=item->text();
+    }
+    for(int i=0;i<m_TableModelWallThickness->rowCount();i++)
+    {
+        QStandardItem* item=m_TableModelWallThickness->item(i,1);
+        if(item==nullptr) continue;
+        wallRowOfName[item->text()]=i;
+        lowerToName[item->text().toLower()]=item->text();
+    }
+    int numLocal=0, numWall=0, numBad=0;
+    QStringList unknown;
+    for(int r=0;r<rows.size();r++)
+    {
+        const QStringList& cells=rows[r];
+        if(nameCol>=cells.size()) continue;
+        QString name=cells[nameCol];
+        if(!localRowOfName.contains(name) && !wallRowOfName.contains(name))
+        {
+            if(lowerToName.contains(name.toLower())) name=lowerToName[name.toLower()];
+            else { unknown.push_back(name); continue; }
+        }
+        if(localCol>=0 && localCol<cells.size() && !cells[localCol].isEmpty() && localRowOfName.contains(name))
+        {
+            bool numeric=false;
+            double v=cells[localCol].toDouble(&numeric);
+            if(numeric && v>=0.0)
+            {
+                QStandardItem* item=m_TableModelLocal->item(localRowOfName[name],localSizeCol);
+                if(item) { item->setText(v>0.0 ? QString::number(v) : QString("")); numLocal++; }
+            }
+            else numBad++;
+        }
+        if(wallCol>=0 && wallCol<cells.size() && !cells[wallCol].isEmpty() && wallRowOfName.contains(name))
+        {
+            bool numeric=false;
+            double v=cells[wallCol].toDouble(&numeric);
+            if(numeric && v>=0.0)
+            {
+                QStandardItem* item=m_TableModelWallThickness->item(wallRowOfName[name],3);
+                if(item) { item->setText(v>0.0 ? QString::number(v) : QString("")); numWall++; }
+            }
+            else numBad++;
+        }
+    }
+    QString report=QString("Local sizes set: %1\nWall thicknesses set: %2").arg(numLocal).arg(numWall);
+    if(numBad>0) report+=QString("\nCells that are not a number or negative, skipped: %1").arg(numBad);
+    if(!unknown.isEmpty())
+    {
+        report+=QString("\nNames not in the model, skipped: %1").arg(unknown.size());
+        for(int i=0;i<unknown.size() && i<10;i++) report+="\n  "+unknown[i];
+        if(unknown.size()>10) report+="\n  ...";
+    }
+    QMessageBox::information(m_Parent, "Import Face Values", report);
+}
+
+//---------------
+// ExportFaceCsv
+//---------------
+// Every face as "face,type,local_size,wall_thickness", one row each, so
+// that the file can be edited and imported again, or copied to another
+// mesh of the same model.
+void sv4guiMeshEdit::ExportFaceCsv(bool)
+{
+    if(m_TableModelLocal==nullptr || m_TableModelWallThickness==nullptr) return;
+    QString fileName = QFileDialog::getSaveFileName(m_Parent, "Export Face Values to CSV", "face_values.csv", "CSV files (*.csv);;All files (*)");
+    if(fileName.isEmpty()) return;
+    QFile file(fileName);
+    if(!file.open(QIODevice::WriteOnly | QIODevice::Text))
+    {
+        QMessageBox::warning(m_Parent, "Export Face Values", "The file could not be written:\n"+fileName);
+        return;
+    }
+    const int localSizeCol=LocalSizeColumn();
+    QMap<QString,QString> wallOfName;
+    for(int i=0;i<m_TableModelWallThickness->rowCount();i++)
+    {
+        QStandardItem* name=m_TableModelWallThickness->item(i,1);
+        QStandardItem* value=m_TableModelWallThickness->item(i,3);
+        if(name && value) wallOfName[name->text()]=value->text();
+    }
+    QTextStream out(&file);
+    out << "face,type,local_size,wall_thickness\n";
+    for(int i=0;i<m_TableModelLocal->rowCount();i++)
+    {
+        QStandardItem* name=m_TableModelLocal->item(i,1);
+        QStandardItem* type=m_TableModelLocal->item(i,2);
+        if(name==nullptr) continue;
+        QString local = (localSizeCol>=0 && m_TableModelLocal->item(i,localSizeCol)) ? m_TableModelLocal->item(i,localSizeCol)->text() : QString("");
+        out << name->text() << "," << (type ? type->text() : QString("")) << "," << local << "," << wallOfName.value(name->text()) << "\n";
+    }
+    file.close();
+    QMessageBox::information(m_Parent, "Export Face Values", QString("%1 faces written to\n%2").arg(m_TableModelLocal->rowCount()).arg(fileName));
 }
 
 void sv4guiMeshEdit::TableRegionListSelectionChanged( const QItemSelection & /*selected*/, const QItemSelection & /*deselected*/ )

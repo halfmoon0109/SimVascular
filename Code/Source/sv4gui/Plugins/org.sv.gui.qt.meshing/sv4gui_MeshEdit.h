@@ -94,6 +94,17 @@ public slots:
 
     void TableViewLocalContextMenuRequested( const QPoint & pos );
 
+    // The per-face tables from and to a CSV file (face name, local size,
+    // wall thickness), so that a model with many faces is not typed in by
+    // hand. Import fills whichever columns the file has; without a header
+    // a two-column file is name and value for the table it was opened from.
+    void TableViewWallThicknessContextMenuRequested( const QPoint & pos );
+    void SetWallThickness( bool checked = false );
+    void ClearWallThickness( bool checked = false );
+    void ImportFaceCsvFromLocal( bool checked = false );
+    void ImportFaceCsvFromWall( bool checked = false );
+    void ExportFaceCsv( bool checked = false );
+
     void TableRegionListSelectionChanged( const QItemSelection & selected, const QItemSelection & deselected );
 
     void TableDomainsListSelectionChanged( const QItemSelection & selected, const QItemSelection & deselected );
@@ -203,6 +214,10 @@ protected:
 //    long m_SphereObserverTag;
 
     QMenu* m_TableMenuLocal;
+    QMenu* m_TableMenuWallThickness;
+
+    void ImportFaceCsv(int fromTable);
+    int LocalSizeColumn() const;
     QStandardItemModel* m_TableModelLocal;
 
     QStandardItemModel* m_TableModelWallThickness;
