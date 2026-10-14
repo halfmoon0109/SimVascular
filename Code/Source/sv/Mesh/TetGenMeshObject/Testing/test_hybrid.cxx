@@ -582,6 +582,43 @@ static void FillHybrid(const Interface &iface, int numLayers)
 }
 
 
+// 9. The widening stops at the cap rims: seeds next to a rim grow the zone
+// everywhere but onto the triangles with a point on the rim, and an island
+// at the rim is kept.
+static void TestWideningAtRims()
+{
+  printf("test 9: the zone widening leaves the band at the cap rims\n");
+  Interface iface; AddTube(iface, 0.0, 0.0, 1.0, 0.0, 8.0, 32, 32, 0.3);
+  const ll nt = (ll)(iface.triangles.size()/3), np = (ll)(iface.points.size()/3);
+  // the rim points: on boundary edges
+  std::map<std::pair<ll, ll>, int> edgeCount;
+  for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) { ll a = iface.triangles[3*t + j], b = iface.triangles[3*t + (j + 1)%3]; edgeCount[std::make_pair(std::min(a, b), std::max(a, b))]++; }
+  std::vector<unsigned char> rimPoint(np, 0);
+  for (std::map<std::pair<ll, ll>, int>::const_iterator it = edgeCount.begin(); it != edgeCount.end(); ++it) if (it->second == 1) { rimPoint[it->first.first] = 1; rimPoint[it->first.second] = 1; }
+  // seeds: the points of the third ring from the z = 0 rim (a loop that failed there)
+  std::vector<ll> seeds;
+  for (ll p = 0; p < np; p++) if (std::abs(iface.points[3*p + 2] - 0.75) < 0.2) seeds.push_back(p);
+  std::vector<unsigned char> structured(nt, 1);
+  // the seeds' own region: the triangles at the seed points are junction already
+  for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) if (std::abs(iface.points[3*iface.triangles[3*t + j] + 2] - 0.75) < 0.2) structured[t] = 0;
+  std::vector<ll> none;
+  ll leftAtRims = 0;
+  ll widened = WidenJunctionZone(iface, seeds, none, 16, structured, &leftAtRims);
+  ll rimJunction = 0, rimTriangles = 0;
+  for (ll t = 0; t < nt; t++)
+  {
+    bool atRim = false;
+    for (int j = 0; j < 3; j++) if (rimPoint[iface.triangles[3*t + j]]) atRim = true;
+    if (!atRim) continue;
+    rimTriangles++;
+    if (!structured[t]) rimJunction++;
+  }
+  printf("  %lld triangles widened with 16 rings, %lld left at the rims; %lld of the %lld rim triangles are junction\n", widened, leftAtRims, rimJunction, rimTriangles);
+  Check(widened > 0, "the zone widened");
+  Check(leftAtRims > 0, "triangles at the rim were held back");
+  Check(rimJunction == 0, "no triangle with a point on a rim became junction");
+}
+
 int main()
 {
   {
@@ -678,6 +715,7 @@ int main()
     Interface iface; MakeJunction(0.5, 0.1, 0.3, 48, 20, iface);
     FillHybrid(iface, 1);
   }
+  TestWideningAtRims();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }

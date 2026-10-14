@@ -716,9 +716,18 @@ struct BandRelaxation
  * regions then grow as well.
  * @param structured Per interface triangle; the widened ones are cleared.
  * @return How many triangles were given to the junction zone.
+ * Triangles at a cap rim (with a point on the interface's boundary) are
+ * never taken, by the rings or as a cut-off island: the junction shell
+ * cannot close against a cap yet, and a zone that reaches a rim refuses
+ * the whole hybrid wall (the user's model, 2026-10-13: eight widenings
+ * ended on 56 rim triangles). The band of prisms left at the rim closes
+ * the wall end as before, and the zone boundary runs along its inner edge.
+ * @param numLeftAtRims Set, when given, to the triangles the rings would
+ * have taken but for the rim.
  */
 long long WidenJunctionZone(const Interface &input, const std::vector<long long> &seedPoints,
-    const std::vector<long long> &seedTriangles, int rings, std::vector<unsigned char> &structured);
+    const std::vector<long long> &seedTriangles, int rings, std::vector<unsigned char> &structured,
+    long long *numLeftAtRims = nullptr);
 
 int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,

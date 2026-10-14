@@ -4379,16 +4379,41 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
 // WidenJunctionZone
 //-------------------
 long long WidenJunctionZone(const Interface &input, const std::vector<long long> &seedPoints,
-    const std::vector<long long> &seedTriangles, int rings, std::vector<unsigned char> &structured)
+    const std::vector<long long> &seedTriangles, int rings, std::vector<unsigned char> &structured,
+    long long *numLeftAtRims)
 {
   const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
+  if (numLeftAtRims != nullptr) *numLeftAtRims = 0;
   if (structured.size() != (size_t)nt) return 0;
   std::vector<std::vector<ll> > incident((size_t)np);
   for (ll t = 0; t < nt; t++)
   {
     for (int j = 0; j < 3; j++) incident[(size_t)input.triangles[(size_t)3*t + j]].push_back(t);
   }
-  ll numWidened = 0;
+  // the band at the cap rims: triangles with a point on a boundary edge
+  std::vector<unsigned char> atRim((size_t)nt, 0);
+  {
+    std::map<std::pair<ll, ll>, int> edgeCount;
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        const ll a = input.triangles[(size_t)3*t + j], b = input.triangles[(size_t)3*t + (j + 1)%3];
+        edgeCount[std::make_pair(std::min(a, b), std::max(a, b))]++;
+      }
+    }
+    std::vector<unsigned char> rimPoint((size_t)np, 0);
+    for (std::map<std::pair<ll, ll>, int>::const_iterator it = edgeCount.begin(); it != edgeCount.end(); ++it)
+    {
+      if (it->second == 1) { rimPoint[(size_t)it->first.first] = 1; rimPoint[(size_t)it->first.second] = 1; }
+    }
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++) if (rimPoint[(size_t)input.triangles[(size_t)3*t + j]]) { atRim[(size_t)t] = 1; break; }
+    }
+  }
+  ll numWidened = 0, numAtRims = 0;
+  std::vector<unsigned char> heldBack((size_t)nt, 0);
   // the seeds: a seed triangle joins the junction zone; the junction
   // triangles at a seed point are the seeds there (the loop's own region)
   std::vector<unsigned char> seed((size_t)nt, 0);
@@ -4423,7 +4448,9 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
         for (size_t q = 0; q < around.size(); q++)
         {
           const ll u = around[q];
-          if (structured[(size_t)u]) { structured[(size_t)u] = 0; seed[(size_t)u] = 1; numWidened++; }
+          if (!structured[(size_t)u]) continue;
+          if (atRim[(size_t)u]) { if (!heldBack[(size_t)u]) { heldBack[(size_t)u] = 1; numAtRims++; } continue; }
+          structured[(size_t)u] = 0; seed[(size_t)u] = 1; numWidened++;
         }
       }
     }
@@ -4461,6 +4488,9 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
         }
       }
       if ((ll)island.size() >= minIsland) continue;
+      bool touchesRim = false;
+      for (size_t m = 0; m < island.size() && !touchesRim; m++) if (atRim[(size_t)island[m]]) touchesRim = true;
+      if (touchesRim) continue;   // the band at a rim is kept whatever its size
       for (size_t m = 0; m < island.size(); m++) { structured[(size_t)island[m]] = 0; numWidened++; }
     }
   }
@@ -4468,6 +4498,7 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
   ll numPinches = 0, numPinched = 0;
   OpenPinches(input, incident, structured, numPinches, numPinched);
   numWidened += numPinched;
+  if (numLeftAtRims != nullptr) *numLeftAtRims = numAtRims;
   return numWidened;
 }
 
@@ -5641,7 +5672,15 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
     // each loop in turn with whatever chain was nearest gave a loop whose
     // chain was missing another loop's chain, twenty edges away and
     // running the other way (the 178k model, 2026-09-29).
+    // The distance is taken both ways - the mean over the loop of the
+    // distance to the chain, and the mean over the chain of the distance to
+    // the loop - and the pair is judged by the larger: a loop of three
+    // points (one junction triangle) lies next to every chain that passes
+    // it and, judged from the loop alone, took a chain of 130 points from
+    // the loop it belonged to (the user's model, 2026-10-13); judged from
+    // the chain too, that chain is far from the three points on average.
     std::vector<std::vector<double> > meanDistance(loops.size(), std::vector<double>(chains.size(), std::numeric_limits<double>::max()));
+    std::vector<std::vector<double> > meanBack(loops.size(), std::vector<double>(chains.size(), std::numeric_limits<double>::max()));
     for (size_t a = 0; a < loops.size(); a++)
     {
       for (size_t b = 0; b < chains.size(); b++)
@@ -5655,6 +5694,14 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
           d += dm;
         }
         meanDistance[a][b] = d/(double)lifted[a].size();
+        double e = 0.0;
+        for (size_t q = 0; q < chains[b].size(); q++)
+        {
+          double dq = std::numeric_limits<double>::max();
+          for (size_t m = 0; m < lifted[a].size(); m++) dq = std::min(dq, Distance(&piece.points[(size_t)3*chains[b][q]], &out.points[(size_t)3*lifted[a][m]]));
+          e += dq;
+        }
+        meanBack[a][b] = e/(double)chains[b].size();
       }
     }
     const double reach = 2.0*erosionDistance + 4.0;   // in loop edges
@@ -5670,7 +5717,8 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
         for (size_t b = 0; b < chains.size(); b++)
         {
           if (chainUsed[b] || !closed[b]) continue;
-          if (meanDistance[a][b] < best) { best = meanDistance[a][b]; bestA = a; bestB = b; }
+          const double both = std::max(meanDistance[a][b], meanBack[a][b]);
+          if (both < best) { best = both; bestA = a; bestB = b; }
         }
       }
       if (bestA == loops.size() || best > reach*loopEdge[bestA]) break;
@@ -5688,24 +5736,33 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       {
         if (meanDistance[a][b] < nearest) { nearest = meanDistance[a][b]; nearestChain = b; }
       }
-      // why that chain is not the loop's: open (it ends at a rim or a hole),
-      // or taken by another loop nearer to it - two zone regions on two
-      // vessels against each other whose layer surfaces have merged into
-      // one piece with one chain around both (the user's model, 2026-10-06)
+      // why that chain is not the loop's: open (it ends at a rim or a hole);
+      // taken by another loop nearer to it, or lying next to another loop
+      // as well - two zone regions on two vessels against each other whose
+      // layer surfaces have merged into one piece with one chain around
+      // both (the user's model, 2026-10-06), which the caller answers by
+      // widening both regions; or far longer than the loop (a loop of a few
+      // points beside a chain that passes it), which only the loop's own
+      // widening answers
       std::string why;
       size_t taker = loops.size();
       if (nearestChain < chains.size())
       {
-        why = ", a chain of " + std::to_string(chains[nearestChain].size()) + " points";
+        why = ", a chain of " + std::to_string(chains[nearestChain].size()) + " points (" + std::to_string(meanBack[a][nearestChain]) + " from the loop on average over the chain)";
         if (!closed[nearestChain]) why += " that is open";
+        const bool bigEnough = 4*lifted[a].size() >= chains[nearestChain].size();
         for (size_t a2 = 0; a2 < loops.size(); a2++)
         {
-          if (chainOfLoop[a2] != (ll)nearestChain) continue;
-          taker = a2;
+          if (a2 == a) continue;
+          const bool owns = chainOfLoop[a2] == (ll)nearestChain;
+          const bool beside = !owns && chainOfLoop[a2] < 0 && meanDistance[a2][nearestChain] <= reach*loopEdge[a2];
+          if (!owns && !beside) continue;
           double c2[3] = {0.0, 0.0, 0.0};
           for (size_t m = 0; m < lifted[a2].size(); m++) for (int j = 0; j < 3; j++) c2[j] += out.points[(size_t)3*lifted[a2][m] + j]/(double)lifted[a2].size();
-          why += " taken by the loop of " + std::to_string(lifted[a2].size()) + " points around (" + std::to_string(c2[0]) + ", " + std::to_string(c2[1]) + ", " + std::to_string(c2[2]) + ") at " + std::to_string(meanDistance[a2][nearestChain]) + " on average";
+          why += std::string(owns ? " taken by" : " lying beside") + " the loop of " + std::to_string(lifted[a2].size()) + " points around (" + std::to_string(c2[0]) + ", " + std::to_string(c2[1]) + ", " + std::to_string(c2[2]) + ") at " + std::to_string(meanDistance[a2][nearestChain]) + " on average";
+          if (bigEnough && taker == loops.size()) taker = a2;
         }
+        if (!bigEnough) why += "; the loop is under a quarter of the chain's points, too small to own it, and its region alone is widened";
       }
       error = "a zone boundary loop of " + std::to_string(lifted[a].size()) + " points around (" + std::to_string(c[0]) + ", " + std::to_string(c[1]) + ", " + std::to_string(c[2]) + ") at layer " + std::to_string(k) + " has no boundary chain of the layer surface's piece within " + std::to_string(reach*loopEdge[a]) + " (the nearest one is " + std::to_string(nearest) + " away on average" + why + ")";
       // The loop, and the loops of the neighbouring regions within a few of

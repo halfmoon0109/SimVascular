@@ -5913,7 +5913,12 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
         reason = "the junction shell could not be built: " + error;
         return SV_ERROR;
       }
-      const long long widened = svoffset::WidenJunctionZone(hybrid.inner, seedPoints, seedTriangles, rings, hybrid.structured);
+      long long leftAtRims = 0;
+      const long long widened = svoffset::WidenJunctionZone(hybrid.inner, seedPoints, seedTriangles, rings, hybrid.structured, &leftAtRims);
+      if (leftAtRims > 0)
+      {
+        fprintf(stdout,"  junction shell attempt %d: the widening left %lld triangles at the cap rims as they were (the zone may not reach a rim)\n", attempt + 1, leftAtRims);
+      }
       hybrid.numWidenings++;
       hybrid.numTrianglesWidened += widened;
       if (built)
