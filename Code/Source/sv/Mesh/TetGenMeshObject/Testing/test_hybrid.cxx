@@ -432,6 +432,24 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
     // surface passes through a piece (a ring) and around the loops whose strips are at fault (two rings: a strip hops between the sides of a piece too narrow for it);
     // a loop without a chain widens its region; a piece with a chain no loop takes (a hole) gives the prisms owning or passing through it to the junction zone
     if (built && shell.numCrossingTriangles == 0 && shell.numFoldedEdges == 0) break;
+    // with SV_HYBRID_ZIPS set: the strips at fault, the worst first, to see where and what they are
+    if (built && getenv("SV_HYBRID_ZIPS") != nullptr)
+    {
+      std::vector<size_t> order;
+      for (size_t z = 0; z < shell.zips.size(); z++) if (shell.zips[z].crossingTriangles > 0 || shell.zips[z].foldedEdges > 0) order.push_back(z);
+      std::sort(order.begin(), order.end(), [&](size_t p, size_t q) { return shell.zips[p].crossingTriangles > shell.zips[q].crossingTriangles; });
+      ll perLevel[8] = {0, 0, 0, 0, 0, 0, 0, 0}, loopsPerLevel[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+      for (size_t i = 0; i < order.size(); i++) { const ZipReport &z = shell.zips[order[i]]; if (z.level >= 0 && z.level < 8) { perLevel[z.level] += z.crossingTriangles; loopsPerLevel[z.level]++; } }
+      printf("    strips at fault: %zu of %zu; crossings per level:", order.size(), shell.zips.size());
+      for (int l = 0; l < 8; l++) if (loopsPerLevel[l] > 0) printf(" level %d: %lld in %lld strips;", l, perLevel[l], loopsPerLevel[l]);
+      printf("\n");
+      for (size_t i = 0; i < order.size() && i < 12; i++)
+      {
+        const ZipReport &z = shell.zips[order[i]];
+        printf("    level %d loop %lld pts, chain %lld pts, strip %lld tris, %lld crossing, %lld folded, mean distance %.3f, agreement %.2f, around (%.2f, %.2f, %.2f)\n",
+            z.level, z.loopPoints, z.chainPoints, z.stripTriangles, z.crossingTriangles, z.foldedEdges, z.meanDistance, z.agreement, z.centre[0], z.centre[1], z.centre[2]);
+      }
+    }
     std::vector<ll> seedPoints, seedTriangles; int rings = 1;
     if (built)
     {
@@ -441,7 +459,8 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
     }
     else if (!shell.failedLoopPoints.empty()) { seedPoints = shell.failedLoopPoints; chainTakenInARow = shell.failedLoopChainTaken ? chainTakenInARow + 1 : 0; rings = std::min(16, 2 << chainTakenInARow); }
     else if (!shell.failedTriangles.empty()) { seedTriangles = shell.failedTriangles; rings = 1; }
-    if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= 16) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
+    const int maxAttempts = getenv("SV_HYBRID_ATTEMPTS") ? atoi(getenv("SV_HYBRID_ATTEMPTS")) : 16;
+    if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= maxAttempts) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
     ll widened = WidenJunctionZone(iface, seedPoints, seedTriangles, rings, structured);
     if (built) printf("  attempt %d: the shell has %lld crossing triangles and %lld folded edges; the junction zone widened by %lld triangles at %zu prisms and around %zu loop points\n", attempt + 1, shell.numCrossingTriangles, shell.numFoldedEdges, widened, seedTriangles.size(), seedPoints.size());
     else printf("  attempt %d: %s; the junction zone widened by %lld triangles (%d rings)\n", attempt + 1, err.c_str(), widened, rings);
