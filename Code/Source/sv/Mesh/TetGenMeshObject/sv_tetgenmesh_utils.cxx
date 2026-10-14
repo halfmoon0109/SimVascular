@@ -5853,6 +5853,14 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
     // end on the user's model, 2026-10-06), so the rings double on each such
     // failure in a row, and the regions wrap around their vessels in a few.
     int chainTakenInARow = 0;
+    // A shell built with strips passing through other triangles widens the
+    // regions of the loops at fault; two rings at a time did not reach the
+    // end on a refined interface (the user's model, 2026-10-13: two
+    // vessels 0.3 thick against each other, loops of 183 points, five
+    // widenings of two rings each left thousands of crossings, the rings
+    // being half the distance they were), so these rings double with each
+    // such attempt as well.
+    int crossingAttempts = 0;
     for (int attempt = 0; ; attempt++)
     {
       hybrid.prisms = svoffset::PrismMesh();
@@ -5890,7 +5898,8 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
           const svoffset::ZipReport &zip = hybrid.shell.zips[z];
           if (zip.crossingTriangles > 0 || zip.foldedEdges > 0) seedPoints.insert(seedPoints.end(), zip.loop.begin(), zip.loop.end());
         }
-        rings = wideningRings;
+        rings = std::min(mostRings, wideningRings << crossingAttempts);
+        crossingAttempts++;
       }
       else if (!hybrid.shell.failedLoopPoints.empty())
       {
