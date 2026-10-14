@@ -420,6 +420,8 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   OffsetField field; Report fr; field.Build(iface, fr, err);
   std::vector<unsigned char> structured; ZoneReport zr; ZoneOptions zo;
   ClassifyPrismZone(iface, field, numLayers, zo, structured, zr, err);
+  { long long nr = 0, nw = 0; double lw = 0.0; ll w = WrapCoveredRegions(iface, zr.coveredPoints, 6.0, structured, nr, nw, lw);
+    if (nr > 0) printf("  %lld junction regions with a covered point, %lld wrapped around their vessels (the longest %.3g, %lld triangles)\n", nr, nw, lw, w); }
   PrismMesh pm; JunctionShell shell;
   // a loop whose piece has no chain of its own widens its junction region by two rings, up to three times (as the glue does)
   int chainTakenInARow = 0;   // as the glue: the rings double while a loop's chain is taken by another loop (two regions on two vessels against each other)

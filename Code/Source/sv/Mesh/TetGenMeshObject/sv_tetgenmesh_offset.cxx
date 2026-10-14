@@ -3489,6 +3489,8 @@ int ClassifyPrismZone(const Interface &input, const OffsetField &field, int numL
       {
         if (pointValid[(size_t)i]) report.numPointsCovered++;
         pointValid[(size_t)i] = 0;
+        if (report.coveredPoints.size() != (size_t)np) report.coveredPoints.assign((size_t)np, 0);
+        report.coveredPoints[(size_t)i] = 1;
       }
       else if (value > options.levelTolerance*f*t)
       {
@@ -4536,6 +4538,90 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
   numWidened += numPinched;
   if (numLeftAtRims != nullptr) *numLeftAtRims = numAtRims;
   return numWidened;
+}
+
+//---------------------
+// WrapCoveredRegions
+//---------------------
+long long WrapCoveredRegions(const Interface &input, const std::vector<unsigned char> &coveredPoints,
+    double maxRadiusOverThickness, std::vector<unsigned char> &structured,
+    long long &numRegions, long long &numWrapped, double &longestWrap)
+{
+  numRegions = 0;
+  numWrapped = 0;
+  longestWrap = 0.0;
+  const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
+  if (structured.size() != (size_t)nt || coveredPoints.size() != (size_t)np) return 0;
+  std::vector<std::vector<ll> > incident((size_t)np);
+  for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) incident[(size_t)input.triangles[(size_t)3*t + j]].push_back(t);
+  // the largest normal curvature at each point, over its edges
+  std::vector<double> curvature((size_t)np, 0.0);
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      const ll a = input.triangles[(size_t)3*t + j], b = input.triangles[(size_t)3*t + (j + 1)%3];
+      const double L = Distance(&input.points[(size_t)3*a], &input.points[(size_t)3*b]);
+      if (!(L > 0.0)) continue;
+      double dn[3];
+      for (int k = 0; k < 3; k++) dn[k] = input.normals[(size_t)3*a + k] - input.normals[(size_t)3*b + k];
+      const double c = std::sqrt(dn[0]*dn[0] + dn[1]*dn[1] + dn[2]*dn[2])/L;
+      curvature[(size_t)a] = std::max(curvature[(size_t)a], c);
+      curvature[(size_t)b] = std::max(curvature[(size_t)b], c);
+    }
+  }
+  // the regions of the junction zone
+  std::vector<ll> region((size_t)nt, -1);
+  std::vector<ll> stack;
+  long long total = 0;
+  for (ll seed = 0; seed < nt; seed++)
+  {
+    if (region[(size_t)seed] >= 0 || structured[(size_t)seed]) continue;
+    std::vector<ll> members;
+    region[(size_t)seed] = seed;
+    stack.push_back(seed);
+    while (!stack.empty())
+    {
+      const ll t = stack.back();
+      stack.pop_back();
+      members.push_back(t);
+      for (int j = 0; j < 3; j++)
+      {
+        const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+        for (size_t q = 0; q < around.size(); q++)
+        {
+          const ll u = around[q];
+          if (region[(size_t)u] >= 0 || structured[(size_t)u]) continue;
+          region[(size_t)u] = seed;
+          stack.push_back(u);
+        }
+      }
+    }
+    // the region's points: any covered? the median curvature and thickness
+    std::vector<ll> points;
+    for (size_t m = 0; m < members.size(); m++) for (int j = 0; j < 3; j++) points.push_back(input.triangles[(size_t)3*members[m] + j]);
+    std::sort(points.begin(), points.end());
+    points.erase(std::unique(points.begin(), points.end()), points.end());
+    bool covered = false;
+    for (size_t m = 0; m < points.size() && !covered; m++) if (coveredPoints[(size_t)points[m]]) covered = true;
+    if (!covered) continue;
+    numRegions++;
+    std::vector<double> c, th;
+    for (size_t m = 0; m < points.size(); m++) { c.push_back(curvature[(size_t)points[m]]); th.push_back(input.thickness[(size_t)points[m]]); }
+    std::sort(c.begin(), c.end());
+    std::sort(th.begin(), th.end());
+    const double medianCurvature = c[c.size()/2], medianThickness = th[th.size()/2];
+    if (!(medianCurvature > 1.0e-9)) continue;
+    const double radius = 1.0/medianCurvature;
+    if (radius > maxRadiusOverThickness*medianThickness) continue;
+    const double distance = 1.1*3.14159265358979323846*radius;
+    std::vector<ll> none;
+    const long long widened = WidenJunctionZone(input, none, members, 0, structured, nullptr, distance);
+    total += widened;
+    numWrapped++;
+    longestWrap = std::max(longestWrap, distance);
+  }
+  return total;
 }
 
 //----------------

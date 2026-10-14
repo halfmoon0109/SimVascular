@@ -5780,6 +5780,18 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       reason = "the prism zone could not be classified: " + error;
       return SV_ERROR;
     }
+    {
+      // the regions on vessels against another vessel, wrapped around their
+      // vessels before the shell (see WrapCoveredRegions)
+      long long numRegions = 0, numWrapped = 0;
+      double longestWrap = 0.0;
+      const long long wrapped = svoffset::WrapCoveredRegions(hybrid.inner, hybrid.zone.coveredPoints, 6.0, hybrid.structured, numRegions, numWrapped, longestWrap);
+      if (numRegions > 0)
+      {
+        fprintf(stdout,"  junction regions with a layer point inside another part of the wall: %lld; %lld of them on vessels under six walls in radius wrapped around their vessels (the longest %.3g along the surface, %lld triangles more in the junction zone)\n",
+            numRegions, numWrapped, longestWrap, wrapped);
+      }
+    }
     hybrid.secondsClassify = seconds();
     if (hybrid.zone.numStructured == 0)
     {

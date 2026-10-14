@@ -452,6 +452,7 @@ struct ZoneReport
   long long numTriangles = 0;
   long long numStructured = 0;             // prism layers
   long long numPointsCovered = 0;          // a layer point of theirs inside another part of the wall
+  std::vector<unsigned char> coveredPoints;   // per interface point: 1 when a layer point of it lies inside another part of the wall (for WrapCoveredRegions)
   long long numPointsOffLevel = 0;         // a layer point off its level the other way (should not happen)
   long long numTrianglesInverted = 0;      // a layer triangle facing away from the base, or too small
   long long numTrianglesCrossing = 0;      // tops of otherwise valid prisms passing through each other
@@ -703,6 +704,34 @@ struct BandRelaxation
   bool removeDegree3 = true;      // a free point on three triangles, one of them under 10 degrees, is taken out
   bool freeThinCaps = true;       // a triangle under 5 degrees keeps neither its normal nor its creases when its point moves
 };
+
+/**
+ * @brief The junction regions on a vessel against another vessel, wrapped
+ * around their vessel before any shell is built.
+ *
+ * Where two vessels run side by side closer than their walls together, the
+ * layer points of each face the other and lie inside the other's wall
+ * (ZoneReport::coveredPoints), and the layer surfaces of the two merge into
+ * one sheet over the contact. The pieces of that sheet are bounded by the
+ * upper and the lower edges of both vessels' loops, which no zipper can
+ * pair with one loop, and widening by rings only pushed the pair along
+ * the vessels (the user's model, 2026-10-13, two vessels 0.3 thick along
+ * twenty units). A region of the junction zone with a covered point on a
+ * vessel whose radius is under maxRadiusOverThickness times the wall there
+ * is therefore grown around its vessel (WidenJunctionZone by 1.1 pi times
+ * the radius, the radius as 1 over the median of the largest normal
+ * curvature at the region's points), so that the merged sheet becomes a
+ * tube with one chain per loop at its ends; a thick vessel (the parent at
+ * a branch root, whose crotch covers the branch's layer points) is left to
+ * the rings, as wrapping it would take its prisms away for nothing.
+ * @param numRegions Set to the regions with a covered point.
+ * @param numWrapped Set to how many of them were wrapped.
+ * @param longestWrap Set to the longest distance wrapped.
+ * @return The triangles given to the junction zone.
+ */
+long long WrapCoveredRegions(const Interface &input, const std::vector<unsigned char> &coveredPoints,
+    double maxRadiusOverThickness, std::vector<unsigned char> &structured,
+    long long &numRegions, long long &numWrapped, double &longestWrap);
 
 /**
  * @brief Widens the junction zone around the given interface points: the
