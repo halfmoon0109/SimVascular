@@ -5888,31 +5888,55 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       // of edges 0.09). A loop without a chain widens its region; a piece
       // with a chain no loop takes gives the prisms owning or passing
       // through it to the junction zone.
-      std::vector<long long> seedPoints, seedTriangles;
+      // Two vessels against each other merge their layer surfaces into one
+      // piece; its chains run along the upper and the lower edges of both
+      // vessels' loops, so a loop's chain is taken by or lies beside another
+      // loop's, or the loop pairs with a chain that is far from a third of
+      // its points. Rings widen such a region along the vessels and never
+      // end (the user's model, 2026-10-13); the region is wrapped around its
+      // vessel instead, pi times the vessel's radius at the loop, so that the
+      // merged piece becomes a tube with one chain per loop at each end.
+      std::vector<long long> seedPoints, seedTriangles, wrapPoints;
       int rings = 1;
+      double wrapDistance = 0.0;
       if (built)
       {
         seedTriangles = hybrid.shell.crossingStructuredTriangles;
         for (size_t z = 0; z < hybrid.shell.zips.size(); z++)
         {
           const svoffset::ZipReport &zip = hybrid.shell.zips[z];
-          if (zip.crossingTriangles > 0 || zip.foldedEdges > 0) seedPoints.insert(seedPoints.end(), zip.loop.begin(), zip.loop.end());
+          if (zip.crossingTriangles == 0 && zip.foldedEdges == 0) continue;
+          if (zip.farFraction > 0.3 && zip.loopRadius > 0.0)
+          {
+            wrapPoints.insert(wrapPoints.end(), zip.loop.begin(), zip.loop.end());
+            wrapDistance = std::max(wrapDistance, 1.1*3.14159265358979323846*zip.loopRadius);
+          }
+          else seedPoints.insert(seedPoints.end(), zip.loop.begin(), zip.loop.end());
         }
         rings = std::min(mostRings, wideningRings << crossingAttempts);
         crossingAttempts++;
       }
       else if (!hybrid.shell.failedLoopPoints.empty())
       {
-        seedPoints = hybrid.shell.failedLoopPoints;
         chainTakenInARow = hybrid.shell.failedLoopChainTaken ? chainTakenInARow + 1 : 0;
-        rings = std::min(mostRings, wideningRings << chainTakenInARow);
+        if (hybrid.shell.failedLoopChainTaken && hybrid.shell.failedLoopRadius > 0.0)
+        {
+          wrapPoints = hybrid.shell.failedLoopPoints;
+          wrapDistance = 1.1*3.14159265358979323846*hybrid.shell.failedLoopRadius;
+          rings = wideningRings;
+        }
+        else
+        {
+          seedPoints = hybrid.shell.failedLoopPoints;
+          rings = std::min(mostRings, wideningRings << chainTakenInARow);
+        }
       }
       else if (!hybrid.shell.failedTriangles.empty())
       {
         seedTriangles = hybrid.shell.failedTriangles;
         rings = 1;
       }
-      if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= maxWidenings)
+      if ((seedPoints.empty() && seedTriangles.empty() && wrapPoints.empty()) || attempt >= maxWidenings)
       {
         if (built)
         {
@@ -5922,8 +5946,21 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
         reason = "the junction shell could not be built: " + error;
         return SV_ERROR;
       }
-      long long leftAtRims = 0;
-      const long long widened = svoffset::WidenJunctionZone(hybrid.inner, seedPoints, seedTriangles, rings, hybrid.structured, &leftAtRims);
+      long long leftAtRims = 0, widened = 0;
+      if (!seedPoints.empty() || !seedTriangles.empty())
+      {
+        widened += svoffset::WidenJunctionZone(hybrid.inner, seedPoints, seedTriangles, rings, hybrid.structured, &leftAtRims);
+      }
+      if (!wrapPoints.empty())
+      {
+        long long leftAtRimsWrap = 0;
+        std::vector<long long> none;
+        const long long wrapped = svoffset::WidenJunctionZone(hybrid.inner, wrapPoints, none, 0, hybrid.structured, &leftAtRimsWrap, wrapDistance);
+        widened += wrapped;
+        leftAtRims += leftAtRimsWrap;
+        fprintf(stdout,"  junction shell attempt %d: the regions of %zu loop points on vessels against another vessel are wrapped around their vessels, %.3g along the surface (pi times the radius at the loop; %lld more triangles)\n",
+            attempt + 1, wrapPoints.size(), wrapDistance, wrapped);
+      }
       if (leftAtRims > 0)
       {
         fprintf(stdout,"  junction shell attempt %d: the widening left %lld triangles at the cap rims as they were (the zone may not reach a rim)\n", attempt + 1, leftAtRims);

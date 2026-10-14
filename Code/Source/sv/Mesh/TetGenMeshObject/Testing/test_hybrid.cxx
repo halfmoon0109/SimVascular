@@ -468,19 +468,33 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
       }
       return;
     }
-    std::vector<ll> seedPoints, seedTriangles; int rings = 1;
+    std::vector<ll> seedPoints, seedTriangles, wrapPoints; int rings = 1; double wrapDistance = 0.0;
     if (built)
     {
       seedTriangles = shell.crossingStructuredTriangles;
-      for (size_t z = 0; z < shell.zips.size(); z++) if (shell.zips[z].crossingTriangles > 0 || shell.zips[z].foldedEdges > 0) seedPoints.insert(seedPoints.end(), shell.zips[z].loop.begin(), shell.zips[z].loop.end());
+      for (size_t z = 0; z < shell.zips.size(); z++)
+      {
+        const ZipReport &zip = shell.zips[z];
+        if (zip.crossingTriangles == 0 && zip.foldedEdges == 0) continue;
+        // as the glue: a loop far from a third of its chain is on a vessel against another; its region is wrapped around the vessel
+        if (zip.farFraction > 0.3 && zip.loopRadius > 0.0) { wrapPoints.insert(wrapPoints.end(), zip.loop.begin(), zip.loop.end()); wrapDistance = std::max(wrapDistance, 1.1*3.14159265358979323846*zip.loopRadius); }
+        else seedPoints.insert(seedPoints.end(), zip.loop.begin(), zip.loop.end());
+      }
       rings = std::min(16, 2 << crossingAttempts);
       crossingAttempts++;
     }
-    else if (!shell.failedLoopPoints.empty()) { seedPoints = shell.failedLoopPoints; chainTakenInARow = shell.failedLoopChainTaken ? chainTakenInARow + 1 : 0; rings = std::min(16, 2 << chainTakenInARow); }
+    else if (!shell.failedLoopPoints.empty())
+    {
+      chainTakenInARow = shell.failedLoopChainTaken ? chainTakenInARow + 1 : 0;
+      if (shell.failedLoopChainTaken && shell.failedLoopRadius > 0.0) { wrapPoints = shell.failedLoopPoints; wrapDistance = 1.1*3.14159265358979323846*shell.failedLoopRadius; rings = 2; }
+      else { seedPoints = shell.failedLoopPoints; rings = std::min(16, 2 << chainTakenInARow); }
+    }
     else if (!shell.failedTriangles.empty()) { seedTriangles = shell.failedTriangles; rings = 1; }
     const int maxAttempts = getenv("SV_HYBRID_ATTEMPTS") ? atoi(getenv("SV_HYBRID_ATTEMPTS")) : 16;
-    if ((seedPoints.empty() && seedTriangles.empty()) || attempt >= maxAttempts) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
-    ll widened = WidenJunctionZone(iface, seedPoints, seedTriangles, rings, structured);
+    if ((seedPoints.empty() && seedTriangles.empty() && wrapPoints.empty()) || attempt >= maxAttempts) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
+    ll widened = 0;
+    if (!seedPoints.empty() || !seedTriangles.empty()) widened += WidenJunctionZone(iface, seedPoints, seedTriangles, rings, structured);
+    if (!wrapPoints.empty()) { std::vector<ll> none; ll wrapped = WidenJunctionZone(iface, wrapPoints, none, 0, structured, nullptr, wrapDistance); widened += wrapped; printf("  attempt %d: %zu loop points wrapped around their vessels, %.3g along the surface (%lld triangles)\n", attempt + 1, wrapPoints.size(), wrapDistance, wrapped); }
     if (built) printf("  attempt %d: the shell has %lld crossing triangles and %lld folded edges; the junction zone widened by %lld triangles at %zu prisms and around %zu loop points (%d rings)\n", attempt + 1, shell.numCrossingTriangles, shell.numFoldedEdges, widened, seedTriangles.size(), seedPoints.size(), rings);
     else printf("  attempt %d: %s; the junction zone widened by %lld triangles (%d rings)\n", attempt + 1, err.c_str(), widened, rings);
   }

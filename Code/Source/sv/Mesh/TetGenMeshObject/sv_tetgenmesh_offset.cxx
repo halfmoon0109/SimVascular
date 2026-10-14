@@ -4380,7 +4380,7 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
 //-------------------
 long long WidenJunctionZone(const Interface &input, const std::vector<long long> &seedPoints,
     const std::vector<long long> &seedTriangles, int rings, std::vector<unsigned char> &structured,
-    long long *numLeftAtRims)
+    long long *numLeftAtRims, double distance)
 {
   const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
   if (numLeftAtRims != nullptr) *numLeftAtRims = 0;
@@ -4433,6 +4433,42 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
       const ll t = incident[(size_t)p][q];
       if (!structured[(size_t)t]) seed[(size_t)t] = 1;
     }
+  }
+  // by distance along the surface from the seeds, when asked
+  if (distance > 0.0)
+  {
+    std::vector<double> centre((size_t)3*nt);
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int k = 0; k < 3; k++) centre[(size_t)3*t + k] = 0.0;
+      for (int j = 0; j < 3; j++) for (int k = 0; k < 3; k++) centre[(size_t)3*t + k] += input.points[(size_t)3*input.triangles[(size_t)3*t + j] + k]/3.0;
+    }
+    std::vector<double> dist((size_t)nt, std::numeric_limits<double>::max());
+    std::priority_queue<std::pair<double, ll>, std::vector<std::pair<double, ll> >, std::greater<std::pair<double, ll> > > queue;
+    for (ll t = 0; t < nt; t++) if (seed[(size_t)t]) { dist[(size_t)t] = 0.0; queue.push(std::make_pair(0.0, t)); }
+    while (!queue.empty())
+    {
+      const std::pair<double, ll> top = queue.top();
+      queue.pop();
+      const ll t = top.second;
+      if (top.first > dist[(size_t)t]) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+        for (size_t q = 0; q < around.size(); q++)
+        {
+          const ll u = around[q];
+          const double d = top.first + Distance(&centre[(size_t)3*t], &centre[(size_t)3*u]);
+          if (d > distance || d >= dist[(size_t)u]) continue;
+          dist[(size_t)u] = d;
+          queue.push(std::make_pair(d, u));
+          if (!structured[(size_t)u]) continue;
+          if (atRim[(size_t)u]) { if (!heldBack[(size_t)u]) { heldBack[(size_t)u] = 1; numAtRims++; } continue; }
+          structured[(size_t)u] = 0; numWidened++;
+        }
+      }
+    }
+    rings = 0;
   }
   // grown by the rings from the seeds alone (growing their whole regions
   // widened 5,551 triangles at 158 seeds on the 178k model)
@@ -5541,9 +5577,9 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
   }
   // the rims' zones, for the pieces' collar-owned triangles
   std::vector<unsigned char> rimStructured(field.Rims().size(), 1);
+  std::vector<std::vector<ll> > incident((size_t)np);
+  for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) incident[(size_t)input.triangles[(size_t)3*t + j]].push_back(t);
   {
-    std::vector<std::vector<ll> > incident((size_t)np);
-    for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) incident[(size_t)input.triangles[(size_t)3*t + j]].push_back(t);
     const std::vector<std::vector<ll> > &rims = field.Rims();
     for (size_t r = 0; r < rims.size(); r++)
       for (size_t m = 0; m < rims[r].size(); m++)
@@ -5653,6 +5689,38 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
     // its chain has to be found within.
     std::vector<std::vector<ll> > lifted(loops.size());
     std::vector<double> loopEdge(loops.size(), 0.0);
+    // the vessel's radius at each loop: one over the median over the loop's
+    // points of the largest normal curvature of the interface edges at the
+    // point (|n_a - n_b| / |a - b| over the triangles on it); the
+    // circumferential direction gives the largest
+    std::vector<double> loopRadius(loops.size(), 0.0);
+    for (size_t a = 0; a < loops.size(); a++)
+    {
+      std::vector<double> curvatures;
+      for (size_t m = 0; m < loops[a].size(); m++)
+      {
+        const ll p = loops[a][m];
+        double largest = 0.0;
+        for (size_t q = 0; q < incident[(size_t)p].size(); q++)
+        {
+          const ll *tri = &input.triangles[(size_t)3*incident[(size_t)p][q]];
+          for (int j = 0; j < 3; j++)
+          {
+            const ll b = tri[j];
+            if (b == p) continue;
+            const double L = Distance(&input.points[(size_t)3*p], &input.points[(size_t)3*b]);
+            if (!(L > 0.0)) continue;
+            double dn[3];
+            for (int k = 0; k < 3; k++) dn[k] = input.normals[(size_t)3*p + k] - input.normals[(size_t)3*b + k];
+            largest = std::max(largest, std::sqrt(dn[0]*dn[0] + dn[1]*dn[1] + dn[2]*dn[2])/L);
+          }
+        }
+        curvatures.push_back(largest);
+      }
+      std::sort(curvatures.begin(), curvatures.end());
+      const double median = curvatures.empty() ? 0.0 : curvatures[curvatures.size()/2];
+      loopRadius[a] = (median > 1.0e-9) ? 1.0/median : 0.0;
+    }
     for (size_t a = 0; a < loops.size(); a++)
     {
       for (size_t m = 0; m < loops[a].size(); m++)
@@ -5787,6 +5855,8 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
           if (close) out.failedLoopPoints.insert(out.failedLoopPoints.end(), loops[b2].begin(), loops[b2].end());
         }
       }
+      out.failedLoopRadius = loopRadius[a];
+      if (taker < loops.size()) out.failedLoopRadius = std::max(out.failedLoopRadius, loopRadius[taker]);
       // The loop that took the chain, whether or not it is that close: the
       // chain of 222 to 308 points ran around both loops of 101 to 136 (the
       // user's model, 2026-10-06, two vessels 0.15 thick against each other
@@ -5867,7 +5937,19 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       zip.loopPoints = (ll)A.size();
       zip.chainPoints = (ll)B.size();
       zip.meanDistance = meanDistance[a][(size_t)chainOfLoop[a]];
+      zip.loopRadius = loopRadius[a];
       zip.loop = loops[a];
+      {
+        ll far = 0;
+        const std::vector<ll> &chain = chains[(size_t)chainOfLoop[a]];
+        for (size_t m = 0; m < A.size(); m++)
+        {
+          double dm = std::numeric_limits<double>::max();
+          for (size_t q = 0; q < chain.size(); q++) dm = std::min(dm, Distance(&out.points[(size_t)3*A[m]], &piece.points[(size_t)3*chain[q]]));
+          if (dm > 2.0*loopEdge[a]) far++;
+        }
+        zip.farFraction = A.empty() ? 0.0 : (double)far/(double)A.size();
+      }
       for (size_t m = 0; m < A.size(); m++) for (int j = 0; j < 3; j++) zip.centre[j] += out.points[(size_t)3*A[m] + j]/(double)A.size();
       if (ZipChains(out.points, A, B, true, strip, error, &zip.agreement) != 0)
       {

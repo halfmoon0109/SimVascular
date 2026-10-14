@@ -631,6 +631,8 @@ struct ZipReport
   long long loopPoints = 0;
   long long chainPoints = 0;
   double meanDistance = 0.0;            // from the loop's points to the chain
+  double farFraction = 0.0;             // of the loop's points, those farther than two loop edges from the chain: above a third, the chain is not this loop's but runs along part of it (two vessels against each other: the merged piece's chains run along the upper and the lower edges of both vessels' loops)
+  double loopRadius = 0.0;              // the vessel's radius at the loop, as 1 over the median over the loop's points of the largest normal curvature of their edges; for the caller to wrap the region around the vessel (pi times it)
   double agreement = 0.0;               // of the two chains' directions (ZipChains), positive when they run the same way
   long long stripTriangles = 0;
   long long crossingTriangles = 0;      // of the strip's, passing through another shell triangle
@@ -671,6 +673,7 @@ struct JunctionShell
   long long numJunctionTriangles = 0;    // interface triangles of the zone
   long long numJunctionOnRims = 0;       // of them, on a cap rim: not handled yet, the build refuses them
   std::vector<long long> failedLoopPoints;   // when the build fails for a zone boundary loop without a piece chain: the loop's interface points, for WidenJunctionZone
+  double failedLoopRadius = 0.0;             // the vessel's radius at the failed loop (and the loop that took its chain, the larger), as ZipReport::loopRadius
   bool failedLoopChainTaken = false;         // and the chain nearest that loop is another loop's: two zone regions on two vessels against each other, whose layer surfaces merged into one piece with one chain around both (the loops' points are in failedLoopPoints together; the caller widens by more rings each time, so that the regions wrap around their vessels and the piece ends in one chain per loop)
   std::vector<long long> crossingStructuredTriangles;   // structured interface triangles whose layer surface passed through a piece at some level (the piece's triangles there were dropped, which can leave a hole in it)
   std::vector<long long> holeOwnerTriangles;   // structured interface triangles owning a triangle of a hole in a piece (a dropped patch enclosed by kept ones) at some level
@@ -724,10 +727,17 @@ struct BandRelaxation
  * the wall end as before, and the zone boundary runs along its inner edge.
  * @param numLeftAtRims Set, when given, to the triangles the rings would
  * have taken but for the rim.
+ * @param distance When positive, the zone grows from the seeds by this
+ * distance along the surface (between triangle centres) instead of by
+ * rings: a region on a vessel against another vessel is wrapped around its
+ * vessel in one step (pi times the radius) so that the merged piece over
+ * the two becomes a tube with one chain per loop at each end, where rings
+ * two at a time chased the pair along the vessels (the user's model,
+ * 2026-10-13).
  */
 long long WidenJunctionZone(const Interface &input, const std::vector<long long> &seedPoints,
     const std::vector<long long> &seedTriangles, int rings, std::vector<unsigned char> &structured,
-    long long *numLeftAtRims = nullptr);
+    long long *numLeftAtRims = nullptr, double distance = 0.0);
 
 int BuildJunctionShell(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &structured,
     const PrismMesh &prisms, const std::vector<Surface> &levels, const std::vector<double> &fractions,
