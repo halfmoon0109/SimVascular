@@ -1604,6 +1604,33 @@ long long OffsetField::Owner(const double x[3], double thicknessScale) const
   return ownerT;
 }
 
+double OffsetField::SurfaceDistance(const double x[3], long long *nearest) const
+{
+  ll bestT, ownerT;
+  double best, bestTerm;
+  Search(x, 1.0, bestT, best, ownerT, bestTerm);
+  if (nearest != nullptr) *nearest = bestT;
+  return bestT >= 0 ? best : -1.0;
+}
+
+double OffsetField::LumenChord(const double p[3], const double n[3], double start, double limit) const
+{
+  double q[3];
+  for (int k = 0; k < 3; k++) q[k] = p[k] - start*n[k];
+  double along = start;
+  const double tolerance = 0.01*start;
+  for (int step = 0; step < 200 && along <= limit; step++)
+  {
+    const double d = SurfaceDistance(q);
+    if (d < 0.0) return -1.0;
+    if (d < tolerance) return along;
+    // the ray may still be nearest its own wall: a step of the distance never passes a wall
+    for (int k = 0; k < 3; k++) q[k] -= d*n[k];
+    along += d;
+  }
+  return -1.0;
+}
+
 double OffsetField::Reach() const
 {
   return data_->reach;
@@ -3489,7 +3516,16 @@ int ClassifyPrismZone(const Interface &input, const OffsetField &field, int numL
       {
         if (pointValid[(size_t)i]) report.numPointsCovered++;
         pointValid[(size_t)i] = 0;
-        if (report.coveredPoints.size() != (size_t)np) report.coveredPoints.assign((size_t)np, 0);
+        if (report.coveredPoints.size() != (size_t)np)
+        {
+          report.coveredPoints.assign((size_t)np, 0);
+          report.coveredBy.assign((size_t)np, -1);
+        }
+        if (!report.coveredPoints[(size_t)i])
+        {
+          const ll owner = field.Owner(q, f);
+          report.coveredBy[(size_t)i] = owner >= 0 && owner < nt ? owner : -1;   // a collar triangle (past the interface's) is no part of the wall
+        }
         report.coveredPoints[(size_t)i] = 1;
       }
       else if (value > options.levelTolerance*f*t)
@@ -4416,6 +4452,7 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
   }
   ll numWidened = 0, numAtRims = 0;
   std::vector<unsigned char> heldBack((size_t)nt, 0);
+  const std::vector<unsigned char> atEntry = structured;
   // the seeds: a seed triangle joins the junction zone; the junction
   // triangles at a seed point are the seeds there (the loop's own region)
   std::vector<unsigned char> seed((size_t)nt, 0);
@@ -4493,6 +4530,57 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
       }
     }
   }
+  // the boundary of the widened zone smoothed: a structured triangle with
+  // two or three junction edge-neighbours joins the zone (a notch), and a
+  // triangle the widening took with two or three structured edge-neighbours
+  // leaves it again (a tooth; never a seed's or the classification's, whose
+  // prisms are not valid). The front of the widening is a staircase on a
+  // bisected surface (a median turn of 73-89 degrees per loop point on the
+  // refined model of 2026-10-13), and the zipper strips from such a loop to
+  // the smoother chain of the level surface passed through the zone walls
+  // (2,469 of 3,343 crossing pairs). Notches, teeth, notches: three passes,
+  // since teeth bared by a pass could otherwise be peeled back without end.
+  {
+    auto edgeNeighbours = [&](ll t, ll out[3]) -> int
+    {
+      int n = 0;
+      for (int j = 0; j < 3; j++)
+      {
+        const ll a = input.triangles[(size_t)3*t + j], b = input.triangles[(size_t)3*t + (j + 1)%3];
+        const std::vector<ll> &around = incident[(size_t)a];
+        for (size_t q = 0; q < around.size() && n < 3; q++)
+        {
+          const ll u = around[q];
+          if (u == t) continue;
+          const ll *uu = &input.triangles[(size_t)3*u];
+          if (uu[0] == b || uu[1] == b || uu[2] == b) { out[n++] = u; break; }
+        }
+      }
+      return n;
+    };
+    for (int pass = 0; pass < 3; pass++)
+    {
+      const bool notches = pass != 1;
+      for (ll t = 0; t < nt; t++)
+      {
+        if (notches)
+        {
+          if (!structured[(size_t)t] || atRim[(size_t)t]) continue;
+        }
+        else
+        {
+          if (structured[(size_t)t] || !atEntry[(size_t)t] || seed[(size_t)t]) continue;
+        }
+        ll around[3];
+        const int n = edgeNeighbours(t, around);
+        int other = 0;
+        for (int q = 0; q < n; q++) if (structured[(size_t)around[q]] != structured[(size_t)t]) other++;
+        if (other < 2) continue;
+        if (notches) { structured[(size_t)t] = 0; numWidened++; }
+        else { structured[(size_t)t] = 1; numWidened--; }
+      }
+    }
+  }
   // a structured island the widening cut off (fewer than the
   // classification's smallest island, 50 triangles) joins the junction
   // zone: its lifted boundary would be a zone loop with a piece chain to
@@ -4540,16 +4628,51 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
   return numWidened;
 }
 
+//--------------
+// WrapDistance
+//--------------
+double WrapDistance(double radius)
+{
+  return 1.25*3.14159265358979323846*radius;
+}
+
+//-------------
+// ChordRadius
+//-------------
+double ChordRadius(const Interface &input, const OffsetField &field, const std::vector<long long> &points)
+{
+  const ll np = (ll)(input.points.size()/3);
+  std::vector<double> chords;
+  const size_t stride = std::max((size_t)1, points.size()/400);
+  for (size_t m = 0; m < points.size(); m += stride)
+  {
+    const ll i = points[m];
+    if (i < 0 || i >= np) continue;
+    const double *n = &input.normals[(size_t)3*i];
+    const double ln = Norm(n);
+    if (!(ln > 0.0)) continue;
+    double u[3] = {n[0]/ln, n[1]/ln, n[2]/ln};
+    const double t = std::max(input.thickness[(size_t)i], 1.0e-6);
+    const double chord = field.LumenChord(&input.points[(size_t)3*i], u, 0.5*t, 400.0*t);
+    if (chord > 0.0) chords.push_back(chord);
+  }
+  if (chords.size() < 3) return 0.0;
+  std::sort(chords.begin(), chords.end());
+  return 0.5*chords[chords.size()/2];
+}
+
 //---------------------
 // WrapCoveredRegions
 //---------------------
-long long WrapCoveredRegions(const Interface &input, const std::vector<unsigned char> &coveredPoints,
-    double maxRadiusOverThickness, std::vector<unsigned char> &structured,
-    long long &numRegions, long long &numWrapped, double &longestWrap)
+long long WrapCoveredRegions(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &coveredPoints,
+    const std::vector<long long> &coveredBy, double maxRadiusOverThickness, std::vector<unsigned char> &structured,
+    long long &numRegions, long long &numWrapped, double &longestWrap,
+    std::vector<CoveredRegion> *regions, double wrapFactor)
 {
   numRegions = 0;
   numWrapped = 0;
   longestWrap = 0.0;
+  if (regions != nullptr) regions->clear();
   const ll np = (ll)(input.points.size()/3), nt = (ll)(input.triangles.size()/3);
   if (structured.size() != (size_t)nt || coveredPoints.size() != (size_t)np) return 0;
   std::vector<std::vector<ll> > incident((size_t)np);
@@ -4570,21 +4693,23 @@ long long WrapCoveredRegions(const Interface &input, const std::vector<unsigned 
       curvature[(size_t)b] = std::max(curvature[(size_t)b], c);
     }
   }
-  // the regions of the junction zone
+  // the regions of the junction zone, all found before any wrap (a wrap
+  // joins regions)
   std::vector<ll> region((size_t)nt, -1);
+  std::vector<std::vector<ll> > members;
   std::vector<ll> stack;
-  long long total = 0;
   for (ll seed = 0; seed < nt; seed++)
   {
     if (region[(size_t)seed] >= 0 || structured[(size_t)seed]) continue;
-    std::vector<ll> members;
-    region[(size_t)seed] = seed;
+    const ll r = (ll)members.size();
+    members.push_back(std::vector<ll>());
+    region[(size_t)seed] = r;
     stack.push_back(seed);
     while (!stack.empty())
     {
       const ll t = stack.back();
       stack.pop_back();
-      members.push_back(t);
+      members[(size_t)r].push_back(t);
       for (int j = 0; j < 3; j++)
       {
         const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
@@ -4592,34 +4717,204 @@ long long WrapCoveredRegions(const Interface &input, const std::vector<unsigned 
         {
           const ll u = around[q];
           if (region[(size_t)u] >= 0 || structured[(size_t)u]) continue;
-          region[(size_t)u] = seed;
+          region[(size_t)u] = r;
           stack.push_back(u);
         }
       }
     }
-    // the region's points: any covered? the median curvature and thickness
+  }
+  // the region a point's covering triangle belongs to: its own, or the one
+  // beside it when the triangle itself extrudes cleanly
+  auto regionOfTriangle = [&](ll t) -> ll
+  {
+    if (t < 0 || t >= nt) return -1;
+    if (region[(size_t)t] >= 0) return region[(size_t)t];
+    for (int j = 0; j < 3; j++)
+    {
+      const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+      for (size_t q = 0; q < around.size(); q++) if (region[(size_t)around[q]] >= 0) return region[(size_t)around[q]];
+    }
+    return -1;
+  };
+  // each region with a covered point: its measures and the regions it is against
+  const ll nr = (ll)members.size();
+  std::vector<CoveredRegion> reports((size_t)nr);
+  std::vector<unsigned char> covered((size_t)nr, 0);
+  std::vector<std::set<ll> > contacts((size_t)nr);
+  for (ll r = 0; r < nr; r++)
+  {
     std::vector<ll> points;
-    for (size_t m = 0; m < members.size(); m++) for (int j = 0; j < 3; j++) points.push_back(input.triangles[(size_t)3*members[m] + j]);
+    for (size_t m = 0; m < members[(size_t)r].size(); m++) for (int j = 0; j < 3; j++) points.push_back(input.triangles[(size_t)3*members[(size_t)r][m] + j]);
     std::sort(points.begin(), points.end());
     points.erase(std::unique(points.begin(), points.end()), points.end());
-    bool covered = false;
-    for (size_t m = 0; m < points.size() && !covered; m++) if (coveredPoints[(size_t)points[m]]) covered = true;
-    if (!covered) continue;
+    long long numCovered = 0, numFacing = 0;
+    std::vector<double> dots;
+    for (size_t m = 0; m < points.size(); m++)
+    {
+      const ll i = points[m];
+      if (!coveredPoints[(size_t)i]) continue;
+      covered[(size_t)r] = 1;
+      numCovered++;
+      if (coveredBy.size() != (size_t)np) continue;
+      const ll o = coveredBy[(size_t)i];
+      if (o >= 0 && o < nt)
+      {
+        double no[3] = {0.0, 0.0, 0.0}, ni[3] = {input.normals[(size_t)3*i], input.normals[(size_t)3*i + 1], input.normals[(size_t)3*i + 2]};
+        for (int j = 0; j < 3; j++) for (int k = 0; k < 3; k++) no[k] += input.normals[(size_t)3*input.triangles[(size_t)3*o + j] + k];
+        const double lo = Norm(no), li = Norm(ni);
+        if (lo > 0.0 && li > 0.0)
+        {
+          const double dot = Dot(no, ni)/(lo*li);
+          dots.push_back(dot);
+          if (dot < -0.8) numFacing++;
+          if (regions != nullptr)
+          {
+            reports[(size_t)r].facingDots.push_back(dot);
+            for (int k = 0; k < 3; k++) reports[(size_t)r].facingDots.push_back(input.points[(size_t)3*i + k]);
+          }
+        }
+      }
+      const ll other = regionOfTriangle(coveredBy[(size_t)i]);
+      if (other < 0 || other == r) continue;
+      contacts[(size_t)r].insert(other);
+      contacts[(size_t)other].insert(r);
+    }
+    if (!covered[(size_t)r]) continue;
     numRegions++;
+    CoveredRegion &report = reports[(size_t)r];
     std::vector<double> c, th;
     for (size_t m = 0; m < points.size(); m++) { c.push_back(curvature[(size_t)points[m]]); th.push_back(input.thickness[(size_t)points[m]]); }
     std::sort(c.begin(), c.end());
     std::sort(th.begin(), th.end());
-    const double medianCurvature = c[c.size()/2], medianThickness = th[th.size()/2];
-    if (!(medianCurvature > 1.0e-9)) continue;
-    const double radius = 1.0/medianCurvature;
-    if (radius > maxRadiusOverThickness*medianThickness) continue;
-    const double distance = 1.1*3.14159265358979323846*radius;
-    std::vector<ll> none;
-    const long long widened = WidenJunctionZone(input, none, members, 0, structured, nullptr, distance);
-    total += widened;
-    numWrapped++;
-    longestWrap = std::max(longestWrap, distance);
+    const double medianCurvature = c[c.size()/2];
+    report.numTriangles = (ll)members[(size_t)r].size();
+    report.numPoints = (ll)points.size();
+    report.coveredFraction = (double)numCovered/(double)points.size();
+    if (!dots.empty())
+    {
+      std::sort(dots.begin(), dots.end());
+      report.facing = dots[dots.size()/2];
+      report.facingFraction = (double)numFacing/(double)dots.size();
+    }
+    for (size_t m = 0; m < points.size(); m++) for (int k = 0; k < 3; k++) report.center[k] += input.points[(size_t)3*points[m] + k]/(double)points.size();
+    report.curvatureRadius = medianCurvature > 1.0e-9 ? 1.0/medianCurvature : 0.0;
+    report.thickness = th[th.size()/2];
+    // the vessel's radius: half the median lumen chord along the inward
+    // normals of the region's points (ChordRadius); the curvature's when no
+    // ray meets the wall again
+    report.radius = ChordRadius(input, field, points);
+    if (!(report.radius > 0.0)) report.radius = report.curvatureRadius;
+    // against another vessel: the covering walls face the covered points
+    // (half of them within 37 degrees of facing, dot under -0.8: the pairs
+    // of vessels side by side on the model, 86-100%), or more than half are
+    // tilted past 90 degrees (median dot under 0: the two anterior cerebral
+    // arteries meeting in a long wedge, median -0.24, the only such region
+    // and the one whose zipper strips crossed through sixteen rings of
+    // widening; a crotch's covering triangles are the neighbouring wall's,
+    // median +0.17 to +1.0)
+    const bool against = !dots.empty() && (report.facingFraction >= 0.5 || report.facing < 0.0);
+    if (report.radius > 0.0 && report.radius <= maxRadiusOverThickness*report.thickness && against) report.wrapped = 1;
+  }
+  // a region against a wrapped one is wrapped with it: the two vessels'
+  // level surfaces merge where they touch, and only two tubes cut square
+  // have a boundary of plain circles there (one of a kissing pair left
+  // unwrapped kept the other's end circle without a chain, 2026-10-14)
+  for (bool changed = true; changed;)
+  {
+    changed = false;
+    for (ll r = 0; r < nr; r++)
+    {
+      if (!reports[(size_t)r].wrapped) continue;
+      for (std::set<ll>::const_iterator it = contacts[(size_t)r].begin(); it != contacts[(size_t)r].end(); ++it)
+      {
+        if (reports[(size_t)*it].wrapped || !(reports[(size_t)*it].radius > 0.0)) continue;
+        reports[(size_t)*it].wrapped = 2;
+        changed = true;
+      }
+    }
+  }
+  long long total = 0;
+  for (ll r = 0; r < nr; r++)
+  {
+    if (!covered[(size_t)r]) continue;
+    CoveredRegion &report = reports[(size_t)r];
+    report.numContacts = (ll)contacts[(size_t)r].size();
+    if (report.wrapped)
+    {
+      const double distance = wrapFactor > 0.0 ? wrapFactor*3.14159265358979323846*report.radius : WrapDistance(report.radius);
+      std::vector<ll> none;
+      report.numWidened = WidenJunctionZone(input, none, members[(size_t)r], 0, structured, nullptr, distance);
+      total += report.numWidened;
+      numWrapped++;
+      longestWrap = std::max(longestWrap, distance);
+    }
+    if (regions != nullptr) regions->push_back(report);
+  }
+  // the boundary loops of each wrapped region's zone component: a band cut
+  // square round its vessel has loops about the circumference long
+  if (regions != nullptr)
+  {
+    std::vector<ll> component((size_t)nt, -1);
+    size_t at = 0;
+    for (ll r = 0; r < nr; r++)
+    {
+      if (!covered[(size_t)r]) continue;
+      CoveredRegion &report = (*regions)[at++];
+      if (!report.wrapped || members[(size_t)r].empty()) continue;
+      const ll seed = members[(size_t)r][0];
+      std::vector<ll> tris;
+      if (component[(size_t)seed] < 0)
+      {
+        component[(size_t)seed] = seed;
+        stack.push_back(seed);
+        while (!stack.empty())
+        {
+          const ll t = stack.back();
+          stack.pop_back();
+          tris.push_back(t);
+          for (int j = 0; j < 3; j++)
+          {
+            const std::vector<ll> &around = incident[(size_t)input.triangles[(size_t)3*t + j]];
+            for (size_t q = 0; q < around.size(); q++)
+            {
+              const ll u = around[q];
+              if (component[(size_t)u] >= 0 || structured[(size_t)u]) continue;
+              component[(size_t)u] = seed;
+              stack.push_back(u);
+            }
+          }
+        }
+      }
+      else
+      {
+        for (ll t = 0; t < nt; t++) if (component[(size_t)t] == component[(size_t)seed]) tris.push_back(t);
+      }
+      std::vector<ll> flat;
+      flat.reserve(3*tris.size());
+      for (size_t m = 0; m < tris.size(); m++) for (int j = 0; j < 3; j++) flat.push_back(input.triangles[(size_t)3*tris[m] + j]);
+      std::vector<std::vector<ll> > chains;
+      std::vector<unsigned char> closed;
+      BoundaryChains(flat, chains, closed);
+      report.numLoops = (ll)chains.size();
+      double longest = 0.0;
+      long long numTurns = 0, numCorners = 0;
+      for (size_t c = 0; c < chains.size(); c++)
+      {
+        double length = 0.0;
+        for (size_t i = 0; i + 1 < chains[c].size(); i++) length += Distance(&input.points[(size_t)3*chains[c][i]], &input.points[(size_t)3*chains[c][i + 1]]);
+        longest = std::max(longest, length);
+        for (size_t i = 1; i + 1 < chains[c].size(); i++)
+        {
+          double e1[3], e2[3];
+          Sub(&input.points[(size_t)3*chains[c][i]], &input.points[(size_t)3*chains[c][i - 1]], e1);
+          Sub(&input.points[(size_t)3*chains[c][i + 1]], &input.points[(size_t)3*chains[c][i]], e2);
+          numCorners++;
+          if (Dot(e1, e2) < 0.0) numTurns++;
+        }
+      }
+      report.longestLoop = report.radius > 0.0 ? longest/(2.0*3.14159265358979323846*report.radius) : 0.0;
+      report.loopTurning = numCorners > 0 ? (double)numTurns/(double)numCorners : 0.0;
+    }
   }
   return total;
 }

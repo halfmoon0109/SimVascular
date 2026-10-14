@@ -5785,11 +5785,22 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       // vessels before the shell (see WrapCoveredRegions)
       long long numRegions = 0, numWrapped = 0;
       double longestWrap = 0.0;
-      const long long wrapped = svoffset::WrapCoveredRegions(hybrid.inner, hybrid.zone.coveredPoints, 6.0, hybrid.structured, numRegions, numWrapped, longestWrap);
+      std::vector<svoffset::CoveredRegion> regions;
+      const long long wrapped = svoffset::WrapCoveredRegions(hybrid.inner, field, hybrid.zone.coveredPoints, hybrid.zone.coveredBy, 12.0, hybrid.structured,
+          numRegions, numWrapped, longestWrap, &regions);
       if (numRegions > 0)
       {
-        fprintf(stdout,"  junction regions with a layer point inside another part of the wall: %lld; %lld of them on vessels under six walls in radius wrapped around their vessels (the longest %.3g along the surface, %lld triangles more in the junction zone)\n",
-            numRegions, numWrapped, longestWrap, wrapped);
+        long long numWithWrapped = 0;
+        for (size_t r = 0; r < regions.size(); r++) if (regions[r].wrapped == 2) numWithWrapped++;
+        fprintf(stdout,"  junction regions with a layer point inside another part of the wall: %lld; %lld of them wrapped around their vessels (%lld against another vessel, %lld against one of those; the longest %.3g along the surface, %lld triangles more in the junction zone)\n",
+            numRegions, numWrapped, numWrapped - numWithWrapped, numWithWrapped, longestWrap, wrapped);
+        for (size_t r = 0; r < regions.size(); r++)
+        {
+          if (!regions[r].wrapped) continue;
+          fprintf(stdout,"    a region of %lld triangles around (%.2f, %.2f, %.2f) on a vessel of radius %.3g (wall %.3g) %s, %lld triangles more; the band's %lld end loops, the longest %.2f circumferences\n",
+              regions[r].numTriangles, regions[r].center[0], regions[r].center[1], regions[r].center[2], regions[r].radius, regions[r].thickness,
+              regions[r].wrapped == 2 ? "wrapped with the vessel it is against" : "wrapped", regions[r].numWidened, regions[r].numLoops, regions[r].longestLoop);
+        }
       }
     }
     hybrid.secondsClassify = seconds();
@@ -5908,9 +5919,24 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       // end (the user's model, 2026-10-13); the region is wrapped around its
       // vessel instead, pi times the vessel's radius at the loop, so that the
       // merged piece becomes a tube with one chain per loop at each end.
-      std::vector<long long> seedPoints, seedTriangles, wrapPoints;
+      std::vector<long long> seedPoints, seedTriangles;
       int rings = 1;
-      double wrapDistance = 0.0;
+      // the loops wrapped round their vessels, each by its own distance: the
+      // radius the lumen chords give (the curvature's is a quarter of it at a
+      // crotch) unless the vessel is over twelve walls in radius (a band round
+      // the aorta took 581k triangles, most of the wall, 2026-10-14; rings there)
+      std::vector<std::pair<std::vector<long long>, double> > wraps;
+      auto wrapOrSeed = [&](const std::vector<long long> &loop, double fallbackRadius, bool wrap)
+      {
+        double radius = wrap ? svoffset::ChordRadius(hybrid.inner, field, loop) : 0.0;
+        if (wrap && !(radius > 0.0)) radius = fallbackRadius;
+        std::vector<double> th;
+        for (size_t m = 0; m < loop.size(); m++) if (loop[m] >= 0 && (size_t)loop[m] < hybrid.inner.thickness.size()) th.push_back(hybrid.inner.thickness[(size_t)loop[m]]);
+        std::sort(th.begin(), th.end());
+        const double thickness = th.empty() ? 0.0 : th[th.size()/2];
+        if (radius > 0.0 && radius <= 12.0*thickness) wraps.push_back(std::make_pair(loop, svoffset::WrapDistance(radius)));
+        else seedPoints.insert(seedPoints.end(), loop.begin(), loop.end());
+      };
       if (built)
       {
         seedTriangles = hybrid.shell.crossingStructuredTriangles;
@@ -5918,12 +5944,11 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
         {
           const svoffset::ZipReport &zip = hybrid.shell.zips[z];
           if (zip.crossingTriangles == 0 && zip.foldedEdges == 0) continue;
-          if (zip.farFraction > 0.3 && zip.loopRadius > 0.0)
-          {
-            wrapPoints.insert(wrapPoints.end(), zip.loop.begin(), zip.loop.end());
-            wrapDistance = std::max(wrapDistance, 1.1*3.14159265358979323846*zip.loopRadius);
-          }
-          else seedPoints.insert(seedPoints.end(), zip.loop.begin(), zip.loop.end());
+          // a loop far from a third of its chain is on a vessel against another;
+          // a loop whose strip is still at fault after a widening by rings is at
+          // a crotch the rings do not mend (thin vessels on the refined model of
+          // 2026-10-13: strips over zone walls a thirtieth of a wall high): wrapped
+          wrapOrSeed(zip.loop, zip.loopRadius, zip.farFraction > 0.3 || crossingAttempts >= 1);
         }
         rings = std::min(mostRings, wideningRings << crossingAttempts);
         crossingAttempts++;
@@ -5931,24 +5956,15 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       else if (!hybrid.shell.failedLoopPoints.empty())
       {
         chainTakenInARow = hybrid.shell.failedLoopChainTaken ? chainTakenInARow + 1 : 0;
-        if (hybrid.shell.failedLoopChainTaken && hybrid.shell.failedLoopRadius > 0.0)
-        {
-          wrapPoints = hybrid.shell.failedLoopPoints;
-          wrapDistance = 1.1*3.14159265358979323846*hybrid.shell.failedLoopRadius;
-          rings = wideningRings;
-        }
-        else
-        {
-          seedPoints = hybrid.shell.failedLoopPoints;
-          rings = std::min(mostRings, wideningRings << chainTakenInARow);
-        }
+        wrapOrSeed(hybrid.shell.failedLoopPoints, hybrid.shell.failedLoopRadius, hybrid.shell.failedLoopChainTaken);
+        rings = wraps.empty() ? std::min(mostRings, wideningRings << chainTakenInARow) : wideningRings;
       }
       else if (!hybrid.shell.failedTriangles.empty())
       {
         seedTriangles = hybrid.shell.failedTriangles;
         rings = 1;
       }
-      if ((seedPoints.empty() && seedTriangles.empty() && wrapPoints.empty()) || attempt >= maxWidenings)
+      if ((seedPoints.empty() && seedTriangles.empty() && wraps.empty()) || attempt >= maxWidenings)
       {
         if (built)
         {
@@ -5963,15 +5979,15 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       {
         widened += svoffset::WidenJunctionZone(hybrid.inner, seedPoints, seedTriangles, rings, hybrid.structured, &leftAtRims);
       }
-      if (!wrapPoints.empty())
+      for (size_t w = 0; w < wraps.size(); w++)
       {
         long long leftAtRimsWrap = 0;
         std::vector<long long> none;
-        const long long wrapped = svoffset::WidenJunctionZone(hybrid.inner, wrapPoints, none, 0, hybrid.structured, &leftAtRimsWrap, wrapDistance);
+        const long long wrapped = svoffset::WidenJunctionZone(hybrid.inner, wraps[w].first, none, 0, hybrid.structured, &leftAtRimsWrap, wraps[w].second);
         widened += wrapped;
         leftAtRims += leftAtRimsWrap;
-        fprintf(stdout,"  junction shell attempt %d: the regions of %zu loop points on vessels against another vessel are wrapped around their vessels, %.3g along the surface (pi times the radius at the loop; %lld more triangles)\n",
-            attempt + 1, wrapPoints.size(), wrapDistance, wrapped);
+        fprintf(stdout,"  junction shell attempt %d: the region of a loop of %zu points is wrapped around its vessel, %.3g along the surface (1.25 pi times the vessel's radius by its lumen chords; %lld more triangles)\n",
+            attempt + 1, wraps[w].first.size(), wraps[w].second, wrapped);
       }
       if (leftAtRims > 0)
       {

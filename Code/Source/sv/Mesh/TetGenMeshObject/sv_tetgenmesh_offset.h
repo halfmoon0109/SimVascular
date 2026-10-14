@@ -337,6 +337,18 @@ public:
   /// triangle counts; its id is past the interface's). -1 if none.
   long long Owner(const double x[3], double thicknessScale = 1.0) const;
 
+  /// The distance from x to the field's surface (the interface and the
+  /// collars past its cap rims), and the triangle it is to.
+  double SurfaceDistance(const double x[3], long long *nearest = nullptr) const;
+
+  /// The lumen chord from the interface point p along -n: how far a ray from
+  /// p into the lumen goes before it meets the wall again, found by
+  /// stepping the ray by the distance to the surface at each step (never
+  /// past a wall). Twice the vessel's radius on a straight vessel, whatever
+  /// the surface's curvature at p (a crotch's curvature says nothing of the
+  /// vessel). Negative when the ray meets nothing within the limit.
+  double LumenChord(const double p[3], const double n[3], double start, double limit) const;
+
 
   /// How far from the field's surface a point is surely outside the wall.
   double Reach() const;
@@ -453,6 +465,7 @@ struct ZoneReport
   long long numStructured = 0;             // prism layers
   long long numPointsCovered = 0;          // a layer point of theirs inside another part of the wall
   std::vector<unsigned char> coveredPoints;   // per interface point: 1 when a layer point of it lies inside another part of the wall (for WrapCoveredRegions)
+  std::vector<long long> coveredBy;           // per interface point: the interface triangle of that other part the first such layer point stands in, -1 for none
   long long numPointsOffLevel = 0;         // a layer point off its level the other way (should not happen)
   long long numTrianglesInverted = 0;      // a layer triangle facing away from the base, or too small
   long long numTrianglesCrossing = 0;      // tops of otherwise valid prisms passing through each other
@@ -729,9 +742,56 @@ struct BandRelaxation
  * @param longestWrap Set to the longest distance wrapped.
  * @return The triangles given to the junction zone.
  */
-long long WrapCoveredRegions(const Interface &input, const std::vector<unsigned char> &coveredPoints,
-    double maxRadiusOverThickness, std::vector<unsigned char> &structured,
-    long long &numRegions, long long &numWrapped, double &longestWrap);
+struct CoveredRegion
+{
+  long long numTriangles = 0;   // of the junction zone before the wrap
+  long long numPoints = 0;
+  double center[3] = {0.0, 0.0, 0.0};
+  double radius = 0.0;          // half the median lumen chord of the region's points (OffsetField::LumenChord); 1/median largest normal curvature when no chord is found
+  double curvatureRadius = 0.0; // 1/median largest normal curvature (0 when flat)
+  double coveredFraction = 0.0; // of the region's points, those with a layer point inside another part of the wall
+  double facing = 0.0;          // median over the covered points of the dot of the point's normal with the covering triangle's: near -1 when the two walls face each other (vessels side by side), nearer 0 at a branch crotch
+  double facingFraction = 0.0;  // of the covered points, those whose covering triangle faces them (dot under -0.8)
+  std::vector<double> facingDots;   // the dots themselves, with the covered point's coordinates after each (x, y, z): for a look at a region
+  double thickness = 0.0;       // median wall thickness
+  long long numContacts = 0;    // regions whose wall its covered layer points stand in, or that stand in its
+  unsigned char wrapped = 0;    // 1 by its radius, 2 with a wrapped region it is against
+  long long numWidened = 0;     // triangles the wrap added to the junction zone
+  long long numLoops = 0;       // boundary loops of the junction-zone component the region lies in after the wrap
+  double longestLoop = 0.0;     // the longest of them over the vessel's circumference 2*pi*radius: near 1 for a band cut square, far above it when the wrap left a strip of prisms along the vessel
+  double loopTurning = 0.0;     // of the loops' points, the fraction where the loop turns by more than 90 degrees (a staircase boundary)
+};
+/// The distance along the surface a region is wrapped by around a vessel of
+/// the radius: 1.25*pi*r. The two fronts round the vessel meet at pi*r; the
+/// widening measures distance between triangle centres, over the true
+/// distance on a refined surface, and the band's end loops are then about
+/// a circumference long (1.0-1.7 on the refined model of 2026-10-13 with
+/// the chord radius; with the curvature radius, a quarter of the vessel's
+/// at a crotch, the bands were strips along the vessels whatever the factor).
+double WrapDistance(double radius);
+/// The radius of the vessel some interface points lie on: half the median
+/// lumen chord along their inward normals (OffsetField::LumenChord; every
+/// n-th point so at most 400 rays), 0 when fewer than three rays meet the
+/// wall again. Right at a crotch too, where the surface's curvature is not
+/// the vessel's.
+double ChordRadius(const Interface &input, const OffsetField &field, const std::vector<long long> &points);
+/// The junction-zone regions on vessels against another vessel, wrapped
+/// round their vessels before the shell is built: where two vessels run
+/// side by side their layer surfaces merge, and the boundary of the merged
+/// piece matches no zone loop unless both regions are bands cut square
+/// round their vessels (then the piece ends in plain circles). A region is
+/// against another vessel when the covering triangles of at least half its
+/// covered points face them (normals' dot under -0.8) or the median dot is
+/// under 0 (two vessels meeting in a long wedge; a crotch's covering
+/// triangles are the neighbouring wall's, median dot +0.17 to +1.0 on the
+/// model); a region a wrapped one is against is wrapped with it, whatever
+/// its own measure. No region on a vessel above maxRadiusOverThickness
+/// walls in radius is wrapped by its own measure (a band round such a
+/// vessel costs many prisms), only with a partner.
+long long WrapCoveredRegions(const Interface &input, const OffsetField &field, const std::vector<unsigned char> &coveredPoints,
+    const std::vector<long long> &coveredBy, double maxRadiusOverThickness, std::vector<unsigned char> &structured,
+    long long &numRegions, long long &numWrapped, double &longestWrap,
+    std::vector<CoveredRegion> *regions = nullptr, double wrapFactor = 0.0);
 
 /**
  * @brief Widens the junction zone around the given interface points: the

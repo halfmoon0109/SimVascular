@@ -420,8 +420,49 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   OffsetField field; Report fr; field.Build(iface, fr, err);
   std::vector<unsigned char> structured; ZoneReport zr; ZoneOptions zo;
   ClassifyPrismZone(iface, field, numLayers, zo, structured, zr, err);
-  { long long nr = 0, nw = 0; double lw = 0.0; ll w = WrapCoveredRegions(iface, zr.coveredPoints, 6.0, structured, nr, nw, lw);
-    if (nr > 0) printf("  %lld junction regions with a covered point, %lld wrapped around their vessels (the longest %.3g, %lld triangles)\n", nr, nw, lw, w); }
+  { long long nr = 0, nw = 0; double lw = 0.0; std::vector<CoveredRegion> regions;
+    const double maxRadiusOverThickness = getenv("SV_HYBRID_WRAP_RADIUS") != nullptr ? atof(getenv("SV_HYBRID_WRAP_RADIUS")) : 12.0;
+    const double wrapFactor = getenv("SV_HYBRID_WRAP_FACTOR") != nullptr ? atof(getenv("SV_HYBRID_WRAP_FACTOR")) : 0.0;
+    ll w = WrapCoveredRegions(iface, field, zr.coveredPoints, zr.coveredBy, maxRadiusOverThickness, structured, nr, nw, lw, &regions, wrapFactor);
+    if (nr > 0) printf("  %lld junction regions with a covered point, %lld wrapped around their vessels (the longest %.3g, %lld triangles)\n", nr, nw, lw, w);
+    if (getenv("SV_HYBRID_ZIPS") != nullptr)
+      for (size_t r = 0; r < regions.size(); r++)
+        printf("    region %zu: %lld triangles, %lld points around (%.2f, %.2f, %.2f), %.0f%% covered (facing %.2f, %.0f%% under -0.8), radius %.3g (by curvature %.3g), thickness %.3g (r/t %.2f), against %lld%s%s\n", r, regions[r].numTriangles,
+            regions[r].numPoints, regions[r].center[0], regions[r].center[1], regions[r].center[2], 100.0*regions[r].coveredFraction, regions[r].facing, 100.0*regions[r].facingFraction, regions[r].radius, regions[r].curvatureRadius, regions[r].thickness,
+            regions[r].thickness > 0.0 ? regions[r].radius/regions[r].thickness : 0.0, regions[r].numContacts,
+            regions[r].wrapped ? (std::string(regions[r].wrapped == 2 ? ", wrapped with one by " : ", wrapped by ") + std::to_string(regions[r].numWidened) + " triangles").c_str() : "",
+            regions[r].wrapped ? (std::string("; ") + std::to_string(regions[r].numLoops) + " loops, the longest " + std::to_string(regions[r].longestLoop) + " circumferences, turning over 90 deg at " + std::to_string((int)(100.0*regions[r].loopTurning)) + "% of their points").c_str() : "");
+    if (getenv("SV_HYBRID_ZIPS") != nullptr)
+      for (size_t r = 0; r < regions.size(); r++)
+      {
+        const std::vector<double> &d = regions[r].facingDots;
+        long long n = 0, u8 = 0, u5 = 0, u2 = 0;
+        for (size_t m = 0; m + 3 < d.size(); m += 4) { n++; if (d[m] < -0.8) u8++; if (d[m] < -0.5) u5++; if (d[m] < -0.2) u2++; }
+        if (n > 0) printf("      region %zu: of %lld covered points with a covering triangle, dot under -0.8: %.0f%%, under -0.5: %.0f%%, under -0.2: %.0f%%\n", r, n, 100.0*u8/n, 100.0*u5/n, 100.0*u2/n);
+      }
+    if (getenv("SV_HYBRID_REGION_DETAIL") != nullptr)
+    {
+      // the covered points of one region: a histogram of the dots and their positions, ten bins of dot, the mean position per bin
+      const size_t r = (size_t)atoi(getenv("SV_HYBRID_REGION_DETAIL"));
+      if (r < regions.size())
+      {
+        const std::vector<double> &d = regions[r].facingDots;
+        for (int bin = 0; bin < 10; bin++)
+        {
+          const double lo = -1.0 + 0.2*bin, hi = lo + 0.2;
+          long long n = 0; double c[3] = {0.0, 0.0, 0.0}, lo3[3] = {1e300, 1e300, 1e300}, hi3[3] = {-1e300, -1e300, -1e300};
+          for (size_t m = 0; m + 3 < d.size(); m += 4)
+          {
+            if (d[m] < lo || d[m] >= hi) continue;
+            n++;
+            for (int k = 0; k < 3; k++) { c[k] += d[m + 1 + k]; lo3[k] = std::min(lo3[k], d[m + 1 + k]); hi3[k] = std::max(hi3[k], d[m + 1 + k]); }
+          }
+          if (n == 0) continue;
+          printf("      dot [%.1f, %.1f): %lld points, mean (%.2f, %.2f, %.2f), x %.1f..%.1f y %.1f..%.1f z %.1f..%.1f\n", lo, hi, n, c[0]/n, c[1]/n, c[2]/n, lo3[0], hi3[0], lo3[1], hi3[1], lo3[2], hi3[2]);
+        }
+      }
+    }
+    if (getenv("SV_HYBRID_CLASSIFY_ONLY") != nullptr) return; }
   PrismMesh pm; JunctionShell shell;
   // a loop whose piece has no chain of its own widens its junction region by two rings, up to three times (as the glue does)
   int chainTakenInARow = 0;   // as the glue: the rings double while a loop's chain is taken by another loop (two regions on two vessels against each other)
@@ -470,7 +511,21 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
       }
       return;
     }
-    std::vector<ll> seedPoints, seedTriangles, wrapPoints; int rings = 1; double wrapDistance = 0.0;
+    std::vector<ll> seedPoints, seedTriangles; int rings = 1;
+    std::vector<std::pair<std::vector<ll>, double> > wraps;   // loops wrapped round their vessels, each by its own distance
+    // as the glue: a loop is wrapped round its vessel by the radius the lumen chords give (the curvature's is a quarter of it at a crotch),
+    // unless the vessel is over twelve walls in radius (a band round the aorta would take most of it; rings there)
+    auto wrapOrSeed = [&](const std::vector<ll> &loop, double fallbackRadius, bool wrap)
+    {
+      double radius = wrap ? ChordRadius(iface, field, loop) : 0.0;
+      if (wrap && !(radius > 0.0)) radius = fallbackRadius;
+      std::vector<double> th;
+      for (size_t m = 0; m < loop.size(); m++) if (loop[m] >= 0 && (size_t)loop[m] < iface.thickness.size()) th.push_back(iface.thickness[(size_t)loop[m]]);
+      std::sort(th.begin(), th.end());
+      const double thickness = th.empty() ? 0.0 : th[th.size()/2];
+      if (radius > 0.0 && radius <= 12.0*thickness) wraps.push_back(std::make_pair(loop, WrapDistance(radius)));
+      else seedPoints.insert(seedPoints.end(), loop.begin(), loop.end());
+    };
     if (built)
     {
       seedTriangles = shell.crossingStructuredTriangles;
@@ -478,9 +533,9 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
       {
         const ZipReport &zip = shell.zips[z];
         if (zip.crossingTriangles == 0 && zip.foldedEdges == 0) continue;
-        // as the glue: a loop far from a third of its chain is on a vessel against another; its region is wrapped around the vessel
-        if (zip.farFraction > 0.3 && zip.loopRadius > 0.0) { wrapPoints.insert(wrapPoints.end(), zip.loop.begin(), zip.loop.end()); wrapDistance = std::max(wrapDistance, 1.1*3.14159265358979323846*zip.loopRadius); }
-        else seedPoints.insert(seedPoints.end(), zip.loop.begin(), zip.loop.end());
+        // a loop far from a third of its chain is on a vessel against another, and a loop whose strip is still at fault after a widening by
+        // rings is at a crotch the rings do not mend (thin vessels on the refined model: strips over the short zone walls): wrapped
+        wrapOrSeed(zip.loop, zip.loopRadius, zip.farFraction > 0.3 || crossingAttempts >= 1);
       }
       rings = std::min(16, 2 << crossingAttempts);
       crossingAttempts++;
@@ -488,15 +543,19 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
     else if (!shell.failedLoopPoints.empty())
     {
       chainTakenInARow = shell.failedLoopChainTaken ? chainTakenInARow + 1 : 0;
-      if (shell.failedLoopChainTaken && shell.failedLoopRadius > 0.0) { wrapPoints = shell.failedLoopPoints; wrapDistance = 1.1*3.14159265358979323846*shell.failedLoopRadius; rings = 2; }
-      else { seedPoints = shell.failedLoopPoints; rings = std::min(16, 2 << chainTakenInARow); }
+      wrapOrSeed(shell.failedLoopPoints, shell.failedLoopRadius, shell.failedLoopChainTaken);
+      rings = wraps.empty() ? std::min(16, 2 << chainTakenInARow) : 2;
     }
     else if (!shell.failedTriangles.empty()) { seedTriangles = shell.failedTriangles; rings = 1; }
     const int maxAttempts = getenv("SV_HYBRID_ATTEMPTS") ? atoi(getenv("SV_HYBRID_ATTEMPTS")) : 16;
-    if ((seedPoints.empty() && seedTriangles.empty() && wrapPoints.empty()) || attempt >= maxAttempts) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
+    if ((seedPoints.empty() && seedTriangles.empty() && wraps.empty()) || attempt >= maxAttempts) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
     ll widened = 0;
     if (!seedPoints.empty() || !seedTriangles.empty()) widened += WidenJunctionZone(iface, seedPoints, seedTriangles, rings, structured);
-    if (!wrapPoints.empty()) { std::vector<ll> none; ll wrapped = WidenJunctionZone(iface, wrapPoints, none, 0, structured, nullptr, wrapDistance); widened += wrapped; printf("  attempt %d: %zu loop points wrapped around their vessels, %.3g along the surface (%lld triangles)\n", attempt + 1, wrapPoints.size(), wrapDistance, wrapped); }
+    for (size_t w = 0; w < wraps.size(); w++)
+    {
+      std::vector<ll> none; ll wrapped = WidenJunctionZone(iface, wraps[w].first, none, 0, structured, nullptr, wraps[w].second); widened += wrapped;
+      printf("  attempt %d: a loop of %zu points wrapped around its vessel, %.3g along the surface (%lld triangles)\n", attempt + 1, wraps[w].first.size(), wraps[w].second, wrapped);
+    }
     if (built) printf("  attempt %d: the shell has %lld crossing triangles and %lld folded edges; the junction zone widened by %lld triangles at %zu prisms and around %zu loop points (%d rings)\n", attempt + 1, shell.numCrossingTriangles, shell.numFoldedEdges, widened, seedTriangles.size(), seedPoints.size(), rings);
     else printf("  attempt %d: %s; the junction zone widened by %lld triangles (%d rings)\n", attempt + 1, err.c_str(), widened, rings);
   }
@@ -720,6 +779,36 @@ int main()
       printf("  junction zone %lld triangles, %lld of them not between the axes\n", zone, off);
       Check(zone > 0 && off == 0, "the junction zone is the strips facing the other tube");
       Check(zr.numStructured > 0.5*zr.numTriangles, "most of both tubes is prisms");
+    }
+    printf("test 3b: the same strips wrapped round their tubes before the shell (WrapCoveredRegions)\n");
+    {
+      OffsetField field; Report fr; std::string err;
+      if (field.Build(iface, fr, err) != 0) { printf("  FAIL field: %s\n", err.c_str()); numFailed++; }
+      else
+      {
+        long long nr = 0, nw = 0; double lw = 0.0; std::vector<CoveredRegion> regions;
+        const ll w = WrapCoveredRegions(iface, field, zr.coveredPoints, zr.coveredBy, 12.0, structured, nr, nw, lw, &regions);
+        printf("  %lld regions with a covered point, %lld wrapped (%lld triangles)\n", nr, nw, w);
+        for (size_t r = 0; r < regions.size(); r++)
+          printf("    region %zu around (%.2f, %.2f, %.2f): facing %.2f (%.0f%% under -0.8), radius %.3f by the chord (%.3f by curvature), against %lld, wrapped %d; %lld loops, the longest %.2f circumferences, turning over 90 deg at %.0f%%\n",
+              r, regions[r].center[0], regions[r].center[1], regions[r].center[2], regions[r].facing, 100.0*regions[r].facingFraction, regions[r].radius, regions[r].curvatureRadius,
+              regions[r].numContacts, (int)regions[r].wrapped, regions[r].numLoops, regions[r].longestLoop, 100.0*regions[r].loopTurning);
+        Check(nr == 2 && nw == 2, "both strips face each other and are wrapped");
+        bool radii = regions.size() == 2, facing = regions.size() == 2, bands = regions.size() == 2;
+        for (size_t r = 0; r < regions.size(); r++)
+        {
+          const double expected = regions[r].center[0] < 0.9 ? 1.0 : 0.5;   // the tube of radius 1 at x 0, the one of radius 0.5 at x 1.8
+          radii = radii && std::fabs(regions[r].radius - expected) < 0.1*expected;
+          facing = facing && regions[r].facing < -0.8 && regions[r].numContacts == 1;
+          bands = bands && regions[r].wrapped && regions[r].numLoops == 2 && regions[r].longestLoop > 0.8 && regions[r].longestLoop < 2.0 && regions[r].loopTurning < 0.1;
+        }
+        Check(radii, "the chord gives each tube's radius within a tenth");
+        Check(facing, "the covering triangles face the covered points (dot under -0.8) and each strip is against the other");
+        Check(bands, "each band is cut square round its tube: two end loops about a circumference long, few sharp turns");
+        ll zone = 0;
+        for (size_t t = 0; t < structured.size(); t++) if (!structured[t]) zone++;
+        printf("  junction zone now %lld of %lld triangles\n", zone, (ll)structured.size());
+      }
     }
   }
   {
