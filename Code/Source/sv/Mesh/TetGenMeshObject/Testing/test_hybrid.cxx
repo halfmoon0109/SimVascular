@@ -450,6 +450,23 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
             z.level, z.loopPoints, z.chainPoints, z.stripTriangles, z.crossingTriangles, z.foldedEdges, z.meanDistance, z.agreement, z.centre[0], z.centre[1], z.centre[2]);
       }
     }
+    // with SV_HYBRID_DUMP_ATTEMPT set: the first shell built with faults goes to that file (points, triangles, markers, prism point ids) and the test stops
+    if (built && getenv("SV_HYBRID_DUMP_ATTEMPT") != nullptr)
+    {
+      FILE *f = fopen(getenv("SV_HYBRID_DUMP_ATTEMPT"), "wb");
+      if (f != nullptr)
+      {
+        auto writeVec = [&](const void *data, size_t bytes, ll count) { fwrite(&count, sizeof(ll), 1, f); fwrite(data, 1, bytes, f); };
+        writeVec(shell.points.data(), shell.points.size()*sizeof(double), (ll)shell.points.size());
+        writeVec(shell.triangles.data(), shell.triangles.size()*sizeof(ll), (ll)shell.triangles.size());
+        std::vector<ll> markers(shell.markers.begin(), shell.markers.end());
+        writeVec(markers.data(), markers.size()*sizeof(ll), (ll)markers.size());
+        writeVec(shell.prismPoint.data(), shell.prismPoint.size()*sizeof(ll), (ll)shell.prismPoint.size());
+        fclose(f);
+        printf("  the faulted shell of attempt %d written to %s; stopping here\n", attempt + 1, getenv("SV_HYBRID_DUMP_ATTEMPT"));
+      }
+      return;
+    }
     std::vector<ll> seedPoints, seedTriangles; int rings = 1;
     if (built)
     {
