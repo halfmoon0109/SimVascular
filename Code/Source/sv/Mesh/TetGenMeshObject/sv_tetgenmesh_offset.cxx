@@ -3416,9 +3416,12 @@ long long DropSmallClosedPieces(const std::vector<double> &points, std::vector<l
 // came apart into fragments of one point), so the point's structured
 // triangles are given to the junction zone, which joins the fans; repeated
 // until no pinch is left. Called by the classification and by the zone's
-// widening, which can make two regions touch.
+// widening, which can make two regions touch. The widening passes the
+// band at the cap rims as kept: those triangles stay prisms (the zone may
+// not reach a rim), and a pinch only they could open is left as it is.
 static void OpenPinches(const Interface &input, const std::vector<std::vector<ll> > &incident,
-    std::vector<unsigned char> &structured, ll &numPinches, ll &numTrianglesPinched)
+    std::vector<unsigned char> &structured, ll &numPinches, ll &numTrianglesPinched,
+    const std::vector<unsigned char> *kept = nullptr)
 {
   const ll np = (ll)(input.points.size()/3);
   for (;;)
@@ -3455,14 +3458,16 @@ static void OpenPinches(const Interface &input, const std::vector<std::vector<ll
       ll numFans = 0;
       for (size_t m = 0; m < parent.size(); m++) if (root((ll)m) == (ll)m) numFans++;
       if (numFans < 2) continue;
+      ll numOpened = 0;
       for (size_t m = 0; m < around.size(); m++)
       {
-        if (structured[(size_t)around[m]])
-        {
-          structured[(size_t)around[m]] = 0;
-          numTrianglesPinched++;
-        }
+        if (!structured[(size_t)around[m]]) continue;
+        if (kept != nullptr && (*kept)[(size_t)around[m]]) continue;
+        structured[(size_t)around[m]] = 0;
+        numOpened++;
       }
+      if (numOpened == 0) continue;   // only the rim band parts the fans
+      numTrianglesPinched += numOpened;
       numPinchedNow++;
     }
     numPinches += numPinchedNow;
@@ -4453,15 +4458,19 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
   ll numWidened = 0, numAtRims = 0;
   std::vector<unsigned char> heldBack((size_t)nt, 0);
   const std::vector<unsigned char> atEntry = structured;
-  // the seeds: a seed triangle joins the junction zone; the junction
-  // triangles at a seed point are the seeds there (the loop's own region)
+  // the seeds: a seed triangle joins the junction zone, unless it is in the
+  // rim band (then it stays a prism and the widening still grows from it);
+  // the junction triangles at a seed point are the seeds there (the loop's
+  // own region)
   std::vector<unsigned char> seed((size_t)nt, 0);
   for (size_t m = 0; m < seedTriangles.size(); m++)
   {
     const ll t = seedTriangles[m];
     if (t < 0 || t >= nt) continue;
-    if (structured[(size_t)t]) { structured[(size_t)t] = 0; numWidened++; }
     seed[(size_t)t] = 1;
+    if (!structured[(size_t)t]) continue;
+    if (atRim[(size_t)t]) { if (!heldBack[(size_t)t]) { heldBack[(size_t)t] = 1; numAtRims++; } continue; }
+    structured[(size_t)t] = 0; numWidened++;
   }
   for (size_t m = 0; m < seedPoints.size(); m++)
   {
@@ -4620,9 +4629,9 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
       for (size_t m = 0; m < island.size(); m++) { structured[(size_t)island[m]] = 0; numWidened++; }
     }
   }
-  // two regions the widening made touch at a point
+  // two regions the widening made touch at a point (the rim band kept)
   ll numPinches = 0, numPinched = 0;
-  OpenPinches(input, incident, structured, numPinches, numPinched);
+  OpenPinches(input, incident, structured, numPinches, numPinched, &atRim);
   numWidened += numPinched;
   if (numLeftAtRims != nullptr) *numLeftAtRims = numAtRims;
   return numWidened;

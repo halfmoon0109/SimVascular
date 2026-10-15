@@ -730,6 +730,30 @@ static void TestWideningAtRims()
   Check(widened > 0, "the zone widened");
   Check(leftAtRims > 0, "triangles at the rim were held back");
   Check(rimJunction == 0, "no triangle with a point on a rim became junction");
+  // seed triangles on the rim (a prism crossing the shell there, or owning a
+  // hole) stay prisms too, and the pinches the widening opens leave the rim
+  // band alone: seeded at the triangles of both rims and of a ring between
+  std::vector<unsigned char> structured2(nt, 1);
+  std::vector<ll> rimSeeds;
+  for (ll t = 0; t < nt; t++)
+  {
+    bool atRim = false;
+    for (int j = 0; j < 3; j++) if (rimPoint[iface.triangles[3*t + j]]) atRim = true;
+    if (atRim || std::abs(iface.points[3*iface.triangles[3*t] + 2] - 4.0) < 0.2) rimSeeds.push_back(t);
+  }
+  std::vector<ll> noPoints;
+  ll leftAtRims2 = 0;
+  ll widened2 = WidenJunctionZone(iface, noPoints, rimSeeds, 2, structured2, &leftAtRims2);
+  ll rimJunction2 = 0;
+  for (ll t = 0; t < nt; t++)
+  {
+    bool atRim = false;
+    for (int j = 0; j < 3; j++) if (rimPoint[iface.triangles[3*t + j]]) atRim = true;
+    if (atRim && !structured2[t]) rimJunction2++;
+  }
+  printf("  seeded at %zu triangles on the rims and a ring between: %lld widened, %lld held back, %lld rim triangles junction\n", rimSeeds.size(), widened2, leftAtRims2, rimJunction2);
+  Check(widened2 > 0 && leftAtRims2 > 0, "the ring widened and the rim seeds were held back");
+  Check(rimJunction2 == 0, "no seed triangle on a rim became junction");
 }
 
 int main()
