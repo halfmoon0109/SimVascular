@@ -754,7 +754,7 @@ struct CoveredRegion
   double facingFraction = 0.0;  // of the covered points, those whose covering triangle faces them (dot under -0.8)
   std::vector<double> facingDots;   // the dots themselves, with the covered point's coordinates after each (x, y, z): for a look at a region
   double thickness = 0.0;       // median wall thickness
-  long long numContacts = 0;    // regions whose wall its covered layer points stand in, or that stand in its
+  long long numContacts = 0;    // regions whose wall its covered layer points stand in, or that stand in its, the covering wall facing them (dot under 0)
   unsigned char wrapped = 0;    // 1 by its radius, 2 with a wrapped region it is against
   long long numWidened = 0;     // triangles the wrap added to the junction zone
   long long numLoops = 0;       // boundary loops of the junction-zone component the region lies in after the wrap
@@ -784,7 +784,8 @@ double ChordRadius(const Interface &input, const OffsetField &field, const std::
 /// covered points face them (normals' dot under -0.8) or the median dot is
 /// under 0 (two vessels meeting in a long wedge; a crotch's covering
 /// triangles are the neighbouring wall's, median dot +0.17 to +1.0 on the
-/// model); a region a wrapped one is against is wrapped with it, whatever
+/// model); a region a wrapped one is against (through a covered point whose
+/// covering triangle faces it, dot under 0) is wrapped with it, whatever
 /// its own measure. No region on a vessel above maxRadiusOverThickness
 /// walls in radius is wrapped by its own measure (a band round such a
 /// vessel costs many prisms), only with a partner.

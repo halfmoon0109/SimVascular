@@ -4781,12 +4781,21 @@ long long WrapCoveredRegions(const Interface &input, const OffsetField &field, c
             reports[(size_t)r].facingDots.push_back(dot);
             for (int k = 0; k < 3; k++) reports[(size_t)r].facingDots.push_back(input.points[(size_t)3*i + k]);
           }
+          // a contact only where the covering wall faces the point (another
+          // vessel); a crotch's covering wall is the neighbouring one of the
+          // same vessel (dot +0.17 to +1.0), and a contact there would wrap
+          // the parent with its branch, the aorta by 1.25*pi times its radius
+          if (dot < 0.0)
+          {
+            const ll other = regionOfTriangle(o);
+            if (other >= 0 && other != r)
+            {
+              contacts[(size_t)r].insert(other);
+              contacts[(size_t)other].insert(r);
+            }
+          }
         }
       }
-      const ll other = regionOfTriangle(coveredBy[(size_t)i]);
-      if (other < 0 || other == r) continue;
-      contacts[(size_t)r].insert(other);
-      contacts[(size_t)other].insert(r);
     }
     if (!covered[(size_t)r]) continue;
     numRegions++;
