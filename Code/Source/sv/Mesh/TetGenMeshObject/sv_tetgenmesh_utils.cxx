@@ -5975,6 +5975,7 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
         return SV_ERROR;
       }
       long long leftAtRims = 0, widened = 0;
+      const std::vector<unsigned char> zoneBefore = hybrid.structured;
       if (!seedPoints.empty() || !seedTriangles.empty())
       {
         widened += svoffset::WidenJunctionZone(hybrid.inner, seedPoints, seedTriangles, rings, hybrid.structured, &leftAtRims);
@@ -5992,6 +5993,17 @@ int TGenUtils_BuildHybridWall(vtkPolyData *surface, vtkDoubleArray *array,
       if (leftAtRims > 0)
       {
         fprintf(stdout,"  junction shell attempt %d: the widening left %lld triangles at the cap rims as they were (the zone may not reach a rim)\n", attempt + 1, leftAtRims);
+      }
+      // a widening that changed nothing (its seeds and the wrap's distance
+      // all within the zone already, or held back at a rim) would build the
+      // same shell again, minutes each, until the attempts run out
+      if (hybrid.structured == zoneBefore)
+      {
+        fprintf(stdout,"  junction shell attempt %d: the widening changed no triangle of the zone; the same shell would be built again\n", attempt + 1);
+        fflush(stdout);
+        if (built) break;
+        reason = "the junction shell could not be built: " + error + " (and widening the junction zone there changed nothing)";
+        return SV_ERROR;
       }
       hybrid.numWidenings++;
       hybrid.numTrianglesWidened += widened;

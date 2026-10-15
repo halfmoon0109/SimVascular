@@ -550,12 +550,15 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
     const int maxAttempts = getenv("SV_HYBRID_ATTEMPTS") ? atoi(getenv("SV_HYBRID_ATTEMPTS")) : 16;
     if ((seedPoints.empty() && seedTriangles.empty() && wraps.empty()) || attempt >= maxAttempts) { if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
     ll widened = 0;
+    const std::vector<unsigned char> zoneBefore = structured;
     if (!seedPoints.empty() || !seedTriangles.empty()) widened += WidenJunctionZone(iface, seedPoints, seedTriangles, rings, structured);
     for (size_t w = 0; w < wraps.size(); w++)
     {
       std::vector<ll> none; ll wrapped = WidenJunctionZone(iface, wraps[w].first, none, 0, structured, nullptr, wraps[w].second); widened += wrapped;
       printf("  attempt %d: a loop of %zu points wrapped around its vessel, %.3g along the surface (%lld triangles)\n", attempt + 1, wraps[w].first.size(), wraps[w].second, wrapped);
     }
+    // as the glue: a widening that changed nothing would build the same shell again
+    if (structured == zoneBefore) { printf("  attempt %d: the widening changed no triangle of the zone\n", attempt + 1); if (built) break; printf("  FAIL shell: %s\n", err.c_str()); numFailed++; return; }
     if (built) printf("  attempt %d: the shell has %lld crossing triangles and %lld folded edges; the junction zone widened by %lld triangles at %zu prisms and around %zu loop points (%d rings)\n", attempt + 1, shell.numCrossingTriangles, shell.numFoldedEdges, widened, seedTriangles.size(), seedPoints.size(), rings);
     else printf("  attempt %d: %s; the junction zone widened by %lld triangles (%d rings)\n", attempt + 1, err.c_str(), widened, rings);
   }
