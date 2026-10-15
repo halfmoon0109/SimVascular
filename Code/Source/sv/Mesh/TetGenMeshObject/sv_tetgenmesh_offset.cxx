@@ -4549,6 +4549,9 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
   // the smoother chain of the level surface passed through the zone walls
   // (2,469 of 3,343 crossing pairs). Notches, teeth, notches: three passes,
   // since teeth bared by a pass could otherwise be peeled back without end.
+  // Only this widening's front: a notch has an edge-neighbour this call took
+  // (the zone elsewhere, the classification's and earlier widenings', is
+  // left as it is; every wrap and retry reshaped it all before).
   {
     auto edgeNeighbours = [&](ll t, ll out[3]) -> int
     {
@@ -4583,8 +4586,14 @@ long long WidenJunctionZone(const Interface &input, const std::vector<long long>
         ll around[3];
         const int n = edgeNeighbours(t, around);
         int other = 0;
-        for (int q = 0; q < n; q++) if (structured[(size_t)around[q]] != structured[(size_t)t]) other++;
-        if (other < 2) continue;
+        bool atFront = !notches;
+        for (int q = 0; q < n; q++)
+        {
+          const ll u = around[q];
+          if (structured[(size_t)u] != structured[(size_t)t]) other++;
+          if (atEntry[(size_t)u] && !structured[(size_t)u]) atFront = true;
+        }
+        if (other < 2 || !atFront) continue;
         if (notches) { structured[(size_t)t] = 0; numWidened++; }
         else { structured[(size_t)t] = 1; numWidened--; }
       }

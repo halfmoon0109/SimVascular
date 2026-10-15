@@ -754,6 +754,42 @@ static void TestWideningAtRims()
   printf("  seeded at %zu triangles on the rims and a ring between: %lld widened, %lld held back, %lld rim triangles junction\n", rimSeeds.size(), widened2, leftAtRims2, rimJunction2);
   Check(widened2 > 0 && leftAtRims2 > 0, "the ring widened and the rim seeds were held back");
   Check(rimJunction2 == 0, "no seed triangle on a rim became junction");
+  // the boundary smoothing works on this widening's front alone: notches in
+  // a zone far from the seeds (a band at z 5-7 with every fourth quad of the
+  // row below it taken, whole quads so that no pinch is made) are left as
+  // they are by a widening at z 2
+  std::vector<unsigned char> structured3(nt, 1);
+  auto zOf = [&](ll t, int j) { return iface.points[3*iface.triangles[3*t + j] + 2]; };
+  ll inRow = 0;
+  for (ll t = 0; t < nt; t++)
+  {
+    const double lo = std::min(zOf(t, 0), std::min(zOf(t, 1), zOf(t, 2))), hi = std::max(zOf(t, 0), std::max(zOf(t, 1), zOf(t, 2)));
+    if (lo > 4.99 && hi < 7.01) structured3[t] = 0;
+    else if (hi < 5.01 && hi > 4.99 && (inRow++ % 8) < 2) structured3[t] = 0;
+  }
+  std::map<std::pair<ll, ll>, std::vector<ll> > edgeTriangles;
+  for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) { ll a = iface.triangles[3*t + j], b = iface.triangles[3*t + (j + 1)%3]; edgeTriangles[std::make_pair(std::min(a, b), std::max(a, b))].push_back(t); }
+  std::vector<ll> notchesFar;
+  for (ll t = 0; t < nt; t++)
+  {
+    if (!structured3[t]) continue;
+    int junction = 0;
+    for (int j = 0; j < 3; j++)
+    {
+      ll a = iface.triangles[3*t + j], b = iface.triangles[3*t + (j + 1)%3];
+      const std::vector<ll> &on = edgeTriangles[std::make_pair(std::min(a, b), std::max(a, b))];
+      for (size_t q = 0; q < on.size(); q++) if (on[q] != t && !structured3[on[q]]) junction++;
+    }
+    if (junction >= 2) notchesFar.push_back(t);
+  }
+  std::vector<ll> seeds3;
+  for (ll p = 0; p < np; p++) if (std::abs(iface.points[3*p + 2] - 2.0) < 0.1) seeds3.push_back(p);
+  for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) if (std::abs(zOf(t, j) - 2.0) < 0.1) structured3[t] = 0;
+  WidenJunctionZone(iface, seeds3, none, 1, structured3);
+  ll notchesTaken = 0;
+  for (size_t m = 0; m < notchesFar.size(); m++) if (!structured3[notchesFar[m]]) notchesTaken++;
+  printf("  %zu notches in a zone far from the seeds, %lld of them taken by the widening\n", notchesFar.size(), notchesTaken);
+  Check(!notchesFar.empty() && notchesTaken == 0, "the smoothing left the zone away from the widening's front alone");
 }
 
 int main()
