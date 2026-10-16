@@ -216,6 +216,7 @@ struct Report
   double largestBubbleAt[3] = {0.0, 0.0, 0.0};   // its centre
   long long numCollapsed = 0;            // edges collapsed by the decimation
   long long numRefusedForCrossing = 0;   // decimation operations refused because a triangle they would make passes through a live triangle near it
+  long long numWelded = 0;               // fins (a folded pair whose apexes lie on one spot) whose apexes were welded after the decimation (WeldFoldedApexes)
   long long numUnfolded = 0;             // edges whose two triangles lay on each other within a degree, flipped, collapsed or taken out with the spike point they stand on by the decimation's last pass
   long long numFoldedEdges = 0;          // of the result: edges whose two triangles still lie on each other within foldDegrees, which the volume mesher refuses
   double smallestFoldDegrees = 180.0;    // of the result: the smallest angle between the two triangles on an edge (180 is flat, 0 is folded)
@@ -882,6 +883,29 @@ struct FoldedPair
  */
 long long ListFoldedEdges(const std::vector<double> &points, const std::vector<long long> &triangles,
     double maxDegrees, size_t maxPairs, std::vector<FoldedPair> &pairs, double &smallestDegrees);
+
+/**
+ * @brief Welds the apexes of folded pairs whose apexes lie on one spot.
+ *
+ * A pair (a, b, c), (b, a, d) lying on each other across a-b within
+ * maxDegrees with c and d closer than maxApexFraction of a-b is a fin: the
+ * decimation left two copies of one point. Measured on the user's model
+ * (2026-10-16, two of three runs): the fin stands on a spike point b of
+ * three triangles, (a, c, b), (b, d, a) and the sliver (b, c, d) on the edge
+ * c-d, a tetrahedron of no volume on the sheet; the collapse of c-d is
+ * refused since a is next to both (the fin pair would be doubled), the fin
+ * weld since the sliver's third corner is next to both too, the flip since
+ * its triangles are degenerate, the spike since its ring triangle is. Here
+ * the apex on fewer triangles goes onto the other: the triangles on it are
+ * rewritten, those with a corner twice die, a pair with one corner set and
+ * opposite windings dies (the fin), and the weld is refused when a pair with
+ * one corner set winds the same way, a rewritten triangle turns over, or an
+ * edge about the apex is left on one or three triangles where it had two
+ * (0 or 2 after, or as many as before). Dead triangles are taken out.
+ * @return The number of fins welded; *numRefused the number refused.
+ */
+long long WeldFoldedApexes(std::vector<double> &points, std::vector<long long> &triangles,
+    double maxDegrees, double maxApexFraction, long long *numRefused = nullptr);
 
 /**
  * @brief Closed pieces of a surface too small for the mesh, taken out.

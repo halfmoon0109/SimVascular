@@ -329,7 +329,8 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_StitchCapAnnulus(vtkPoints *points,
     const std::vector<vtkIdType> &outerLoop,
     const double outward[3],
     vtkCellArray *cells,
-    int &numDegenerate);
+    int &numDegenerate,
+    int *numInverted = nullptr);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_BuildOffsetOuterSurface(vtkPolyData *surface,
     vtkDoubleArray *array,

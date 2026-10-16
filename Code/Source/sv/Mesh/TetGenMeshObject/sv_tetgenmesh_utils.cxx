@@ -5681,9 +5681,9 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
         report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numZeroCloudPoints,
         report.numDegenerateContourTriangles, report.numContourPointsOffLevel, options.snapIterations, report.numCollapsed,
         report.numPoints, report.numTriangles, report.secondsDecimate, report.numRefusedForCrossing);
-    fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another, %lld edges whose two triangles lie on each other within %.2g degree (%lld unfolded by the decimation; the smallest angle between two triangles on an edge is %.3g degrees)\n",
+    fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another, %lld edges whose two triangles lie on each other within %.2g degree (%lld unfolded by the decimation, %lld fins welded after it; the smallest angle between two triangles on an edge is %.3g degrees)\n",
         report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing,
-        report.numFoldedEdges, svoffset::foldDegrees, report.numUnfolded, report.smallestFoldDegrees);
+        report.numFoldedEdges, svoffset::foldDegrees, report.numUnfolded, report.numWelded, report.smallestFoldDegrees);
     if (report.numBubblesDropped > 0)
     {
       fprintf(stdout,"  %lld closed piece(s) of the contour taken out before the decimation as smaller across than %g times the local size (bubbles around pockets where the level closes over a gap between walls): %lld triangles, the largest %.3g across at (%.5g, %.5g, %.5g)\n",
@@ -6805,6 +6805,9 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
  * @param outward The direction out of the vessel end.
  * @param cells The annulus triangles are appended here, facing outward.
  * @param numDegenerate Set to the number of zero-area triangles produced.
+ * @param numInverted If given, set to the number of triangles that faced into
+ * the vessel as made and were turned: a rim point behind its neighbour in
+ * angle, so the triangle lies on its neighbour (the shell check reports them).
  * @return SV_OK if the annulus is built.
  */
 
@@ -6813,9 +6816,14 @@ int TGenUtils_StitchCapAnnulus(vtkPoints *points,
     const std::vector<vtkIdType> &outerLoop,
     const double outward[3],
     vtkCellArray *cells,
-    int &numDegenerate)
+    int &numDegenerate,
+    int *numInverted)
 {
   numDegenerate = 0;
+  if (numInverted != nullptr)
+  {
+    *numInverted = 0;
+  }
 
   if (points == nullptr || cells == nullptr)
   {
@@ -6930,31 +6938,57 @@ int TGenUtils_StitchCapAnnulus(vtkPoints *points,
     }
   }
 
-  // The angle swept from each rim's start, rescaled so both end at a full turn.
-  // Rescaling matters because the two rims start a little apart in angle;
-  // without it the merge would run one rim out before the other.
+  // The angle swept from the inner rim's start, both rims in that one frame:
+  // the outer rim starts where it starts, its gap from the inner start
+  // included, and each rim sweeps a full turn from there (each winds once,
+  // checked above, so the wrapped steps sum to one turn). Rescaling the two
+  // sweeps to end together, as before 2026-10-16, measured the outer rim
+  // from its own start and so read it behind by the gap: at a cap of a thin
+  // vessel (wall 0.18, rims 0.06 apart, the gap about one rim edge) the merge
+  // ran the layer rim an edge ahead of the outer one, and the triangles
+  // between them lay on each other and were wound against their neighbours.
   std::vector<double> innerSweep(n+1, 0.0), outerSweep(m+1, 0.0);
   for (size_t k = 0; k < n; k++)
   {
     innerSweep[k+1] = innerSweep[k] + wrap(angleOf(inner[(k+1)%n]) - angleOf(inner[k]));
   }
+  outerSweep[0] = wrap(angleOf(outerRim[startOuter]) - startAngle);
   for (size_t k = 0; k < m; k++)
   {
     outerSweep[k+1] = outerSweep[k] +
         wrap(angleOf(outerRim[(startOuter+k+1)%m]) - angleOf(outerRim[(startOuter+k)%m]));
   }
-  for (size_t k = 0; k <= n; k++)
+
+  // The annulus is the end face of the wall, so it faces out of the vessel
+  // end. Which of the two orders gives that depends on which rim was
+  // advanced, so it is measured rather than worked out per case.
+  auto facing = [&](const vtkIdType triangle[3], double normal[3]) -> int
   {
-    innerSweep[k] /= innerSweep[n];
-  }
-  for (size_t k = 0; k <= m; k++)
-  {
-    outerSweep[k] /= outerSweep[m];
-  }
+    double p0[3], p1[3], p2[3], e1[3], e2[3];
+    points->GetPoint(triangle[0], p0);
+    points->GetPoint(triangle[1], p1);
+    points->GetPoint(triangle[2], p2);
+    vtkMath::Subtract(p1, p0, e1);
+    vtkMath::Subtract(p2, p0, e2);
+    vtkMath::Cross(e1, e2, normal);
+    if (vtkMath::Norm(normal) <= 0.0)
+    {
+      return 0;
+    }
+    return (vtkMath::Dot(normal, outward) < 0.0) ? -1 : 1;
+  };
 
   size_t i = 0, j = 0;
   while (i < n || j < m)
   {
+    // the triangle each advance would make, and whether it faces out; the
+    // rim whose next point comes first in angle advances, unless its
+    // triangle faces in (a rim point behind its neighbour in angle) and the
+    // other rim's does not
+    vtkIdType byInner[3] = {inner[i%n], inner[(i+1)%n], outerRim[(startOuter+j)%m]};
+    vtkIdType byOuter[3] = {outerRim[(startOuter+j)%m], outerRim[(startOuter+j+1)%m], inner[i%n]};
+    double normalInner[3], normalOuter[3];
+    const int faceInner = facing(byInner, normalInner), faceOuter = facing(byOuter, normalOuter);
     bool advanceInner;
     if (i >= n)
     {
@@ -6967,45 +7001,47 @@ int TGenUtils_StitchCapAnnulus(vtkPoints *points,
     else
     {
       advanceInner = (innerSweep[i+1] <= outerSweep[j+1]);
+      if (advanceInner && faceInner < 0 && faceOuter > 0)
+      {
+        advanceInner = false;
+      }
+      else if (!advanceInner && faceOuter < 0 && faceInner > 0)
+      {
+        advanceInner = true;
+      }
     }
 
     vtkIdType triangle[3];
+    int face;
     if (advanceInner)
     {
-      triangle[0] = inner[i%n];
-      triangle[1] = inner[(i+1)%n];
-      triangle[2] = outerRim[(startOuter+j)%m];
+      for (int k = 0; k < 3; k++) triangle[k] = byInner[k];
+      face = faceInner;
       i++;
     }
     else
     {
-      triangle[0] = outerRim[(startOuter+j)%m];
-      triangle[1] = outerRim[(startOuter+j+1)%m];
-      triangle[2] = inner[i%n];
+      for (int k = 0; k < 3; k++) triangle[k] = byOuter[k];
+      face = faceOuter;
       j++;
     }
 
-    // The annulus is the end face of the wall, so it faces out of the vessel
-    // end. Which of the two orders gives that depends on which rim was
-    // advanced, so it is measured rather than worked out per case.
-    double p0[3], p1[3], p2[3], e1[3], e2[3], normal[3];
-    points->GetPoint(triangle[0], p0);
-    points->GetPoint(triangle[1], p1);
-    points->GetPoint(triangle[2], p2);
-    vtkMath::Subtract(p1, p0, e1);
-    vtkMath::Subtract(p2, p0, e2);
-    vtkMath::Cross(e1, e2, normal);
-
-    if (vtkMath::Norm(normal) <= 0.0)
+    if (face == 0)
     {
       // Dropping it would leave a hole in the wall's end face, which is worse
       // than a facet the volume mesher will complain about, so it is kept and
       // counted for the caller to report.
       numDegenerate++;
     }
-    else if (vtkMath::Dot(normal, outward) < 0.0)
+    else if (face < 0)
     {
+      // turned to face out; it still lies on its neighbour and is wound
+      // against it, which the caller reports (the shell check refuses it)
       std::swap(triangle[1], triangle[2]);
+      if (numInverted != nullptr)
+      {
+        (*numInverted)++;
+      }
     }
 
     cells->InsertNextCell(3, triangle);
@@ -7719,15 +7755,20 @@ int TGenUtils_BuildWallShellSurface(vtkPolyData *surface, vtkPolyData *outer,
     for (size_t r = 0; r + 1 < rims.size(); r++)
     {
       vtkIdType before = cells->GetNumberOfCells();
-      int numCapDegenerate = 0;
+      int numCapDegenerate = 0, numCapInverted = 0;
       if (TGenUtils_StitchCapAnnulus(points, rims[r], rims[r+1],
-            caps[c].outward, cells, numCapDegenerate) != SV_OK)
+            caps[c].outward, cells, numCapDegenerate, &numCapInverted) != SV_OK)
       {
         fprintf(stderr,"Problem closing the wall at the cap at (%.5g, %.5g, %.5g) between its rims %zu and %zu\n",
             caps[c].origin[0], caps[c].origin[1], caps[c].origin[2], r, r + 1);
         return SV_ERROR;
       }
       numDegenerate += numCapDegenerate;
+      if (numCapInverted > 0)
+      {
+        fprintf(stdout,"  the annulus at the cap at (%.5g, %.5g, %.5g) between its rims %zu and %zu has %d triangle(s) that faced in as made and were turned (a rim point behind its neighbour in angle)\n",
+            caps[c].origin[0], caps[c].origin[1], caps[c].origin[2], r, r + 1, numCapInverted);
+      }
       for (vtkIdType added = before; added < cells->GetNumberOfCells(); added++)
       {
         roles->InsertNextValue(sideRole);

@@ -601,6 +601,54 @@ static void TestFoldCount()
   Check(n == 0 && std::abs(smallest - 90.0) < 1e-6, "and none is counted when they stand apart");
 }
 
+// 0d. A fin as the decimation left it on the user's model (2026-10-16): a
+// sheet with two copies c and d of one point, the fin (c, a, b), (a, d, b)
+// standing out of it to a spike point b, and the sliver (d, c, b) between
+// the copies. The weld takes the fin, the sliver and the sheet's own sliver
+// (c, d, x) out and rewrites the sheet's triangles on d to c, leaving a
+// plain sheet. Apexes a tenth of the edge apart are left alone.
+static void TestFoldedApexWeld()
+{
+  printf("test 0d: the apexes of a fin on a spike point are welded, the fin and its slivers taken out\n");
+  //                     a        b              c        d            x        y          z          w
+  std::vector<double> pts = {0,0,0,  0.3,0.5,0.4,  0,1,0,  1e-4,1,0,  0,2,0,  -1,1.5,0,  1,0.5,0,  1,1.5,0};
+  const ll a = 0, b = 1, c = 2, d = 3, x = 4, y = 5, z = 6, w = 7;
+  std::vector<ll> tris = {a,c,y,  c,x,y,  a,z,d,  d,z,w,  d,w,x,  c,d,x,  d,c,b,  c,a,b,  a,d,b};
+  std::vector<svoffset::FoldedPair> pairs;
+  double smallest = 0.0;
+  ll before = svoffset::ListFoldedEdges(pts, tris, 1.0, 4, pairs, smallest);
+  ll nb, nn, nm;
+  svoffset::CountEdges(tris, nb, nn, nm);
+  printf("  before: %zu triangles, %lld folded pair(s) at %.3g degrees, %lld boundary, %lld non-manifold, %lld miswound edges\n", tris.size()/3, before, smallest, nb, nn, nm);
+  Check(before == 1 && nn == 0 && nm == 0, "the sheet with the fin is manifold and has the one folded pair");
+  long long refused = -1;
+  const long long welded = svoffset::WeldFoldedApexes(pts, tris, 1.0, 0.1, &refused);
+  ll after = svoffset::ListFoldedEdges(pts, tris, 1.0, 4, pairs, smallest);
+  ll nb2, nn2, nm2;
+  svoffset::CountEdges(tris, nb2, nn2, nm2);
+  printf("  welded %lld (refused %lld): %zu triangles on %zu points, %lld folded, %lld boundary, %lld non-manifold, %lld miswound edges\n",
+      welded, refused, tris.size()/3, pts.size()/3, after, nb2, nn2, nm2);
+  Check(welded == 1 && refused == 0, "the one fin is welded");
+  Check(tris.size()/3 == 5 && pts.size()/3 == 6, "the fin, its sliver and the sheet's sliver are gone with the spike point and one apex");
+  Check(after == 0 && nn2 == 0 && nm2 == 0 && nb2 == nb, "what is left is a manifold sheet with no fold and the boundary it had");
+  bool plain = true;
+  for (size_t t = 0; t < tris.size()/3; t++)
+  {
+    double n[3], e1[3], e2[3];
+    for (int k = 0; k < 3; k++) { e1[k] = pts[3*tris[3*t+1]+k] - pts[3*tris[3*t]+k]; e2[k] = pts[3*tris[3*t+2]+k] - pts[3*tris[3*t]+k]; }
+    n[0] = e1[1]*e2[2] - e1[2]*e2[1]; n[1] = e1[2]*e2[0] - e1[0]*e2[2]; n[2] = e1[0]*e2[1] - e1[1]*e2[0];
+    if (!(n[2] > 1e-6)) plain = false;
+  }
+  Check(plain, "every triangle left lies in the sheet and faces up");
+  // apexes well apart: not a fin, left alone
+  std::vector<double> pts2 = {0,0,0,  1,0,0,  0.5,1,0,  0.5,0.3,0.2,  0.5,-1,0};
+  std::vector<ll> tris2 = {0,1,2,  1,0,3,  1,0,4};
+  refused = -1;
+  const long long welded2 = svoffset::WeldFoldedApexes(pts2, tris2, 1.0, 0.1, &refused);
+  printf("  apexes 0.7 apart on an edge of 1: welded %lld\n", welded2);
+  Check(welded2 == 0 && tris2.size() == 9, "a folded pair whose apexes are apart is not touched");
+}
+
 // 0b. The decimation's crossing guard: two new triangles of one operation,
 // tested one after the other, are each tested against every triangle near
 // them. With one mark for "leaving" and "already seen", the second test
@@ -764,6 +812,7 @@ static void TestLayers()
 int main()
 {
   TestFoldCount();
+  TestFoldedApexWeld();
   TestCrossingGuard();
   TestBubbles();
   TestTube();

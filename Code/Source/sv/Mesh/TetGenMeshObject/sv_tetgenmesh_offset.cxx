@@ -3234,6 +3234,10 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     pts = newPts;
     tris = newTris;
   }
+  // the fins the unfolding could not take (two of three runs on the user's
+  // model, 2026-10-16: a folded pair with its apexes on one spot, on a
+  // spike point with the sliver between the apexes), their apexes welded
+  report.numWelded = WeldFoldedApexes(pts, tris, 1.0, 0.1);
   // Which vessel end each point belongs to (see Surface::pointRim).
   surface.rims = field.Rims();
   surface.pointRim.assign(pts.size()/3, -1);
@@ -4944,6 +4948,214 @@ long long WrapCoveredRegions(const Interface &input, const OffsetField &field, c
     }
   }
   return total;
+}
+
+//-------------------
+// WeldFoldedApexes
+//-------------------
+long long WeldFoldedApexes(std::vector<double> &points, std::vector<long long> &triangles,
+    double maxDegrees, double maxApexFraction, long long *numRefused)
+{
+  if (numRefused != nullptr) *numRefused = 0;
+  const ll np = (ll)(points.size()/3);
+  ll nt = (ll)(triangles.size()/3);
+  std::vector<unsigned char> dead((size_t)nt, 0);
+  long long numWelded = 0;
+  auto normalOf = [&](const ll *T, double n[3])
+  {
+    double e1[3], e2[3];
+    Sub(&points[(size_t)3*T[1]], &points[(size_t)3*T[0]], e1);
+    Sub(&points[(size_t)3*T[2]], &points[(size_t)3*T[0]], e2);
+    Cross(e1, e2, n);
+  };
+  auto sameSet = [](const ll *A, const ll *B) -> bool
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      bool found = false;
+      for (int k = 0; k < 3; k++) if (A[j] == B[k]) found = true;
+      if (!found) return false;
+    }
+    return true;
+  };
+  auto sameWinding = [](const ll *A, const ll *B) -> bool
+  {
+    // the same corner set: the same way round when B is a rotation of A
+    for (int r = 0; r < 3; r++)
+    {
+      if (A[0] == B[r] && A[1] == B[(r + 1)%3] && A[2] == B[(r + 2)%3]) return true;
+    }
+    return false;
+  };
+  for (int pass = 0; pass < 100; pass++)
+  {
+    // the live triangles and the folded pairs among them
+    std::vector<ll> live, liveId;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (dead[(size_t)t]) continue;
+      live.insert(live.end(), &triangles[(size_t)3*t], &triangles[(size_t)3*t] + 3);
+      liveId.push_back(t);
+    }
+    std::vector<FoldedPair> pairs;
+    double smallest = 180.0;
+    ListFoldedEdges(points, live, maxDegrees, (size_t)1 << 20, pairs, smallest);
+    if (pairs.empty()) break;
+    std::vector<std::vector<ll> > incident((size_t)np);
+    for (size_t m = 0; m < liveId.size(); m++)
+    {
+      for (int j = 0; j < 3; j++) incident[(size_t)live[3*m + j]].push_back(liveId[m]);
+    }
+    bool changed = false;
+    for (size_t p = 0; p < pairs.size() && !changed; p++)
+    {
+      const ll t1 = liveId[(size_t)pairs[p].a], t2 = liveId[(size_t)pairs[p].b];
+      if (dead[(size_t)t1] || dead[(size_t)t2]) continue;
+      const ll a = pairs[p].edge[0], b = pairs[p].edge[1];
+      ll c = -1, d = -1;
+      for (int j = 0; j < 3; j++)
+      {
+        const ll w1 = triangles[(size_t)3*t1 + j], w2 = triangles[(size_t)3*t2 + j];
+        if (w1 != a && w1 != b) c = w1;
+        if (w2 != a && w2 != b) d = w2;
+      }
+      if (c < 0 || d < 0 || c == d) continue;
+      const double apart = Distance(&points[(size_t)3*c], &points[(size_t)3*d]);
+      const double edge = Distance(&points[(size_t)3*a], &points[(size_t)3*b]);
+      if (!(apart <= maxApexFraction*edge)) continue;
+      // the apex on fewer triangles goes (u) onto the other (v)
+      const ll u = incident[(size_t)c].size() <= incident[(size_t)d].size() ? c : d;
+      const ll v = (u == c) ? d : c;
+      // the rewritten triangles on u, and the triangles on v, after the weld
+      struct Tri { ll t; ll T[3]; bool dies; };
+      std::vector<Tri> after;
+      for (size_t m = 0; m < incident[(size_t)u].size(); m++)
+      {
+        Tri x;
+        x.t = incident[(size_t)u][m];
+        x.dies = false;
+        for (int j = 0; j < 3; j++) x.T[j] = triangles[(size_t)3*x.t + j] == u ? v : triangles[(size_t)3*x.t + j];
+        if (x.T[0] == x.T[1] || x.T[1] == x.T[2] || x.T[2] == x.T[0]) x.dies = true;
+        else
+        {
+          double nOld[3], nNew[3];
+          normalOf(&triangles[(size_t)3*x.t], nOld);
+          normalOf(x.T, nNew);
+          if (!(Dot(nOld, nNew) > 0.0)) { x.dies = false; x.t = -1; }   // turned over: refused below
+        }
+        after.push_back(x);
+      }
+      bool refused = false;
+      for (size_t m = 0; m < after.size(); m++) if (after[m].t < 0) refused = true;
+      for (size_t m = 0; m < incident[(size_t)v].size(); m++)
+      {
+        Tri x;
+        x.t = incident[(size_t)v][m];
+        x.dies = false;
+        bool onU = false;
+        for (int j = 0; j < 3; j++) { x.T[j] = triangles[(size_t)3*x.t + j]; if (x.T[j] == u) onU = true; }
+        if (onU) continue;   // already among the rewritten
+        after.push_back(x);
+      }
+      // a pair with one corner set: opposite windings die together (the fin), the same winding refuses
+      for (size_t m = 0; m < after.size() && !refused; m++)
+      {
+        if (after[m].dies) continue;
+        for (size_t q = m + 1; q < after.size(); q++)
+        {
+          if (after[q].dies || !sameSet(after[m].T, after[q].T)) continue;
+          if (sameWinding(after[m].T, after[q].T)) { refused = true; break; }
+          after[m].dies = after[q].dies = true;
+          break;
+        }
+      }
+      if (!refused)
+      {
+        // every edge at a corner of a changed triangle: on 0 or 2 triangles after, or on as many as before
+        std::map<std::pair<ll, ll>, std::pair<int, int> > count;   // before, after
+        std::set<ll> changedTris, corners;
+        for (size_t m = 0; m < after.size(); m++)
+        {
+          changedTris.insert(after[m].t);
+          for (int j = 0; j < 3; j++) corners.insert(triangles[(size_t)3*after[m].t + j]);
+        }
+        corners.insert(v);
+        std::set<ll> seen;
+        for (std::set<ll>::const_iterator it = corners.begin(); it != corners.end(); ++it)
+        {
+          const std::vector<ll> &around = incident[(size_t)*it];
+          for (size_t m = 0; m < around.size(); m++)
+          {
+            const ll t = around[m];
+            if (!seen.insert(t).second) continue;
+            for (int j = 0; j < 3; j++)
+            {
+              const ll x = triangles[(size_t)3*t + j], y = triangles[(size_t)3*t + (j + 1)%3];
+              count[std::make_pair(std::min(x, y), std::max(x, y))].first++;
+            }
+            if (changedTris.count(t)) continue;
+            for (int j = 0; j < 3; j++)
+            {
+              const ll x = triangles[(size_t)3*t + j], y = triangles[(size_t)3*t + (j + 1)%3];
+              count[std::make_pair(std::min(x, y), std::max(x, y))].second++;
+            }
+          }
+        }
+        for (size_t m = 0; m < after.size(); m++)
+        {
+          if (after[m].dies) continue;
+          for (int j = 0; j < 3; j++)
+          {
+            const ll x = after[m].T[j], y = after[m].T[(j + 1)%3];
+            count[std::make_pair(std::min(x, y), std::max(x, y))].second++;
+          }
+        }
+        for (std::map<std::pair<ll, ll>, std::pair<int, int> >::const_iterator it = count.begin(); it != count.end() && !refused; ++it)
+        {
+          const int before = it->second.first, now = it->second.second;
+          if (now == 0 || now == 2 || now == before) continue;
+          refused = true;
+        }
+      }
+      if (refused)
+      {
+        if (numRefused != nullptr) (*numRefused)++;
+        continue;
+      }
+      for (size_t m = 0; m < after.size(); m++)
+      {
+        if (after[m].dies) { dead[(size_t)after[m].t] = 1; continue; }
+        for (int j = 0; j < 3; j++) triangles[(size_t)3*after[m].t + j] = after[m].T[j];
+      }
+      numWelded++;
+      changed = true;
+    }
+    if (!changed) break;
+  }
+  if (numWelded > 0)
+  {
+    // the dead triangles and the points no triangle uses taken out
+    std::vector<ll> newTris;
+    std::vector<ll> newId((size_t)np, -1);
+    std::vector<double> newPts;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (dead[(size_t)t]) continue;
+      for (int j = 0; j < 3; j++)
+      {
+        const ll w = triangles[(size_t)3*t + j];
+        if (newId[(size_t)w] < 0)
+        {
+          newId[(size_t)w] = (ll)(newPts.size()/3);
+          newPts.insert(newPts.end(), &points[(size_t)3*w], &points[(size_t)3*w] + 3);
+        }
+        newTris.push_back(newId[(size_t)w]);
+      }
+    }
+    points.swap(newPts);
+    triangles.swap(newTris);
+  }
+  return numWelded;
 }
 
 //----------------
