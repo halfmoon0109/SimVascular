@@ -522,3 +522,302 @@ Assessment: ACCEPTABLE (some distorted elements)
 !1581.512! WARNING: QPainter::end: Painter ended with 2 saved states
 !1581.515! WARNING: QPainter::end: Painter ended with 2 saved states
 !1581.516! WARNING: QPainter::end: Painter ended with 2 saved states
+Getting sizing function Surface
+Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 4218044
+  Min / Avg / Max: 1.000 / 1.157 / 46.986
+  Aspect ratio > 10: 1, > 30: 1, > 100: 0
+  aspect ratio 46.986 at (4.27209, -25.5107, 74.2352), edges 0.122389 0.160426 0.282619
+Remeshing surface with MMG...
+  -- MMGS, Release 5.3.8 (Apr. 10, 2017) 
+     Copyright (c) IMB-LJLL, 2004-
+     Jul  6 2026 02:09:01
+
+  -- MMGS: INPUT DATA
+  --  INPUT DATA COMPLETED.     0.000s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   MODULE MMGS: IMB-LJLL : 5.3.8 (Apr. 10, 2017)
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- PHASE 1 : ANALYSIS
+
+  -- MESH QUALITY   4218044
+     BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
+  -- PHASE 1 COMPLETED.     3.232s
+
+  -- PHASE 2 : ISOTROPIC MESHING
+         3479 splitted,  1857468 collapsed,    93845 swapped, 5 iter.
+
+  -- GRADATION : 1.300000
+          119 splitted,        5 collapsed,       58 swapped, 3 iter.
+        33026 splitted,   106893 collapsed,    26100 swapped,  4130238 moved, 2 iter. 
+  -- PHASE 2 COMPLETED.     13.035s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   END OF MODULE MMGS: IMB-LJLL 
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- MESH QUALITY   359794
+     BEST   1.000000  AVRG.   0.972488  WRST.   0.388243 (346014)
+
+  -- MESH PACKED UP
+     NUMBER OF VERTICES     179891   CORNERS       10
+     NUMBER OF TRIANGLES    359794
+     NUMBER OF EDGES          1666   RIDGES      1666
+
+   MMGSLIB: ELAPSED TIME  16.367s
+Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 356387
+  Min / Avg / Max: 1.000 / 1.209 / 4.898
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+Checking surface mesh
+Regions: 1
+Number of Free Edges on Surface: 481
+Number of Non-Manifold Edges on Surface: 0
+[GenerateBoundaryLayerMesh] 
+[GenerateBoundaryLayerMesh] ========== cvTetGenMeshObject::GenerateBoundaryLayerMesh ==========
+[GenerateBoundaryLayerMesh] markerListName: CellEntityIds
+Surface triangle quality (fluid/wall interface surface), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 356387
+  Min / Avg / Max: 1.000 / 1.209 / 4.898
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+[GenerateBoundaryLayerMesh] negateWarpVectors: 1
+[GenerateBoundaryLayerMesh] useConstantThickness: 0
+[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals.
+Fluid boundary layer options in effect: MaxEdgeSize 0.1953, BLThicknessFactor 0.8, constant thickness 0 (total layer thickness 0.15624), NumSubLayers 3, SubLayerRatio 0.5
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [fluid boundary layer, inward]:
+  concave points: 178358 of 178414; points with t/R >= 1 / 2 / 4: 0/0/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  no point requests a thickness above its concave radius of curvature
+0 tangle triangles found
+Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: 0/0/0 of 178414
+Wall mesh options in effect: WallThickness 0.5, CurvatureFactor 0, SmoothingIterations 0, NumberOfWallLayers 3
+  local wall thickness by model face (others 0.5): 1:1.7 2:1.7 3:0.18 4:1 5:0.18 6:0.55 7:0.55 8:1.7 9:0.55 10:0.75 11:0.26 12:0.26 13:0.18 14:0.26 15:1.2 16:1.1 17:0.55 18:0.15 19:1 20:1.1 21:1.1 22:0.75 23:0.29 24:0.75 25:0.3 26:0.75 27:0.26 28:1.1 29:0.12 30:0.1 31:0.3 32:0.1 33:0.18 34:0.1 35:0.18 36:0.1 37:0.15 38:0.1 39:0.18 40:0.1
+  CurvatureFactor and SmoothingIterations are wedge-extrusion options: the TetGen fill ignores them (its ramp toward thicker neighbours, slope 0.5, grades the thickness)
+  the wall is filled with TetGen tetrahedra in 3 layer(s) through the thickness: 2 offset surface(s) at fractions of the thickness go into the shell as facets the mesher keeps, so each layer is one tetrahedron thick; SmoothingIterations and CurvatureFactor act on the thickness field only
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [solid wall, outward]:
+  concave points: 62421 of 178414; points with t/R >= 1 / 2 / 4: 208/11/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  concave regions with t/R >= 1: 19 in total (separated by 8.012), worst 8 shown:
+    [1] t/R 2.54 (t 0.875, R_typical 0.34385, R_smallest 0.17893) at (-38.138, -27.592, -95.672), 37 points
+    [2] t/R 2.15 (t 1.45, R_typical 0.67342, R_smallest 0.49471) at (-0.20073, -24.167, -176.28), 23 points
+    [3] t/R 2.15 (t 0.875, R_typical 0.40745, R_smallest 0.36215) at (20.544, -43.328, -90.664), 32 points
+    [4] t/R 2.08 (t 1.35, R_typical 0.64788, R_smallest 0.48937) at (11.294, -20.97, -171.17), 20 points
+    [5] t/R 1.83 (t 1.4, R_typical 0.76433, R_smallest 0.55037) at (26.094, -7.7192, -168.73), 18 points
+    [6] t/R 1.78 (t 1.1, R_typical 0.61942, R_smallest 0.45017) at (-31.779, -36.855, -150.81), 15 points
+    [7] t/R 1.66 (t 1.4, R_typical 0.8455, R_smallest 0.56229) at (17.816, -14.219, -168.58), 10 points
+    [8] t/R 1.62 (t 0.35, R_typical 0.21653, R_smallest 0.14147) at (-9.2112, -34.73, 65.874), 5 points
+    ... 48 further points with t/R >= 1 in the remaining 11 regions
+Wall thickness reduction (final vs requested): points below 90%/50%/25%: 0/0/0 of 178414
+  wrote wall_diagnostics.vtp in /work
+Thickness ramp toward thicker neighbours (fall of at most 0.5 per unit distance) [requested wall thickness]: raised 907 of 178414 points; largest raise 0.27305 at (-9.212, -34.222, 65.836) (0.15 -> 0.42305)
+Wall outer surface and its 2 layer surface(s) as offsets of the interface at 0.333 0.667 1 of the thickness, contoured from one distance field so that they are nested:
+  178414 interface points and 356387 triangles
+  offset surface: the distance field: the interface, its collars and their search grid
+  offset surface: the point cloud and the field on its outer layer
+  offset surface: the field on the cloud at this fraction of the thickness (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the Delaunay tetrahedralization of the cloud (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: marching tetrahedra over the cloud (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the decimation of the contour to the interface's size (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the field on the cloud at this fraction of the thickness (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: the Delaunay tetrahedralization of the cloud (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: marching tetrahedra over the cloud (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: the decimation of the contour to the interface's size (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: the Delaunay tetrahedralization of the cloud (surface 3 of 3, at 1 of the thickness)
+  offset surface: marching tetrahedra over the cloud (surface 3 of 3, at 1 of the thickness)
+  offset surface: the decimation of the contour to the interface's size (surface 3 of 3, at 1 of the thickness)
+  thickness 0.1 to 1.7; 14 cap rims continued by collars of 962 triangles
+  the field was sampled on 716542 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges, each offset point 0.1 of its distance off its ray); 3.1 s for the field
+  wrote wall_layer_1_of_3_offset.vtp in /work
+  surface 1 of 3, at 0.333 of the thickness (layer_1_of_3):
+  5148426 tetrahedra over the cloud, 1305450 of them cut by the level (2.8 s); the contour had 943907 points and 1887826 triangles (4.6 s; 0 cloud points on the level itself, 0 triangles of no area left out, 8 points still off the level after 16 steps); 693623 edges collapsed onto the level to the interface's own size, leaving 250284 points and 500580 triangles (55.8 s; 0 operations refused because a triangle they would make passes through a neighbour)
+  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation; the smallest angle between two triangles on an edge is 6.95 degrees)
+  wrote wall_layer_2_of_3_offset.vtp in /work
+  surface 2 of 3, at 0.667 of the thickness (layer_2_of_3):
+  5148426 tetrahedra over the cloud, 1257868 of them cut by the level (2.9 s); the contour had 895516 points and 1791064 triangles (4.4 s; 0 cloud points on the level itself, 0 triangles of no area left out, 3 points still off the level after 16 steps); 644842 edges collapsed onto the level to the interface's own size, leaving 250674 points and 501380 triangles (44.7 s; 18 operations refused because a triangle they would make passes through a neighbour)
+  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 1 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation; the smallest angle between two triangles on an edge is 0.0275 degrees)
+  the first fault is two triangles of the offset surface lying on each other across an edge at (25.012, -37.492, -77.721)
+  wrote wall_outer_offset.vtp in /work
+  surface 3 of 3, at 1 of the thickness (outer):
+  5148426 tetrahedra over the cloud, 1252865 of them cut by the level (2.7 s); the contour had 892306 points and 1784640 triangles (4.3 s; 0 cloud points on the level itself, 0 triangles of no area left out, 42 points still off the level after 16 steps); 588128 edges collapsed onto the level to the interface's own size, leaving 304178 points and 608384 triangles (47.8 s; 0 operations refused because a triangle they would make passes through a neighbour)
+  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation; the smallest angle between two triangles on an edge is 0.319 degrees)
+  12932772 field evaluations in all; 185.7 s for the 3 surface(s)
+  trimming at the caps by the ownership the offset surface carries
+    cap at (-7.3439, -29.897, 73.208): 121 points past its plane came off, 25 moved onto it
+    cap at (6.8066, -35.178, 74.937): 126 points past its plane came off, 33 moved onto it
+    cap at (-2.6581, -58.683, 106.73): 170 points past its plane came off, 26 moved onto it
+    cap at (-60.326, 0.90499, -157.24): 201 points past its plane came off, 37 moved onto it
+    cap at (58.941, -36.73, -160.25): 182 points past its plane came off, 44 moved onto it
+    cap at (-35.523, -36.568, -54.893): 114 points past its plane came off, 17 moved onto it
+    cap at (0.40292, -54.43, 104.63): 177 points past its plane came off, 33 moved onto it
+    cap at (-13.411, 0.1561, 73.48): 207 points past its plane came off, 51 moved onto it
+    cap at (-4.7392, -15.769, -232.29): 392 points past its plane came off, 66 moved onto it
+    cap at (-33.548, -49.496, 72.021): 280 points past its plane came off, 64 moved onto it
+    cap at (12.398, -0.64914, 64.315): 166 points past its plane came off, 28 moved onto it
+    cap at (39.306, 24.142, -258.77): 240 points past its plane came off, 42 moved onto it
+    cap at (26.521, -42.075, 71.189): 280 points past its plane came off, 58 moved onto it
+    cap at (22.996, -41.361, -58.33): 133 points past its plane came off, 20 moved onto it
+    4990 triangles past a plane removed, 239 split along one, 991 dropped for touching the kept side only along an edge or at a point or for lying flat in the plane; 304178 -> 301508 points, 608384 -> 602409 triangles; 663 rim edges, the shortest 0.250 of the local edge, the smallest angle between a rim triangle and its plane 76.31 degrees
+  trimmed the offset surface at 14 cap planes, leaving 301508 points and 602409 triangles
+    cap at (-7.3439, -29.897, 73.208): inner rim 21 points, trimmed rim 27 points (radius 0.30538, wall 0.1, rim edge 0.086429)
+    cap at (6.8066, -35.178, 74.937): inner rim 21 points, trimmed rim 33 points (radius 0.30669, wall 0.1, rim edge 0.085611)
+    cap at (-2.6581, -58.683, 106.73): inner rim 26 points, trimmed rim 33 points (radius 1.2433, wall 0.18, rim edge 0.2834)
+    cap at (-60.326, 0.90499, -157.24): inner rim 37 points, trimmed rim 41 points (radius 4.2906, wall 1.1, rim edge 0.68079)
+    cap at (58.941, -36.73, -160.25): inner rim 35 points, trimmed rim 54 points (radius 4.3265, wall 1.1, rim edge 0.71713)
+    cap at (-35.523, -36.568, -54.893): inner rim 21 points, trimmed rim 37 points (radius 1.4056, wall 0.75, rim edge 0.4014)
+    cap at (0.40292, -54.43, 104.63): inner rim 28 points, trimmed rim 40 points (radius 1.2287, wall 0.18, rim edge 0.27011)
+    cap at (-13.411, 0.1561, 73.48): inner rim 38 points, trimmed rim 54 points (radius 1.0499, wall 0.15, rim edge 0.17255)
+    cap at (-4.7392, -15.769, -232.29): inner rim 67 points, trimmed rim 70 points (radius 19.858, wall 1.7, rim edge 1.7195)
+    cap at (-33.548, -49.496, 72.021): inner rim 51 points, trimmed rim 72 points (radius 1.5069, wall 0.26, rim edge 0.17863)
+    cap at (12.398, -0.64914, 64.315): inner rim 26 points, trimmed rim 32 points (radius 1.0453, wall 0.18, rim edge 0.23476)
+    cap at (39.306, 24.142, -258.77): inner rim 40 points, trimmed rim 45 points (radius 11.527, wall 1.7, rim edge 1.6976)
+    cap at (26.521, -42.075, 71.189): inner rim 47 points, trimmed rim 78 points (radius 1.3523, wall 0.26, rim edge 0.16963)
+    cap at (22.996, -41.361, -58.33): inner rim 23 points, trimmed rim 47 points (radius 1.5338, wall 0.75, rim edge 0.40469)
+Surface triangle quality (outer wall offset), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 602409
+  Min / Avg / Max: 1.001 / 1.637 / 169.855
+  Aspect ratio > 10: 159, > 30: 38, > 100: 2
+  aspect ratio 169.855 at (-27.8803, -30.9012, -84.3855), edges 0.45244 0.00313635 0.450321
+  aspect ratio 166.164 at (-27.9944, -30.7798, -84.4594), edges 0.367651 0.365173 0.00313635
+  aspect ratio 68.833 at (-16.1913, 2.7126, -127.969), edges 0.474005 0.298686 0.772433
+  aspect ratio 65.241 at (-16.1352, 2.70449, -127.983), edges 0.772433 0.473931 0.298789
+  aspect ratio 63.796 at (-41.6644, -34.3801, -92.2715), edges 0.409163 0.206718 0.615627
+Offset wall thickness [solid wall, offset]:
+  offset surface to inner surface, over 301508 of its points: below 90%/50%/25% of the requested thickness at 5/0/0, worst 0.827
+    this is the construction, not the shape: every outer point was put a wall from the interface, so a shortfall is the construction giving it back - a vertex normal leaning against its facets reads a percent or two short, and a point left inside a fold reads far shorter
+    regions below 90%: 3 in total (separated by 8.036), worst 3 shown:
+      [1] ratio 0.827 at (4.7206, -24.384, 74.04), 1 points
+      [2] ratio 0.836 at (-1.8817, -38.5, 80.438), 2 points
+      [3] ratio 0.894 at (-30.541, -14.1, -34.339), 2 points
+  inner surface to offset surface, over 178414 of its points: below 90%/50%/25% at 474/0/0, worst 0.849, thickest 3.10x requested
+    this is the wall over the interface. Above one at a junction is the crease filling it, which is intended; below one is wall that is missing
+    132 points carry more than twice the wall asked for, in 8 regions (separated by 8.012), thickest 8 shown:
+      [1] ratio 3.10 (requested 0.18) at (-2.2732, -48.256, 94.782), 66 points
+      [2] ratio 2.98 (requested 0.3) at (5.2601, -21.182, 21.467), 2 points
+      [3] ratio 2.83 (requested 0.18127) at (-8.9035, -34.848, 65.456), 9 points
+      [4] ratio 2.66 (requested 0.75) at (-38.069, -28.207, -95.5), 18 points
+      [5] ratio 2.54 (requested 1) at (-31.785, -36.157, -149.35), 8 points
+      [6] ratio 2.34 (requested 0.75) at (25.9, -36.842, -76.096), 16 points
+      [7] ratio 2.29 (requested 0.75) at (-24.228, -32.335, -82.479), 12 points
+      [8] ratio 2.04 (requested 0.125) at (-4.1764, -30.124, 71.5), 1 points
+      a region at a branch crotch is the crease and is expected; a region on the plain side of a vessel means the wall has reached another vessel passing close by, and the local wall thickness on those faces has to come below half the gap
+    regions below 90%: 41 in total (separated by 8.012), worst 8 shown:
+      [1] ratio 0.849 (requested 0.3) at (4.5054, -21.184, 29.206), 12 points
+      [2] ratio 0.850 (requested 0.29) at (-0.42923, -26.123, 52.968), 8 points
+      [3] ratio 0.850 (requested 0.3) at (-11.413, -4.85, -18.553), 26 points
+      [4] ratio 0.852 (requested 0.3) at (-27.572, -14.124, -28.459), 10 points
+      [5] ratio 0.854 (requested 0.3) at (-33.103, 2.2917, -32.282), 20 points
+      [6] ratio 0.855 (requested 0.3) at (3.8058, -19.707, -1.3831), 22 points
+      [7] ratio 0.858 (requested 0.3) at (10.136, -10.917, 13.965), 14 points
+      [8] ratio 0.859 (requested 0.12) at (3.846, -34.774, 70.71), 54 points
+      ... 308 further points in the remaining 33 regions
+  wrote wall_offset_diagnostics.vtp in /work
+  the smallest angle between two triangles on an edge of the trimmed outer wall offset surface is 0.319 degrees (the mesher refuses under 0.1)
+  trimming at the caps by the ownership the offset surface carries
+    cap at (-7.3439, -29.897, 73.208): 129 points past its plane came off, 25 moved onto it
+    cap at (6.8066, -35.178, 74.937): 123 points past its plane came off, 23 moved onto it
+    cap at (-2.6581, -58.683, 106.73): 172 points past its plane came off, 29 moved onto it
+    cap at (-60.326, 0.90499, -157.24): 210 points past its plane came off, 40 moved onto it
+    cap at (58.941, -36.73, -160.25): 194 points past its plane came off, 37 moved onto it
+    cap at (-35.523, -36.568, -54.893): 125 points past its plane came off, 24 moved onto it
+    cap at (0.40292, -54.43, 104.63): 176 points past its plane came off, 30 moved onto it
+    cap at (-13.411, 0.1561, 73.48): 216 points past its plane came off, 38 moved onto it
+    cap at (-4.7392, -15.769, -232.29): 389 points past its plane came off, 67 moved onto it
+    cap at (-33.548, -49.496, 72.021): 279 points past its plane came off, 56 moved onto it
+    cap at (12.398, -0.64914, 64.315): 169 points past its plane came off, 30 moved onto it
+    cap at (39.306, 24.142, -258.77): 238 points past its plane came off, 44 moved onto it
+    cap at (26.521, -42.075, 71.189): 268 points past its plane came off, 47 moved onto it
+    cap at (22.996, -41.361, -58.33): 130 points past its plane came off, 26 moved onto it
+    5125 triangles past a plane removed, 69 split along one, 962 dropped for touching the kept side only along an edge or at a point or for lying flat in the plane; 250284 -> 247500 points, 500580 -> 494490 triangles; 550 rim edges, the shortest 0.266 of the local edge, the smallest angle between a rim triangle and its plane 74.54 degrees
+  trimmed the offset surface at 14 cap planes, leaving 247500 points and 494490 triangles
+    cap at (-7.3439, -29.897, 73.208): inner rim 21 points, trimmed rim 25 points (radius 0.30538, wall 0.033333, rim edge 0.086429)
+    cap at (6.8066, -35.178, 74.937): inner rim 21 points, trimmed rim 23 points (radius 0.30669, wall 0.033333, rim edge 0.085611)
+    cap at (-2.6581, -58.683, 106.73): inner rim 26 points, trimmed rim 32 points (radius 1.2433, wall 0.06, rim edge 0.2834)
+    cap at (-60.326, 0.90499, -157.24): inner rim 37 points, trimmed rim 41 points (radius 4.2906, wall 0.36667, rim edge 0.68079)
+    cap at (58.941, -36.73, -160.25): inner rim 35 points, trimmed rim 37 points (radius 4.3265, wall 0.36667, rim edge 0.71713)
+    cap at (-35.523, -36.568, -54.893): inner rim 21 points, trimmed rim 27 points (radius 1.4056, wall 0.25, rim edge 0.4014)
+    cap at (0.40292, -54.43, 104.63): inner rim 28 points, trimmed rim 36 points (radius 1.2287, wall 0.06, rim edge 0.27011)
+    cap at (-13.411, 0.1561, 73.48): inner rim 38 points, trimmed rim 43 points (radius 1.0499, wall 0.05, rim edge 0.17255)
+    cap at (-4.7392, -15.769, -232.29): inner rim 67 points, trimmed rim 69 points (radius 19.858, wall 0.56667, rim edge 1.7195)
+    cap at (-33.548, -49.496, 72.021): inner rim 51 points, trimmed rim 58 points (radius 1.5069, wall 0.086667, rim edge 0.17863)
+    cap at (12.398, -0.64914, 64.315): inner rim 26 points, trimmed rim 31 points (radius 1.0453, wall 0.06, rim edge 0.23476)
+    cap at (39.306, 24.142, -258.77): inner rim 40 points, trimmed rim 45 points (radius 11.527, wall 0.56667, rim edge 1.6976)
+    cap at (26.521, -42.075, 71.189): inner rim 47 points, trimmed rim 54 points (radius 1.3523, wall 0.086667, rim edge 0.16963)
+    cap at (22.996, -41.361, -58.33): inner rim 23 points, trimmed rim 29 points (radius 1.5338, wall 0.25, rim edge 0.40469)
+  the smallest angle between two triangles on an edge of the trimmed layer surface 1 of 3 is 10.3 degrees
+Surface triangle quality (wall layer 1 of 3 offset), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 494490
+  Min / Avg / Max: 1.000 / 1.663 / 122.548
+  Aspect ratio > 10: 176, > 30: 70, > 100: 3
+  aspect ratio 122.548 at (8.49477, -4.97945, -0.183204), edges 0.490362 0.187953 0.678231
+  aspect ratio 112.526 at (7.07334, -19.427, 19.2529), edges 0.462003 0.182573 0.644482
+  aspect ratio 106.774 at (8.44152, -5.06486, -0.165271), edges 0.678231 0.494627 0.183717
+  aspect ratio 98.392 at (7.01499, -19.3531, 19.2455), edges 0.644482 0.465899 0.178708
+  aspect ratio 86.366 at (-19.0119, -8.96728, -95.3521), edges 0.572762 0.207282 0.779844
+  wall layer surface 1 of 3 at 0.333 of the thickness: 247500 points, 494490 triangles, trimmed at 14 cap planes
+  trimming at the caps by the ownership the offset surface carries
+    cap at (-7.3439, -29.897, 73.208): 129 points past its plane came off, 11 moved onto it
+    cap at (6.8066, -35.178, 74.937): 138 points past its plane came off, 20 moved onto it
+    cap at (-2.6581, -58.683, 106.73): 182 points past its plane came off, 21 moved onto it
+    cap at (-60.326, 0.90499, -157.24): 204 points past its plane came off, 24 moved onto it
+    cap at (58.941, -36.73, -160.25): 184 points past its plane came off, 35 moved onto it
+    cap at (-35.523, -36.568, -54.893): 120 points past its plane came off, 22 moved onto it
+    cap at (0.40292, -54.43, 104.63): 185 points past its plane came off, 22 moved onto it
+    cap at (-13.411, 0.1561, 73.48): 226 points past its plane came off, 31 moved onto it
+    cap at (-4.7392, -15.769, -232.29): 396 points past its plane came off, 57 moved onto it
+    cap at (-33.548, -49.496, 72.021): 277 points past its plane came off, 45 moved onto it
+    cap at (12.398, -0.64914, 64.315): 178 points past its plane came off, 16 moved onto it
+    cap at (39.306, 24.142, -258.77): 248 points past its plane came off, 31 moved onto it
+    cap at (26.521, -42.075, 71.189): 269 points past its plane came off, 46 moved onto it
+    cap at (22.996, -41.361, -58.33): 121 points past its plane came off, 21 moved onto it
+    5147 triangles past a plane removed, 396 split along one, 754 dropped for touching the kept side only along an edge or at a point or for lying flat in the plane; 250674 -> 248036 points, 501380 -> 495512 triangles; 620 rim edges, the shortest 0.252 of the local edge, the smallest angle between a rim triangle and its plane 75.66 degrees
+  trimmed the offset surface at 14 cap planes, leaving 248036 points and 495512 triangles
+    cap at (-7.3439, -29.897, 73.208): inner rim 21 points, trimmed rim 36 points (radius 0.30538, wall 0.066667, rim edge 0.086429)
+    cap at (6.8066, -35.178, 74.937): inner rim 21 points, trimmed rim 28 points (radius 0.30669, wall 0.066667, rim edge 0.085611)
+    cap at (-2.6581, -58.683, 106.73): inner rim 26 points, trimmed rim 37 points (radius 1.2433, wall 0.12, rim edge 0.2834)
+    cap at (-60.326, 0.90499, -157.24): inner rim 37 points, trimmed rim 45 points (radius 4.2906, wall 0.73333, rim edge 0.68079)
+    cap at (58.941, -36.73, -160.25): inner rim 35 points, trimmed rim 41 points (radius 4.3265, wall 0.73333, rim edge 0.71713)
+    cap at (-35.523, -36.568, -54.893): inner rim 21 points, trimmed rim 38 points (radius 1.4056, wall 0.5, rim edge 0.4014)
+    cap at (0.40292, -54.43, 104.63): inner rim 28 points, trimmed rim 35 points (radius 1.2287, wall 0.12, rim edge 0.27011)
+    cap at (-13.411, 0.1561, 73.48): inner rim 38 points, trimmed rim 47 points (radius 1.0499, wall 0.1, rim edge 0.17255)
+    cap at (-4.7392, -15.769, -232.29): inner rim 67 points, trimmed rim 68 points (radius 19.858, wall 1.1333, rim edge 1.7195)
+    cap at (-33.548, -49.496, 72.021): inner rim 51 points, trimmed rim 65 points (radius 1.5069, wall 0.17333, rim edge 0.17863)
+    cap at (12.398, -0.64914, 64.315): inner rim 26 points, trimmed rim 34 points (radius 1.0453, wall 0.12, rim edge 0.23476)
+    cap at (39.306, 24.142, -258.77): inner rim 40 points, trimmed rim 47 points (radius 11.527, wall 1.1333, rim edge 1.6976)
+    cap at (26.521, -42.075, 71.189): inner rim 47 points, trimmed rim 61 points (radius 1.3523, wall 0.17333, rim edge 0.16963)
+    cap at (22.996, -41.361, -58.33): inner rim 23 points, trimmed rim 38 points (radius 1.5338, wall 0.5, rim edge 0.40469)
+  the untrimmed layer surface 2 of 3 had 1 faults; after the trim it has 1
+  the smallest angle between two triangles on an edge of the trimmed layer surface 2 of 3 is 0.0275 degrees
+The trimmed wall layer surface 2 of 3 has 1 faults the volume mesher will refuse (0 edges on more than two triangles, 0 wound against each other, 0 triangles passing through another, the first at (0, 0, 0), 1 edges whose two triangles lie on each other, the first at (25.012, -37.492, -77.721))
+  0 pairs of triangles of the wall_layer_2_of_3 surface cross and 1 lie on each other across an edge within 0.1 degree; the first 0 and 1:
+    1: triangles 46977 and 390684 lie on each other across their edge of 0.25 at (25.012, -37.492, -77.721), 0.0275 degrees apart; centroids 0.000187 apart; edges 0.635 0.654 0.25 and 0.654 0.636 0.25
+       the nearest interface triangle is 0.514 away, on face 10, thickness 0.75, edges about 0.32
+  wrote wall_layer_2_of_3_crossings.vtp in /work
+  wrote wall_layer_2_of_3_crossings.vtp: the 2 crossing or folded triangles of the pairs above and two rings around them, 42 triangles in all
+  wrote wall_layer_2_of_3_crossings_interface.vtp in /work
+  wrote wall_layer_2_of_3_crossings_interface.vtp: the 1678 interface triangles within reach of the crossings, with their thickness and normals
+Problem with vessel wall meshing
+!1854.770! WARNING: QPainter::end: Painter ended with 2 saved states
+!1854.812! WARNING: QPainter::end: Painter ended with 2 saved states
+!1874.606! WARNING: QPainter::end: Painter ended with 2 saved states
+!1874.610! WARNING: QPainter::end: Painter ended with 2 saved states
+!1874.611! WARNING: QPainter::end: Painter ended with 2 saved states
+!1882.195! WARNING: QPainter::end: Painter ended with 2 saved states
+!1883.583! WARNING: QPainter::end: Painter ended with 2 saved states
+!1886.284! WARNING: QPainter::end: Painter ended with 2 saved states
+!1886.323! WARNING: QPainter::end: Painter ended with 2 saved states
+!1886.754! WARNING: QPainter::end: Painter ended with 2 saved states
+!1886.801! WARNING: QPainter::end: Painter ended with 2 saved states
+!1887.023! WARNING: QPainter::end: Painter ended with 2 saved states
+!1887.063! WARNING: QPainter::end: Painter ended with 2 saved states
+!1887.371! WARNING: QPainter::end: Painter ended with 2 saved states
+!1887.481! WARNING: QPainter::end: Painter ended with 2 saved states
+!1888.524! WARNING: QPainter::end: Painter ended with 2 saved states
+!1888.566! WARNING: QPainter::end: Painter ended with 2 saved states
+!1888.566! WARNING: QPainter::end: Painter ended with 2 saved states
+!1888.605! WARNING: QPainter::end: Painter ended with 2 saved states
+!1888.770! WARNING: QPainter::end: Painter ended with 2 saved states
+!1888.827! WARNING: QPainter::end: Painter ended with 2 saved states
