@@ -5097,8 +5097,9 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
   }
   for (size_t c = 0; c < caps.size(); c++)
   {
-    fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): %lld points past its plane came off, %lld moved onto it\n",
-        caps[c].origin[0], caps[c].origin[1], caps[c].origin[2], trimReport.numCut[c], trimReport.numSnapped[c]);
+    fprintf(stdout,"    cap at (%.5g, %.5g, %.5g): %lld points past its plane came off, %lld moved onto it, %lld interior points left on it moved just inside\n",
+        caps[c].origin[0], caps[c].origin[1], caps[c].origin[2], trimReport.numCut[c], trimReport.numSnapped[c],
+        c < trimReport.numPushedOff.size() ? trimReport.numPushedOff[c] : 0LL);
     if (trimReport.numCut[c] == 0)
     {
       fprintf(stderr,"No point of the offset surface past the cap plane at (%.5g, %.5g, %.5g) belongs to that cap, so nothing was trimmed there\n",
@@ -6795,7 +6796,11 @@ int TGenUtils_BuildTrimmedExtrudedOuterSurface(vtkPolyData *surface, vtkDoubleAr
  * orders them both and the two can be merged on it, taking whichever rim is
  * behind at each step. This holds while each rim winds once around the axis,
  * which is checked rather than assumed - a rim that doubles back has no such
- * order and would be triangulated into overlapping facets.
+ * order and would be triangulated into overlapping facets. The merge is the
+ * offset core's svoffset::StitchAnnulus since 2026-10-19 (the glue cannot be
+ * built or tested without VTK, and a change to the merge here turned every
+ * annulus into two fans on the user's model): the rims' points go to it as
+ * a local array and its triangles come back as ids here.
  *
  * Neither rim is moved. The inner rim in particular is part of the fluid/wall
  * interface, and the solver matches it against the fluid mesh.
@@ -6830,223 +6835,44 @@ int TGenUtils_StitchCapAnnulus(vtkPoints *points,
     fprintf(stderr,"Cannot stitch a cap annulus without points and an output cell array\n");
     return SV_ERROR;
   }
-  if (innerLoop.size() < 3 || outerLoop.size() < 3)
-  {
-    fprintf(stderr,"Cannot stitch a cap annulus between rims of %zu and %zu points\n",
-        innerLoop.size(), outerLoop.size());
-    return SV_ERROR;
-  }
 
-  double center[3] = {0.0, 0.0, 0.0};
-  for (size_t m = 0; m < innerLoop.size(); m++)
-  {
-    double p[3];
-    points->GetPoint(innerLoop[m], p);
-    for (int k = 0; k < 3; k++)
-    {
-      center[k] += p[k];
-    }
-  }
-  for (int k = 0; k < 3; k++)
-  {
-    center[k] /= (double)innerLoop.size();
-  }
-
-  // A frame on the cap plane in which the angle increases counterclockwise
-  // about the outward direction. Crossing with the axis the outward direction
-  // leans on least keeps the first vector well away from degenerate.
-  double axis[3] = {0.0, 0.0, 0.0};
-  int smallest = 0;
-  for (int k = 1; k < 3; k++)
-  {
-    if (std::abs(outward[k]) < std::abs(outward[smallest]))
-    {
-      smallest = k;
-    }
-  }
-  axis[smallest] = 1.0;
-
-  double u[3], v[3];
-  vtkMath::Cross(axis, outward, u);
-  if (vtkMath::Normalize(u) <= 0.0)
-  {
-    fprintf(stderr,"The cap outward direction is not a usable axis for stitching the annulus\n");
-    return SV_ERROR;
-  }
-  vtkMath::Cross(outward, u, v);
-  if (vtkMath::Normalize(v) <= 0.0)
-  {
-    fprintf(stderr,"The cap outward direction is not a usable axis for stitching the annulus\n");
-    return SV_ERROR;
-  }
-
-  auto angleOf = [&](vtkIdType ptId)
-  {
-    double p[3], offset[3];
-    points->GetPoint(ptId, p);
-    vtkMath::Subtract(p, center, offset);
-    return std::atan2(vtkMath::Dot(offset, v), vtkMath::Dot(offset, u));
-  };
-
-  auto wrap = [](double d)
-  {
-    while (d > vtkMath::Pi()) { d -= 2.0*vtkMath::Pi(); }
-    while (d <= -vtkMath::Pi()) { d += 2.0*vtkMath::Pi(); }
-    return d;
-  };
-
-  std::vector<vtkIdType> inner = innerLoop;
-  std::vector<vtkIdType> outerRim = outerLoop;
-
-  // Both rims have to run the same way round before they can be merged, and
-  // each has to run round exactly once for the angle to order it at all.
+  // The triangulation itself is the offset core's (svoffset::StitchAnnulus,
+  // tested without VTK): the two rims' points are handed to it as a local
+  // point array and its triangles mapped back to the point ids here.
+  std::vector<double> localPoints;
+  std::vector<vtkIdType> localToPoint;
+  std::vector<long long> inner, outer;
   for (int side = 0; side < 2; side++)
   {
-    std::vector<vtkIdType> &loop = (side == 0) ? inner : outerRim;
-    double turning = 0.0;
+    const std::vector<vtkIdType> &loop = (side == 0) ? innerLoop : outerLoop;
+    std::vector<long long> &local = (side == 0) ? inner : outer;
     for (size_t m = 0; m < loop.size(); m++)
     {
-      turning += wrap(angleOf(loop[(m+1)%loop.size()]) - angleOf(loop[m]));
-    }
-    if (std::abs(std::abs(turning) - 2.0*vtkMath::Pi()) > 0.5)
-    {
-      fprintf(stderr,"A cap rim of %zu points turns %.4g radians about the cap axis instead of one full turn, so it does not wind once around the vessel end and cannot be stitched by angle\n",
-          loop.size(), turning);
-      return SV_ERROR;
-    }
-    if (turning < 0.0)
-    {
-      std::reverse(loop.begin(), loop.end());
+      double p[3];
+      points->GetPoint(loop[m], p);
+      local.push_back((long long)localToPoint.size());
+      localToPoint.push_back(loop[m]);
+      localPoints.insert(localPoints.end(), p, p + 3);
     }
   }
-
-  size_t n = inner.size();
-  size_t m = outerRim.size();
-
-  // Start the outer rim at the point nearest in angle to where the inner rim
-  // starts, so the first triangle is not a sliver spanning most of the cap.
-  size_t startOuter = 0;
-  double startAngle = angleOf(inner[0]);
-  double bestGap = 0.0;
-  for (size_t j = 0; j < m; j++)
+  std::vector<long long> triangles;
+  long long degenerate = 0, inverted = 0;
+  std::string error;
+  if (svoffset::StitchAnnulus(localPoints, inner, outer, outward, triangles, degenerate, inverted, error) != 0)
   {
-    double gap = std::abs(wrap(angleOf(outerRim[j]) - startAngle));
-    if (j == 0 || gap < bestGap)
-    {
-      bestGap = gap;
-      startOuter = j;
-    }
+    fprintf(stderr,"Cannot stitch a cap annulus: %s\n", error.c_str());
+    return SV_ERROR;
   }
-
-  // The angle swept from the inner rim's start, both rims in that one frame:
-  // the outer rim starts where it starts, its gap from the inner start
-  // included, and each rim sweeps a full turn from there (each winds once,
-  // checked above, so the wrapped steps sum to one turn). Rescaling the two
-  // sweeps to end together, as before 2026-10-16, measured the outer rim
-  // from its own start and so read it behind by the gap: at a cap of a thin
-  // vessel (wall 0.18, rims 0.06 apart, the gap about one rim edge) the merge
-  // ran the layer rim an edge ahead of the outer one, and the triangles
-  // between them lay on each other and were wound against their neighbours.
-  std::vector<double> innerSweep(n+1, 0.0), outerSweep(m+1, 0.0);
-  for (size_t k = 0; k < n; k++)
+  for (size_t i = 0; i + 2 < triangles.size(); i += 3)
   {
-    innerSweep[k+1] = innerSweep[k] + wrap(angleOf(inner[(k+1)%n]) - angleOf(inner[k]));
-  }
-  outerSweep[0] = wrap(angleOf(outerRim[startOuter]) - startAngle);
-  for (size_t k = 0; k < m; k++)
-  {
-    outerSweep[k+1] = outerSweep[k] +
-        wrap(angleOf(outerRim[(startOuter+k+1)%m]) - angleOf(outerRim[(startOuter+k)%m]));
-  }
-
-  // The annulus is the end face of the wall, so it faces out of the vessel
-  // end. Which of the two orders gives that depends on which rim was
-  // advanced, so it is measured rather than worked out per case.
-  auto facing = [&](const vtkIdType triangle[3], double normal[3]) -> int
-  {
-    double p0[3], p1[3], p2[3], e1[3], e2[3];
-    points->GetPoint(triangle[0], p0);
-    points->GetPoint(triangle[1], p1);
-    points->GetPoint(triangle[2], p2);
-    vtkMath::Subtract(p1, p0, e1);
-    vtkMath::Subtract(p2, p0, e2);
-    vtkMath::Cross(e1, e2, normal);
-    if (vtkMath::Norm(normal) <= 0.0)
-    {
-      return 0;
-    }
-    return (vtkMath::Dot(normal, outward) < 0.0) ? -1 : 1;
-  };
-
-  size_t i = 0, j = 0;
-  while (i < n || j < m)
-  {
-    // the triangle each advance would make, and whether it faces out; the
-    // rim whose next point comes first in angle advances, unless its
-    // triangle faces in (a rim point behind its neighbour in angle) and the
-    // other rim's does not
-    vtkIdType byInner[3] = {inner[i%n], inner[(i+1)%n], outerRim[(startOuter+j)%m]};
-    vtkIdType byOuter[3] = {outerRim[(startOuter+j)%m], outerRim[(startOuter+j+1)%m], inner[i%n]};
-    double normalInner[3], normalOuter[3];
-    const int faceInner = facing(byInner, normalInner), faceOuter = facing(byOuter, normalOuter);
-    bool advanceInner;
-    if (i >= n)
-    {
-      advanceInner = false;
-    }
-    else if (j >= m)
-    {
-      advanceInner = true;
-    }
-    else
-    {
-      advanceInner = (innerSweep[i+1] <= outerSweep[j+1]);
-      if (advanceInner && faceInner < 0 && faceOuter > 0)
-      {
-        advanceInner = false;
-      }
-      else if (!advanceInner && faceOuter < 0 && faceInner > 0)
-      {
-        advanceInner = true;
-      }
-    }
-
-    vtkIdType triangle[3];
-    int face;
-    if (advanceInner)
-    {
-      for (int k = 0; k < 3; k++) triangle[k] = byInner[k];
-      face = faceInner;
-      i++;
-    }
-    else
-    {
-      for (int k = 0; k < 3; k++) triangle[k] = byOuter[k];
-      face = faceOuter;
-      j++;
-    }
-
-    if (face == 0)
-    {
-      // Dropping it would leave a hole in the wall's end face, which is worse
-      // than a facet the volume mesher will complain about, so it is kept and
-      // counted for the caller to report.
-      numDegenerate++;
-    }
-    else if (face < 0)
-    {
-      // turned to face out; it still lies on its neighbour and is wound
-      // against it, which the caller reports (the shell check refuses it)
-      std::swap(triangle[1], triangle[2]);
-      if (numInverted != nullptr)
-      {
-        (*numInverted)++;
-      }
-    }
-
+    vtkIdType triangle[3] = {localToPoint[(size_t)triangles[i]], localToPoint[(size_t)triangles[i + 1]], localToPoint[(size_t)triangles[i + 2]]};
     cells->InsertNextCell(3, triangle);
   }
-
+  numDegenerate = (int)degenerate;
+  if (numInverted != nullptr)
+  {
+    *numInverted = (int)inverted;
+  }
   return SV_OK;
 }
 

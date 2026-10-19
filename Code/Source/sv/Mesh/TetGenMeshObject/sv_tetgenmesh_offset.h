@@ -395,6 +395,7 @@ struct TrimReport
   long long numPointsAfter = 0, numTrianglesAfter = 0;
   std::vector<long long> numCut;      // per plane: points past it that came off
   std::vector<long long> numSnapped;  // per plane: points moved onto it
+  std::vector<long long> numPushedOff;   // per plane: points left on it that are on no rim edge, moved just inside (an interior point on the plane put an edge of the surface in the plane, under the annulus, 2026-10-19)
   long long numRemoved = 0;           // triangles wholly past a plane
   long long numDropped = 0;           // triangles left with nothing on the kept side but a point or an edge in the plane, or lying flat in it
   long long numSplit = 0;             // triangles the plane passed through
@@ -906,6 +907,36 @@ long long ListFoldedEdges(const std::vector<double> &points, const std::vector<l
  */
 long long WeldFoldedApexes(std::vector<double> &points, std::vector<long long> &triangles,
     double maxDegrees, double maxApexFraction, long long *numRefused = nullptr);
+
+/**
+ * @brief Triangulates the ring between two rims round one vessel end, the
+ * wall's end face between two of its surfaces (interface, layers, outer).
+ *
+ * Both rims run round the same vessel end, so the angle about the cap axis
+ * orders them and the two are merged on it: each rim is checked to wind
+ * once (a rim that doubles back has no such order), both are turned to run
+ * the same way, the angle is swept from the inner rim's start with the
+ * outer rim's gap from that start included (measuring each rim from its own
+ * start, rescaled to end together, read the outer rim behind by the gap and
+ * ran a layer rim an edge ahead of it on the user's model, 2026-10-16), and
+ * at each step the rim whose next point comes first in angle advances,
+ * unless the triangle it would make faces into the vessel while the other
+ * rim's faces out. A triangle of the inner rim's edge is wound the other way
+ * from one of the outer rim's edge, which is taken into account (judging
+ * them alike turned every annulus into two fans, 2026-10-19). Triangles are
+ * appended to triangles as indices into points, wound to face outward; a
+ * triangle of no area is kept (a hole would be worse) and counted, and one
+ * that faces in whatever is done is turned and counted (it lies on its
+ * neighbour; the shell check reports it).
+ * @param points The points both rims index into (x, y, z each).
+ * @param innerLoop The inner rim, in order round the vessel end.
+ * @param outerLoop The outer rim, in order.
+ * @param outward The direction out of the vessel end (unit length not required).
+ * @return 0 when the annulus is built, 1 with error set otherwise.
+ */
+int StitchAnnulus(const std::vector<double> &points, const std::vector<long long> &innerLoop,
+    const std::vector<long long> &outerLoop, const double outward[3], std::vector<long long> &triangles,
+    long long &numDegenerate, long long &numInverted, std::string &error);
 
 /**
  * @brief Closed pieces of a surface too small for the mesh, taken out.

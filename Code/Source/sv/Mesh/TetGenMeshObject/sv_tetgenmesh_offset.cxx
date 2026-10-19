@@ -354,6 +354,7 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
   report.numTrianglesBefore = nt;
   report.numCut.assign(planes.size(), 0);
   report.numSnapped.assign(planes.size(), 0);
+  report.numPushedOff.assign(planes.size(), 0);
 
   // The mean edge at each point, which sizes the band a point is snapped
   // onto the plane from.
@@ -675,6 +676,42 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
   }
   report.numPointsAfter = np;
   report.numTrianglesAfter = nt;
+
+  // A point left on a plane that is on no rim edge: an interior point the
+  // snap moved onto the plane whose triangles all stayed. Its edges to the
+  // rim lie in the plane, under the annulus the shell closes the wall with,
+  // and the two touch along them (the user's model, 2026-10-19: one such
+  // point at the aortic inlet, its edge along the rim coincident with an
+  // annulus triangle's base, which the shell check counts as a crossing).
+  // It is moved just inside, half the snap band.
+  {
+    std::map<EdgeKey, int> edgeCount;
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++) edgeCount[EdgeKey(tris[(size_t)3*t + j], tris[(size_t)3*t + (j+1)%3])]++;
+    }
+    std::vector<unsigned char> onRim((size_t)np, 0);
+    for (std::map<EdgeKey, int>::const_iterator it = edgeCount.begin(); it != edgeCount.end(); ++it)
+    {
+      if (it->second == 1) { onRim[(size_t)it->first.a] = 1; onRim[(size_t)it->first.b] = 1; }
+    }
+    for (ll i = 0; i < np; i++)
+    {
+      if (onRim[(size_t)i]) continue;
+      for (size_t p = 0; p < planes.size(); p++)
+      {
+        const CapPlane &plane = planes[p];
+        double off[3];
+        Sub(plane.origin, &pts[(size_t)3*i], off);
+        const double tol = 1.0e-6*std::max(meanEdge[(size_t)i], 1.0e-12);
+        if (std::abs(Dot(off, plane.outward)) > tol) continue;
+        const double inside = 0.5*snapFraction*meanEdge[(size_t)i];
+        for (int k = 0; k < 3; k++) pts[(size_t)3*i + k] -= inside*plane.outward[k];
+        report.numPushedOff[p]++;
+        break;
+      }
+    }
+  }
 
   // The rims: their shortest edge against the mean edge at its ends, and the
   // angle each rim triangle makes with its cap plane on the side the annulus
@@ -5156,6 +5193,126 @@ long long WeldFoldedApexes(std::vector<double> &points, std::vector<long long> &
     triangles.swap(newTris);
   }
   return numWelded;
+}
+
+//---------------
+// StitchAnnulus
+//---------------
+int StitchAnnulus(const std::vector<double> &points, const std::vector<long long> &innerLoop,
+    const std::vector<long long> &outerLoop, const double outward[3], std::vector<long long> &triangles,
+    long long &numDegenerate, long long &numInverted, std::string &error)
+{
+  numDegenerate = 0;
+  numInverted = 0;
+  const ll np = (ll)(points.size()/3);
+  if (innerLoop.size() < 3 || outerLoop.size() < 3)
+  {
+    error = "an annulus needs rims of three points at least (" + std::to_string(innerLoop.size()) + " and " + std::to_string(outerLoop.size()) + ")";
+    return 1;
+  }
+  for (size_t m = 0; m < innerLoop.size(); m++) if (innerLoop[m] < 0 || innerLoop[m] >= np) { error = "a rim point is not among the points"; return 1; }
+  for (size_t m = 0; m < outerLoop.size(); m++) if (outerLoop[m] < 0 || outerLoop[m] >= np) { error = "a rim point is not among the points"; return 1; }
+  double out[3] = {outward[0], outward[1], outward[2]};
+  const double lo = Norm(out);
+  if (!(lo > 0.0)) { error = "the outward direction has no length"; return 1; }
+  for (int k = 0; k < 3; k++) out[k] /= lo;
+  double centre[3] = {0.0, 0.0, 0.0};
+  for (size_t m = 0; m < innerLoop.size(); m++) for (int k = 0; k < 3; k++) centre[k] += points[(size_t)3*innerLoop[m] + k];
+  for (int k = 0; k < 3; k++) centre[k] /= (double)innerLoop.size();
+  // a frame on the cap plane in which the angle increases counterclockwise
+  // about the outward direction; the axis the outward direction leans on
+  // least keeps the first vector away from degenerate
+  double axis[3] = {0.0, 0.0, 0.0};
+  int smallest = 0;
+  for (int k = 1; k < 3; k++) if (std::abs(out[k]) < std::abs(out[smallest])) smallest = k;
+  axis[smallest] = 1.0;
+  double u[3], v[3];
+  Cross(axis, out, u);
+  const double lu = Norm(u);
+  if (!(lu > 0.0)) { error = "the outward direction gives no frame on the cap plane"; return 1; }
+  for (int k = 0; k < 3; k++) u[k] /= lu;
+  Cross(out, u, v);
+  const double lv = Norm(v);
+  if (!(lv > 0.0)) { error = "the outward direction gives no frame on the cap plane"; return 1; }
+  for (int k = 0; k < 3; k++) v[k] /= lv;
+  auto angleOf = [&](ll p) -> double
+  {
+    double d[3];
+    Sub(&points[(size_t)3*p], centre, d);
+    return std::atan2(Dot(d, v), Dot(d, u));
+  };
+  auto wrap = [](double d) -> double
+  {
+    while (d > 3.14159265358979323846) d -= 2.0*3.14159265358979323846;
+    while (d <= -3.14159265358979323846) d += 2.0*3.14159265358979323846;
+    return d;
+  };
+  std::vector<ll> inner = innerLoop, outer = outerLoop;
+  // both rims the same way round, each winding once
+  for (int side = 0; side < 2; side++)
+  {
+    std::vector<ll> &loop = side == 0 ? inner : outer;
+    double turning = 0.0;
+    for (size_t m = 0; m < loop.size(); m++) turning += wrap(angleOf(loop[(m + 1)%loop.size()]) - angleOf(loop[m]));
+    if (std::abs(std::abs(turning) - 2.0*3.14159265358979323846) > 0.5)
+    {
+      error = "a cap rim of " + std::to_string(loop.size()) + " points turns " + std::to_string(turning) + " radians about the cap axis instead of one full turn, so it does not wind once around the vessel end and cannot be stitched by angle";
+      return 1;
+    }
+    if (turning < 0.0) std::reverse(loop.begin(), loop.end());
+  }
+  const size_t n = inner.size(), m = outer.size();
+  // the outer rim starts at its point nearest in angle to the inner rim's start
+  size_t startOuter = 0;
+  const double startAngle = angleOf(inner[0]);
+  double bestGap = 0.0;
+  for (size_t j = 0; j < m; j++)
+  {
+    const double gap = std::abs(wrap(angleOf(outer[j]) - startAngle));
+    if (j == 0 || gap < bestGap) { bestGap = gap; startOuter = j; }
+  }
+  // the angle swept from the inner rim's start, both rims in that one frame
+  std::vector<double> innerSweep(n + 1, 0.0), outerSweep(m + 1, 0.0);
+  for (size_t k = 0; k < n; k++) innerSweep[k + 1] = innerSweep[k] + wrap(angleOf(inner[(k + 1)%n]) - angleOf(inner[k]));
+  outerSweep[0] = wrap(angleOf(outer[startOuter]) - startAngle);
+  for (size_t k = 0; k < m; k++) outerSweep[k + 1] = outerSweep[k] + wrap(angleOf(outer[(startOuter + k + 1)%m]) - angleOf(outer[(startOuter + k)%m]));
+  // 1 when a triangle faces out of the vessel end, -1 in, 0 when it has no area
+  auto facing = [&](const ll T[3]) -> int
+  {
+    double e1[3], e2[3], nrm[3];
+    Sub(&points[(size_t)3*T[1]], &points[(size_t)3*T[0]], e1);
+    Sub(&points[(size_t)3*T[2]], &points[(size_t)3*T[0]], e2);
+    Cross(e1, e2, nrm);
+    if (!(Norm(nrm) > 0.0)) return 0;
+    return Dot(nrm, out) < 0.0 ? -1 : 1;
+  };
+  size_t i = 0, j = 0;
+  while (i < n || j < m)
+  {
+    // the triangle each advance would make, both wound to face out when the
+    // rims run as they should (the inner rim's edge backwards, the outer's
+    // forwards, both rims running counterclockwise about the outward axis)
+    const ll byInner[3] = {inner[(i + 1)%n], inner[i%n], outer[(startOuter + j)%m]};
+    const ll byOuter[3] = {outer[(startOuter + j)%m], outer[(startOuter + j + 1)%m], inner[i%n]};
+    const int faceInner = facing(byInner), faceOuter = facing(byOuter);
+    bool advanceInner;
+    if (i >= n) advanceInner = false;
+    else if (j >= m) advanceInner = true;
+    else
+    {
+      advanceInner = innerSweep[i + 1] <= outerSweep[j + 1];
+      if (advanceInner && faceInner < 0 && faceOuter > 0) advanceInner = false;
+      else if (!advanceInner && faceOuter < 0 && faceInner > 0) advanceInner = true;
+    }
+    ll T[3];
+    int face;
+    if (advanceInner) { for (int k = 0; k < 3; k++) T[k] = byInner[k]; face = faceInner; i++; }
+    else { for (int k = 0; k < 3; k++) T[k] = byOuter[k]; face = faceOuter; j++; }
+    if (face == 0) numDegenerate++;
+    else if (face < 0) { std::swap(T[1], T[2]); numInverted++; }
+    for (int k = 0; k < 3; k++) triangles.push_back(T[k]);
+  }
+  return 0;
 }
 
 //----------------

@@ -649,6 +649,81 @@ static void TestFoldedApexWeld()
   Check(welded2 == 0 && tris2.size() == 9, "a folded pair whose apexes are apart is not touched");
 }
 
+// 0e. The annulus between two rims round a vessel end: uniform rims, then
+// rims of uneven spacing starting apart in angle with a little radial
+// noise (200 draws), as the trimmed layer rims are. Every triangle faces
+// out, none was turned, none passes through another, and every rim edge is
+// in exactly one triangle. A rim that doubles back is refused.
+static void TestAnnulus()
+{
+  printf("test 0e: the annulus between two rims faces out, closes the ring and has no crossing\n");
+  unsigned long long seed = 12345;
+  auto uniform = [&]() { seed = seed*6364136223846793005ULL + 1442695040888963407ULL; return (double)(seed >> 11)/9007199254740992.0; };
+  const double outward[3] = {0.0, 0.0, 1.0};
+  long long trialsBad = 0, inverted = 0, degenerate = 0, crossing = 0, openRings = 0, trials = 0;
+  for (int trial = 0; trial < 200; trial++)
+  {
+    std::vector<double> pts;
+    std::vector<ll> inner, outer;
+    const double sigma = trial == 0 ? 0.0 : 0.3;
+    const double radii[2] = {1.30, 1.36};
+    const int counts[2] = {35, 40};
+    for (int side = 0; side < 2; side++)
+    {
+      std::vector<double> steps(counts[side]);
+      double total = 0.0;
+      for (int k = 0; k < counts[side]; k++) { steps[k] = std::exp(sigma*(uniform() + uniform() + uniform() - 1.5)*2.0); total += steps[k]; }
+      double ang = uniform()*2.0*M_PI;
+      for (int k = 0; k < counts[side]; k++)
+      {
+        const double r = radii[side]*(1.0 + (trial == 0 ? 0.0 : 0.01*(2.0*uniform() - 1.0)));
+        (side == 0 ? inner : outer).push_back((ll)(pts.size()/3));
+        pts.push_back(r*std::cos(ang)); pts.push_back(r*std::sin(ang)); pts.push_back(0.0);
+        ang += 2.0*M_PI*steps[k]/total;
+      }
+    }
+    std::vector<ll> tris;
+    long long nd = 0, ni = 0;
+    std::string err;
+    if (svoffset::StitchAnnulus(pts, inner, outer, outward, tris, nd, ni, err) != 0) { printf("  FAIL stitch: %s\n", err.c_str()); trialsBad++; continue; }
+    trials++;
+    inverted += ni; degenerate += nd;
+    std::vector<unsigned char> cr; double at[3];
+    crossing += svenvelope::CountCrossingTriangles(pts, tris, cr, at);
+    // every rim edge in exactly one triangle, no other edge of the rims' points on one triangle only
+    std::map<std::pair<ll, ll>, int> use;
+    for (size_t t = 0; t < tris.size()/3; t++) for (int j = 0; j < 3; j++) { ll a = tris[3*t+j], b = tris[3*t+(j+1)%3]; use[std::make_pair(std::min(a, b), std::max(a, b))]++; }
+    bool closed = true;
+    for (int side = 0; side < 2 && closed; side++)
+    {
+      const std::vector<ll> &loop = side == 0 ? inner : outer;
+      for (size_t k = 0; k < loop.size(); k++) { ll a = loop[k], b = loop[(k+1)%loop.size()]; if (use[std::make_pair(std::min(a, b), std::max(a, b))] != 1) closed = false; }
+    }
+    for (std::map<std::pair<ll, ll>, int>::const_iterator it = use.begin(); it != use.end() && closed; ++it) if (it->second > 2) closed = false;
+    if (!closed) openRings++;
+    for (size_t t = 0; t < tris.size()/3 && trial == 0; t++)
+    {
+      double e1[3], e2[3], nrm[3];
+      for (int k = 0; k < 3; k++) { e1[k] = pts[3*tris[3*t+1]+k] - pts[3*tris[3*t]+k]; e2[k] = pts[3*tris[3*t+2]+k] - pts[3*tris[3*t]+k]; }
+      nrm[0] = e1[1]*e2[2] - e1[2]*e2[1]; nrm[1] = e1[2]*e2[0] - e1[0]*e2[2]; nrm[2] = e1[0]*e2[1] - e1[1]*e2[0];
+      if (!(nrm[2] > 0.0)) { printf("  a triangle of the uniform annulus does not face out\n"); trialsBad++; break; }
+    }
+    if (trial == 0) printf("  uniform rims of 35 and 40 points: %zu triangles, %lld turned, %lld of no area, %lld crossing\n", tris.size()/3, ni, nd, (long long)svenvelope::CountCrossingTriangles(pts, tris, cr, at));
+  }
+  printf("  %lld draws of uneven rims: turned %lld, of no area %lld, crossing %lld, rings left open %lld\n", trials, inverted, degenerate, crossing, openRings);
+  Check(trialsBad == 0 && trials == 200, "every pair of rims is stitched");
+  Check(inverted == 0 && degenerate == 0, "no triangle was turned or has no area");
+  Check(crossing == 0, "no annulus triangle passes through another");
+  Check(openRings == 0, "every rim edge is in exactly one triangle and no edge in more than two");
+  // a rim that goes out and back without winding round (angles 0, 90, 0, 270: no net turn): refused
+  std::vector<double> pts = {1,0,0,  0,1,0,  -1,0,0,  0,-1,0,  1.2,0,0,  0,1.2,0,  -1.2,0,0,  0,-1.2,0};
+  std::vector<ll> inner = {0, 1, 2, 3}, folded = {4, 5, 4, 7};
+  std::vector<ll> tris; long long nd = 0, ni = 0; std::string err;
+  const int rc = svoffset::StitchAnnulus(pts, inner, folded, outward, tris, nd, ni, err);
+  printf("  a rim with no net turn: %s\n", rc == 0 ? "stitched (wrong)" : err.c_str());
+  Check(rc != 0, "a rim that does not wind once is refused");
+}
+
 // 0b. The decimation's crossing guard: two new triangles of one operation,
 // tested one after the other, are each tested against every triangle near
 // them. With one mark for "leaving" and "already seen", the second test
@@ -776,6 +851,26 @@ static void TestLayers()
     std::vector<svoffset::CapPlane> planes = PlanesFromRims(iface, s);
     svoffset::TrimReport trim; std::string err;
     if (svoffset::TrimSurfaceAtCaps(s, planes, 0.1, trim, err) != 0) { printf("  FAIL trim of layer %d: %s\n", k, err.c_str()); numFailed++; ok = false; break; }
+    {
+      // no point of the trimmed layer lies on a cap plane unless it is on the rim
+      std::map<std::pair<ll, ll>, int> use;
+      for (size_t t = 0; t < s.triangles.size()/3; t++) for (int j = 0; j < 3; j++) { ll a = s.triangles[3*t+j], b = s.triangles[3*t+(j+1)%3]; use[std::make_pair(std::min(a, b), std::max(a, b))]++; }
+      std::vector<unsigned char> onRim(s.points.size()/3, 0);
+      for (std::map<std::pair<ll, ll>, int>::const_iterator it = use.begin(); it != use.end(); ++it) if (it->second == 1) { onRim[it->first.first] = 1; onRim[it->first.second] = 1; }
+      ll interiorOnPlane = 0, pushed = 0;
+      for (size_t p = 0; p < planes.size(); p++) pushed += trim.numPushedOff[p];
+      for (size_t i = 0; i < s.points.size()/3; i++)
+      {
+        if (onRim[i]) continue;
+        for (size_t p = 0; p < planes.size(); p++)
+        {
+          double h = 0.0; for (int c = 0; c < 3; c++) h += (planes[p].origin[c] - s.points[3*i+c])*planes[p].outward[c];
+          if (std::abs(h) < 1e-9) interiorOnPlane++;
+        }
+      }
+      printf("  layer %d: %lld interior point(s) on a cap plane after the trim (%lld moved just inside by it)\n", k, interiorOnPlane, pushed);
+      Check(interiorOnPlane == 0, "no interior point of a trimmed layer lies on a cap plane");
+    }
     // the layer is k/N of the wall from the interface, away from the ends
     double worst = 1e300, best = 0.0;
     for (size_t i = 0; i < s.points.size()/3; i++)
@@ -813,6 +908,7 @@ int main()
 {
   TestFoldCount();
   TestFoldedApexWeld();
+  TestAnnulus();
   TestCrossingGuard();
   TestBubbles();
   TestTube();
