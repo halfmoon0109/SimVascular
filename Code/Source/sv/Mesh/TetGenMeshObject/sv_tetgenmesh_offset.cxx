@@ -1641,6 +1641,59 @@ long long OffsetField::Owner(const double x[3], double thicknessScale) const
   return ownerT;
 }
 
+double OffsetField::SheetTerm(const double x[3], double thicknessScale, const double coneNormal[3], double coneCos,
+    double q[3], long long &owner) const
+{
+  // Search over the triangles facing within the cone: the sheet of one
+  // side of a valley, where the field's own minimum would jump to the other.
+  const Data &d = *data_;
+  const TriangleGrid &g = d.grid;
+  int c[3];
+  for (int k = 0; k < 3; k++) c[k] = g.Bin(x[k], k);
+  double bestTerm = std::numeric_limits<double>::max();
+  ll ownerT = -1;
+  const double scale = thicknessScale;
+  int rings = std::max(g.n[0], std::max(g.n[1], g.n[2]));
+  for (int r = 0; r <= rings; r++)
+  {
+    double bound = (r - 1)*g.cell;
+    if (ownerT >= 0 && bound - scale*d.largestThickness >= bestTerm) break;
+    for (int k = c[2] - r; k <= c[2] + r; k++)
+    {
+      for (int j = c[1] - r; j <= c[1] + r; j++)
+      {
+        for (int i = c[0] - r; i <= c[0] + r; i++)
+        {
+          if (std::max(std::abs(k - c[2]), std::max(std::abs(j - c[1]), std::abs(i - c[0]))) != r) continue;
+          if (i < 0 || j < 0 || k < 0 || i >= g.n[0] || j >= g.n[1] || k >= g.n[2]) continue;
+          size_t b = g.Index(i, j, k);
+          if (g.start[b + 1] == g.start[b]) continue;
+          double dd = g.BoxDistance(x, i, j, k);
+          if (dd - scale*g.binMaxThickness[b] >= bestTerm) continue;
+          for (ll m = g.start[b]; m < g.start[b + 1]; m++)
+          {
+            ll t = g.cells[(size_t)m];
+            const double *fn = &d.faceNormals[(size_t)3*t];
+            if (fn[0]*coneNormal[0] + fn[1]*coneNormal[1] + fn[2]*coneNormal[2] < coneCos) continue;
+            const ll *tt = &d.triangles[(size_t)3*t];
+            double qq[3], bary[3];
+            double dist = ClosestOnTriangle(x, &d.points[(size_t)3*tt[0]], &d.points[(size_t)3*tt[1]], &d.points[(size_t)3*tt[2]], qq, bary);
+            double tq = bary[0]*d.thickness[(size_t)tt[0]] + bary[1]*d.thickness[(size_t)tt[1]] + bary[2]*d.thickness[(size_t)tt[2]];
+            if (dist - scale*tq < bestTerm)
+            {
+              bestTerm = dist - scale*tq;
+              ownerT = t;
+              for (int kk = 0; kk < 3; kk++) q[kk] = qq[kk];
+            }
+          }
+        }
+      }
+    }
+  }
+  owner = ownerT;
+  return bestTerm;
+}
+
 double OffsetField::SurfaceDistance(const double x[3], long long *nearest) const
 {
   ll bestT, ownerT;
@@ -1680,6 +1733,7 @@ const std::vector<std::vector<long long> > &OffsetField::Rims() const
 
 const std::vector<double> &OffsetField::Points() const { return data_->points; }
 const std::vector<double> &OffsetField::Normals() const { return data_->normals; }
+const std::vector<double> &OffsetField::FaceNormals() const { return data_->faceNormals; }
 const std::vector<double> &OffsetField::Thickness() const { return data_->thickness; }
 const std::vector<long long> &OffsetField::Triangles() const { return data_->triangles; }
 long long OffsetField::NumEvaluations() const { return data_->numEvaluations; }
@@ -1687,6 +1741,485 @@ long long OffsetField::NumEvaluations() const { return data_->numEvaluations; }
 //---------------------
 // BuildOffsetSurface
 //---------------------
+
+//------------
+// CutCreases
+//------------
+// The valleys where two offset sheets meet, cut into a level surface after
+// its decimation (Options::creaseDegrees): every edge whose ends stand on
+// sheets turned more than the crease angle from each other, with the field
+// above the level at the chord's middle, is cut where the two sheets'
+// terms both vanish under the chord's highest point - the edge split there,
+// or its end moved there when the cut falls within creaseSnap of the end.
+// The marched contour cannot have put a point on the valley line: its
+// points lie on tetrahedron edges, each found by a search along the edge
+// that stops on whichever sheet the edge meets first, so the triangles in
+// every tetrahedron the valley crosses chord sheet to sheet over it,
+// alternately with ones on a sheet: the teeth along a branch root in the
+// user's picture of 2026-10-20.
+struct CreaseCut
+{
+  ll numEdges = 0, numInserted = 0, numSnapped = 0, numFlipped = 0, numRefused = 0;
+  ll refusedBy[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};   // why: 0 no sheet in a cone, 1 the ends not each on its sheet, 2 facing sheets, 3 the chord under the level, 4 no level under the chord, 5 a corner or a half would turn over, 6 the flip would, 7 the valley not under the chord, 8 a triangle would pass through another
+};
+static void CutCreases(const OffsetField &field, double fraction, const Options &options,
+    std::vector<double> &pts, std::vector<ll> &tris, std::vector<unsigned char> &crease, CreaseCut &report)
+{
+  crease.assign(pts.size()/3, 0);
+  if (!(options.creaseDegrees > 0.0) || tris.size() < 3) return;
+  const double cosCrease = std::cos(options.creaseDegrees*M_PI/180.0);
+  const ll np = (ll)(pts.size()/3), nt = (ll)(tris.size()/3);
+  const std::vector<double> &faceNormals = field.FaceNormals();
+  // each point's sheet: the normal of the field triangle its offset stands on
+  std::vector<ll> owner((size_t)np, -1);
+  std::vector<double> ref((size_t)3*np, 0.0);   // per point: the way out of the wall there, the owner's face normal (a valley point gets its sheets' bisector)
+  for (ll v = 0; v < np; v++)
+  {
+    owner[(size_t)v] = field.Owner(&pts[(size_t)3*v], fraction);
+    if (owner[(size_t)v] >= 0) for (int k = 0; k < 3; k++) ref[(size_t)3*v + k] = faceNormals[(size_t)3*owner[(size_t)v] + k];
+  }
+  // the edges, once each
+  std::set<EdgeKey> seen;
+  struct Cut { ll a, b; double x[3]; double s; double out[3]; };
+  std::vector<Cut> cuts;
+  for (ll t = 0; t < nt; t++)
+  {
+    for (int j = 0; j < 3; j++)
+    {
+      const ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j + 1)%3];
+      if (!seen.insert(EdgeKey(a, b)).second) continue;
+      if (owner[(size_t)a] < 0 || owner[(size_t)b] < 0 || owner[(size_t)a] == owner[(size_t)b]) continue;
+      const double *na = &faceNormals[(size_t)3*owner[(size_t)a]], *nb = &faceNormals[(size_t)3*owner[(size_t)b]];
+      const double *pa = &pts[(size_t)3*a], *pb = &pts[(size_t)3*b];
+      const double length = Distance(pa, pb);
+      if (!(length > 0.0)) continue;
+      double mid[3];
+      for (int k = 0; k < 3; k++) mid[k] = 0.5*(pa[k] + pb[k]);
+      if (Dot(na, nb) >= cosCrease) continue;   // the two ends stand on one sheet, or on sheets nearly parallel
+      if (Dot(na, nb) < -0.5) continue;   // sheets turned more than 120 degrees: two walls closing on each other, left as marched at every level (see Options::creaseDegrees)
+      if (field.Evaluate(mid, fraction) <= options.creaseChord*length) continue;   // the chord lies on or under the level: no valley under it
+      report.numEdges++;
+      // the point of the chord equidistant from the two sheets (bisection
+      // on the difference of their terms: the chord's end a is on sheet A,
+      // where B's term is positive, and the other way round at b)
+      auto along = [&](double u, double x[3]) { for (int k = 0; k < 3; k++) x[k] = pa[k] + u*(pb[k] - pa[k]); };
+      auto sheets = [&](const double x[3], double &termA, double &termB, double ga[3], double gb[3]) -> bool
+      {
+        double qa[3], qb[3];
+        ll ta, tb;
+        termA = field.SheetTerm(x, fraction, na, cosCrease, qa, ta);
+        termB = field.SheetTerm(x, fraction, nb, cosCrease, qb, tb);
+        if (ta < 0 || tb < 0) return false;
+        Sub(x, qa, ga); Sub(x, qb, gb);
+        const double la = Norm(ga), lb = Norm(gb);
+        if (la > 1.0e-9*length) { for (int k = 0; k < 3; k++) ga[k] /= la; } else { for (int k = 0; k < 3; k++) ga[k] = na[k]; }
+        if (lb > 1.0e-9*length) { for (int k = 0; k < 3; k++) gb[k] /= lb; } else { for (int k = 0; k < 3; k++) gb[k] = nb[k]; }
+        return true;
+      };
+      double termA, termB, ga[3], gb[3], x[3];
+      double lo = 0.0, hi = 1.0, gLo, gHi;
+      along(lo, x);
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; continue; }
+      gLo = termA - termB;
+      along(hi, x);
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; continue; }
+      gHi = termA - termB;
+      if (!(gLo < 0.0 && gHi > 0.0)) { report.numRefused++; report.refusedBy[1]++; continue; }   // the ends are not on their own sheets after all
+      for (int it = 0; it < 24; it++)
+      {
+        const double u = 0.5*(lo + hi);
+        along(u, x);
+        if (!sheets(x, termA, termB, ga, gb)) break;
+        if (termA - termB < 0.0) lo = u; else hi = u;
+      }
+      const double s = 0.5*(lo + hi);
+      along(s, x);
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; continue; }
+      // straight down between the sheets to the level: the field is the
+      // smaller term and the point is equidistant, so both vanish together
+      double d[3] = {-(ga[0] + gb[0]), -(ga[1] + gb[1]), -(ga[2] + gb[2])};
+      const double ld = Norm(d);
+      if (!(ld > 0.1)) { report.numRefused++; report.refusedBy[2]++; continue; }   // the sheets face each other: no valley between them
+      for (int k = 0; k < 3; k++) d[k] /= ld;
+      const double f0 = field.Evaluate(x, fraction);
+      if (!(f0 > 0.0)) { report.numRefused++; report.refusedBy[3]++; continue; }
+      // the level lies under the chord within a few edges even in a sharp valley (the drop is the chord's height over the valley)
+      double below = std::min(2.0*f0, 0.25*length), fBelow = 0.0;
+      bool bracketed = false;
+      for (int it = 0; it < 10 && below <= 4.0*length; it++)
+      {
+        double y[3];
+        for (int k = 0; k < 3; k++) y[k] = x[k] + below*d[k];
+        fBelow = field.Evaluate(y, fraction);
+        if (fBelow <= 0.0) { bracketed = true; break; }
+        below *= 2.0;
+      }
+      if (!bracketed) { report.numRefused++; report.refusedBy[4]++; continue; }
+      double above = 0.0;
+      for (int it = 0; it < 24; it++)
+      {
+        const double m = 0.5*(above + below);
+        double y[3];
+        for (int k = 0; k < 3; k++) y[k] = x[k] + m*d[k];
+        if (field.Evaluate(y, fraction) > 0.0) above = m; else below = m;
+      }
+      for (int k = 0; k < 3; k++) x[k] += 0.5*(above + below)*d[k];
+      // slid along the valley line (the two sheets' intersection runs along
+      // the cross of their gradients) to under the chord's middle - the drop
+      // lands beside an oblique chord, past an end even - and settled on both
+      // sheets again by a few Newton steps in the plane of the gradients
+      for (int it = 0; it < 4; it++)
+      {
+        if (!sheets(x, termA, termB, ga, gb)) break;
+        double u[3];
+        Cross(ga, gb, u);
+        const double lu = Norm(u);
+        if (it == 0 && lu > 1.0e-6)
+        {
+          double toMid[3];
+          Sub(mid, x, toMid);
+          const double slide = Dot(toMid, u)/(lu*lu);
+          for (int k = 0; k < 3; k++) x[k] += slide*u[k];
+          continue;
+        }
+        const double c = Dot(ga, gb);
+        if (c*c > 0.98) break;
+        const double alpha = (-termA + c*termB)/(1.0 - c*c), beta = (-termB + c*termA)/(1.0 - c*c);
+        for (int k = 0; k < 3; k++) x[k] += alpha*ga[k] + beta*gb[k];
+      }
+      // a valley farther from the chord's middle than the edge is long is not
+      // under it: the chord closes over a slot between two sheets that run
+      // on side by side below their cusp (two walls closing on each other,
+      // test 3 of test_offset), which no cut at the cusp can resolve
+      if (Distance(x, mid) > 0.6*length) { report.numRefused++; report.refusedBy[7]++; continue; }
+      Cut cut;
+      cut.a = a; cut.b = b; cut.s = s;
+      for (int k = 0; k < 3; k++) { cut.x[k] = x[k]; cut.out[k] = na[k] + nb[k]; }
+      cuts.push_back(cut);
+    }
+  }
+  if (cuts.empty()) return;
+  // Each cut resolved on the surface as it now stands. The valley point is
+  // compared with the four corners of the two triangles on the edge: a
+  // corner within creaseSnap of the edge's length is moved onto it (the
+  // marching often leaves a corner just off the valley, a tent with the
+  // chord for its base), and when that corner is the apex opposite the
+  // edge the edge is flipped to the two apexes, so the valley runs along
+  // the new edge; otherwise the edge is split at the valley point. Every
+  // operation has to keep the triangles facing as they did.
+  std::vector<std::vector<ll> > incident((size_t)np);
+  for (ll t = 0; t < nt; t++) for (int j = 0; j < 3; j++) incident[(size_t)tris[(size_t)3*t + j]].push_back(t);
+  // No operation may put a triangle through another (the marched contour
+  // is dense at a valley, and a corner moved onto it or a half dropped to
+  // it passed through the slivers beside it: 59 crossings in a level of
+  // the user's model that the shell could never be rid of): the crossing
+  // guard of the decimation, over the contour as it stands.
+  // The guard never learns new triangles, so the slots the splits may need
+  // (two per cut) are made first, dead, and filled as they are used; the
+  // unused are taken out at the end.
+  const ll firstSlot = nt;
+  ll nextSlot = nt;
+  tris.resize((size_t)3*(nt + 2*(ll)cuts.size()), 0);
+  std::vector<unsigned char> dead((size_t)(nt + 2*(ll)cuts.size()), 1);
+  for (ll t = 0; t < nt; t++) dead[(size_t)t] = 0;
+  CrossingGuard guard(pts, tris, dead);
+  {
+    double sum = 0.0;
+    ll n = 0;
+    for (ll t = 0; t < nt; t += std::max<ll>(1, nt/20000))
+    {
+      const ll *T = &tris[(size_t)3*t];
+      for (int j = 0; j < 3; j++) { sum += Distance(&pts[(size_t)3*T[j]], &pts[(size_t)3*T[(j + 1)%3]]); n++; }
+    }
+    guard.Build(n > 0 ? 2.0*sum/(double)n : 1.0);
+  }
+  auto triangleNormal = [&](const double *p0, const double *p1, const double *p2, double n[3])
+  {
+    double e1[3], e2[3];
+    Sub(p1, p0, e1); Sub(p2, p0, e2); Cross(e1, e2, n);
+  };
+  // A triangle faces out when its normal agrees with the way out at its
+  // corners (the marched triangles are slivers at a valley, whose own
+  // normals mean little), and it may not shrink to nothing.
+  auto facesOut = [&](const double n[3], ll v0, ll v1, ll v2) -> bool
+  {
+    double r[3];
+    for (int k = 0; k < 3; k++) r[k] = ref[(size_t)3*v0 + k] + ref[(size_t)3*v1 + k] + ref[(size_t)3*v2 + k];
+    const double ln = Norm(n), lr = Norm(r);
+    if (!(ln > 0.0)) return false;
+    return !(lr > 0.0) || Dot(n, r) > 1.0e-3*ln*lr;
+  };
+  auto turnsAny = [&](ll v, const double to[3]) -> bool
+  {
+    for (size_t m = 0; m < incident[(size_t)v].size(); m++)
+    {
+      const ll *T = &tris[(size_t)3*incident[(size_t)v][m]];
+      const double *p[3], *q[3];
+      for (int j = 0; j < 3; j++) { p[j] = &pts[(size_t)3*T[j]]; q[j] = (T[j] == v) ? to : p[j]; }
+      double n1[3], n2[3];
+      triangleNormal(p[0], p[1], p[2], n1);
+      triangleNormal(q[0], q[1], q[2], n2);
+      if (!facesOut(n2, T[0], T[1], T[2]) || Norm(n2) < 1.0e-4*Norm(n1)) return true;
+    }
+    return false;
+  };
+  for (size_t m = 0; m < cuts.size(); m++)
+  {
+    const Cut &cut = cuts[m];
+    const ll a = cut.a, b = cut.b;
+    // the triangles on the edge now (a flip may have taken the edge away)
+    std::vector<ll> on;
+    for (size_t q = 0; q < incident[(size_t)a].size(); q++)
+    {
+      const ll t = incident[(size_t)a][q];
+      const ll *T = &tris[(size_t)3*t];
+      if (T[0] == b || T[1] == b || T[2] == b) on.push_back(t);
+    }
+    if (on.empty()) continue;
+    const double length = Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]);
+    // the nearest corner
+    ll nearest = -1;
+    double nearestDistance = std::numeric_limits<double>::max();
+    for (size_t q = 0; q < on.size(); q++)
+      for (int j = 0; j < 3; j++)
+      {
+        const ll v = tris[(size_t)3*on[q] + j];
+        const double dv = Distance(&pts[(size_t)3*v], cut.x);
+        if (dv < nearestDistance) { nearestDistance = dv; nearest = v; }
+      }
+    bool snapped = false;
+    if (nearest >= 0 && nearestDistance < options.creaseSnap*length && (nearestDistance <= 1.0e-6*length || !turnsAny(nearest, cut.x)))
+    {
+      bool crosses = false;
+      if (nearestDistance > 1.0e-6*length)
+      {
+        double was[3];
+        for (int k = 0; k < 3; k++) { was[k] = pts[(size_t)3*nearest + k]; pts[(size_t)3*nearest + k] = cut.x[k]; }
+        guard.BeginOperation();
+        for (size_t m = 0; m < incident[(size_t)nearest].size(); m++) guard.Leave(incident[(size_t)nearest][m]);
+        for (size_t m = 0; m < incident[(size_t)nearest].size() && !crosses; m++) crosses = guard.Crosses(&tris[(size_t)3*incident[(size_t)nearest][m]]);
+        if (crosses) { for (int k = 0; k < 3; k++) pts[(size_t)3*nearest + k] = was[k]; report.refusedBy[8]++; }
+        else
+        {
+          for (size_t m = 0; m < incident[(size_t)nearest].size(); m++) { guard.Remove(incident[(size_t)nearest][m]); guard.Add(incident[(size_t)nearest][m]); }
+        }
+      }
+      if (!crosses)
+      {
+        crease[(size_t)nearest] = 1;
+        report.numSnapped++;
+        snapped = true;
+      }
+    }
+    if (snapped && (nearest == a || nearest == b)) continue;   // the edge ends on the valley now
+    if (snapped && on.size() == 2)
+    {
+      // the apex is on the valley: the edge flipped to the apexes, when the
+      // two triangles make a quad that stays facing; otherwise the split
+      // below leaves a sliver for the decimation to collapse along the valley
+      ll t1 = on[0], t2 = on[1];
+      ll *T1 = &tris[(size_t)3*t1], *T2 = &tris[(size_t)3*t2];
+      int j1 = -1;
+      for (int j = 0; j < 3; j++) if (T1[j] == a && T1[(j + 1)%3] == b) j1 = j;
+      if (j1 < 0) { std::swap(t1, t2); std::swap(T1, T2); for (int j = 0; j < 3; j++) if (T1[j] == a && T1[(j + 1)%3] == b) j1 = j; }
+      int j2 = -1;
+      if (j1 >= 0) for (int j = 0; j < 3; j++) if (T2[j] == b && T2[(j + 1)%3] == a) j2 = j;
+      if (j1 >= 0 && j2 >= 0)
+      {
+        const ll c = T1[(j1 + 2)%3], d = T2[(j2 + 2)%3];
+        if (c != d && (nearest == c || nearest == d))
+        {
+          double m1[3], m2[3];
+          triangleNormal(&pts[(size_t)3*a], &pts[(size_t)3*d], &pts[(size_t)3*c], m1);
+          triangleNormal(&pts[(size_t)3*d], &pts[(size_t)3*b], &pts[(size_t)3*c], m2);
+          const ll new1[3] = {a, d, c}, new2[3] = {d, b, c};
+          guard.BeginOperation();
+          guard.Leave(t1); guard.Leave(t2);
+          if (facesOut(m1, a, d, c) && facesOut(m2, d, b, c) && !guard.Crosses(new1) && !guard.Crosses(new2))
+          {
+            guard.Remove(t1); guard.Remove(t2);
+            T1[0] = a; T1[1] = d; T1[2] = c;
+            T2[0] = d; T2[1] = b; T2[2] = c;
+            guard.Add(t1); guard.Add(t2);
+            std::vector<ll> &ofA = incident[(size_t)a], &ofB = incident[(size_t)b];
+            ofA.erase(std::remove(ofA.begin(), ofA.end(), t2), ofA.end());
+            ofB.erase(std::remove(ofB.begin(), ofB.end(), t1), ofB.end());
+            incident[(size_t)c].push_back(t2);
+            incident[(size_t)d].push_back(t1);
+            report.numFlipped++;
+            continue;
+          }
+          report.refusedBy[6]++;
+        }
+      }
+    }
+    // the split: both halves of each triangle on the edge have to face as it did
+    bool sound = true;
+    for (size_t q = 0; q < on.size() && sound; q++)
+    {
+      const ll *T = &tris[(size_t)3*on[q]];
+      int j = -1;
+      for (int jj = 0; jj < 3; jj++) if ((T[jj] == a && T[(jj + 1)%3] == b) || (T[jj] == b && T[(jj + 1)%3] == a)) j = jj;
+      if (j < 0) { sound = false; break; }
+      const double *p0 = &pts[(size_t)3*T[j]], *p1 = &pts[(size_t)3*T[(j + 1)%3]], *p2 = &pts[(size_t)3*T[(j + 2)%3]];
+      double n0[3], n1[3], n2[3];
+      triangleNormal(p0, p1, p2, n0);
+      triangleNormal(p0, cut.x, p2, n1);
+      triangleNormal(cut.x, p1, p2, n2);
+      double r1[3], r2[3];
+      for (int k = 0; k < 3; k++)
+      {
+        r1[k] = ref[(size_t)3*T[j] + k] + ref[(size_t)3*T[(j + 2)%3] + k] + cut.out[k];
+        r2[k] = ref[(size_t)3*T[(j + 1)%3] + k] + ref[(size_t)3*T[(j + 2)%3] + k] + cut.out[k];
+      }
+      if (!(Norm(n1) > 0.0) || !(Norm(n2) > 0.0) || Dot(n1, r1) <= 1.0e-3*Norm(n1)*Norm(r1) || Dot(n2, r2) <= 1.0e-3*Norm(n2)*Norm(r2)) sound = false;
+    }
+    if (!sound) { report.numRefused++; report.refusedBy[5]++; continue; }
+    const ll p = (ll)(pts.size()/3);
+    pts.insert(pts.end(), cut.x, cut.x + 3);
+    {
+      guard.BeginOperation();
+      for (size_t q = 0; q < on.size(); q++) guard.Leave(on[q]);
+      bool crosses = false;
+      for (size_t q = 0; q < on.size() && !crosses; q++)
+      {
+        const ll *T = &tris[(size_t)3*on[q]];
+        int j = -1;
+        for (int jj = 0; jj < 3; jj++) if ((T[jj] == a && T[(jj + 1)%3] == b) || (T[jj] == b && T[(jj + 1)%3] == a)) j = jj;
+        const ll half1[3] = {T[j], p, T[(j + 2)%3]}, half2[3] = {p, T[(j + 1)%3], T[(j + 2)%3]};
+        crosses = guard.Crosses(half1) || guard.Crosses(half2);
+      }
+      if (crosses) { pts.resize((size_t)3*p); report.numRefused++; report.refusedBy[8]++; continue; }
+    }
+    incident.push_back(std::vector<ll>());
+    crease.push_back(1);
+    {
+      const double lo = Norm(cut.out);
+      for (int k = 0; k < 3; k++) ref.push_back(lo > 0.0 ? cut.out[k]/lo : 0.0);
+    }
+    for (size_t q = 0; q < on.size(); q++)
+    {
+      const ll t = on[q];
+      ll *T = &tris[(size_t)3*t];
+      int j = -1;
+      for (int jj = 0; jj < 3; jj++) if ((T[jj] == a && T[(jj + 1)%3] == b) || (T[jj] == b && T[(jj + 1)%3] == a)) j = jj;
+      const ll first = T[j], second = T[(j + 1)%3], c = T[(j + 2)%3];
+      // t becomes (first, p, c); the new triangle (p, second, c)
+      guard.Remove(t);
+      T[0] = first; T[1] = p; T[2] = c;
+      const ll t2 = nextSlot++;
+      tris[(size_t)3*t2] = p; tris[(size_t)3*t2 + 1] = second; tris[(size_t)3*t2 + 2] = c;
+      dead[(size_t)t2] = 0;
+      guard.Add(t); guard.Add(t2);
+      incident[(size_t)p].push_back(t); incident[(size_t)p].push_back(t2);
+      incident[(size_t)second].push_back(t2);
+      incident[(size_t)c].push_back(t2);
+      std::vector<ll> &ofSecond = incident[(size_t)second];
+      ofSecond.erase(std::remove(ofSecond.begin(), ofSecond.end(), t), ofSecond.end());
+    }
+    report.numInserted++;
+  }
+  // the slots not used taken out (nothing marks a triangle dead but them)
+  tris.resize((size_t)3*nextSlot);
+  (void)firstSlot;
+}
+
+
+//------------
+// NestLevels
+//------------
+// The levels nested again where the valley cut into one crosses a chord
+// left in the one under it (a cut refused there, or a chord between
+// sheets turned too far): the lower level's crossing triangles have their
+// points pulled in, along the field's gradient, a quarter of their edge
+// at a time until the pair is apart. The levels are compared from the
+// outside in, so a level pulled in is compared with the one under it
+// afterwards. Measured on the user's model, 2026-10-20: 29 crossing
+// triangles between the outer two levels at three branch roots, which the
+// junction shell's census would otherwise count at every attempt.
+static ll NestLevels(const OffsetField &field, const std::vector<double> &fractions, std::vector<Surface> &surfaces)
+{
+  ll numMoved = 0;
+  for (size_t k = surfaces.size(); k >= 2; k--)
+  {
+    Surface &lower = surfaces[k - 2];
+    const Surface &upper = surfaces[k - 1];
+    const double fraction = fractions[k - 2];
+    for (int pass = 0; pass < 3; pass++)
+    {
+      std::vector<double> pts(lower.points);
+      std::vector<ll> tris(lower.triangles);
+      const ll base = (ll)(pts.size()/3), ntLower = (ll)(tris.size()/3);
+      pts.insert(pts.end(), upper.points.begin(), upper.points.end());
+      for (size_t i = 0; i < upper.triangles.size(); i++) tris.push_back(upper.triangles[i] + base);
+      std::vector<svenvelope::CrossingPair> pairs;
+      if (svenvelope::ListCrossingPairs(pts, tris, (size_t)1 << 20, pairs) == 0) break;
+      // no move may put a triangle of the lower level through another of
+      // it (the first pull-in on the user's model: nine crossings on the
+      // first level): the decimation's guard over the lower level, with the
+      // triangles at each of its points
+      std::vector<unsigned char> deadLower((size_t)ntLower, 0);
+      CrossingGuard guard(lower.points, lower.triangles, deadLower);
+      std::vector<std::vector<ll> > incident((size_t)base);
+      {
+        double sum = 0.0;
+        ll n = 0;
+        for (ll t = 0; t < ntLower; t++)
+        {
+          const ll *T = &lower.triangles[(size_t)3*t];
+          for (int j = 0; j < 3; j++) { incident[(size_t)T[j]].push_back(t); if (t%64 == 0) { sum += Distance(&lower.points[(size_t)3*T[j]], &lower.points[(size_t)3*T[(j + 1)%3]]); n++; } }
+        }
+        guard.Build(n > 0 ? 2.0*sum/(double)n : 1.0);
+      }
+      ll moved = 0;
+      for (size_t q = 0; q < pairs.size(); q++)
+      {
+        ll lo = pairs[q].a, up = pairs[q].b;
+        if (lo >= ntLower) std::swap(lo, up);
+        if (lo >= ntLower || up < ntLower) continue;   // both in one level: not this step's
+        const ll *T = &tris[(size_t)3*lo], *U = &tris[(size_t)3*up];
+        double edge = 0.0;
+        for (int j = 0; j < 3; j++) edge += Distance(&pts[(size_t)3*T[j]], &pts[(size_t)3*T[(j + 1)%3]])/3.0;
+        for (int step = 0; step < 4 && svenvelope::TrianglesCross(pts, T, U); step++)
+        {
+          for (int j = 0; j < 3; j++)
+          {
+            const ll v = T[j];
+            double *p = &pts[(size_t)3*v];
+            // the field's gradient by differences: the way out of the wall
+            double g[3];
+            const double h = 0.05*edge;
+            for (int c = 0; c < 3; c++)
+            {
+              double a[3] = {p[0], p[1], p[2]}, b[3] = {p[0], p[1], p[2]};
+              a[c] += h; b[c] -= h;
+              g[c] = field.Evaluate(a, fraction) - field.Evaluate(b, fraction);
+            }
+            const double lg = Norm(g);
+            if (!(lg > 0.0)) continue;
+            double was[3] = {p[0], p[1], p[2]};
+            for (int c = 0; c < 3; c++) lower.points[(size_t)3*v + c] = p[c] - 0.25*edge*g[c]/lg;
+            guard.BeginOperation();
+            for (size_t m = 0; m < incident[(size_t)v].size(); m++) guard.Leave(incident[(size_t)v][m]);
+            bool crosses = false;
+            for (size_t m = 0; m < incident[(size_t)v].size() && !crosses; m++) crosses = guard.Crosses(&lower.triangles[(size_t)3*incident[(size_t)v][m]]);
+            if (crosses)
+            {
+              for (int c = 0; c < 3; c++) lower.points[(size_t)3*v + c] = was[c];
+              continue;
+            }
+            for (int c = 0; c < 3; c++) p[c] = lower.points[(size_t)3*v + c];
+            for (size_t m = 0; m < incident[(size_t)v].size(); m++) { guard.Remove(incident[(size_t)v][m]); guard.Add(incident[(size_t)v][m]); }
+            moved++;
+          }
+        }
+      }
+      numMoved += moved;
+      if (moved == 0) break;
+    }
+  }
+  return numMoved;
+}
 
 int BuildOffsetSurfaces(const Interface &input, const Options &options,
     const std::vector<double> &fractions, DelaunayFunction delaunay, void *context,
@@ -2212,6 +2745,24 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
   // the surface a manifold (the link condition), make no edge longer than
   // the local size allows, and turn no triangle by more than the option's
   // cosine.
+  // The valleys where two sheets meet, cut into the contour before the
+  // decimation (CutCreases): the marching chords across them, and the
+  // decimation, refusing to turn a triangle across the chords' folds, left
+  // the valley a mess of its smallest triangles (the synthetic junction:
+  // edges of 0.02 to 0.09 against a target of 0.2). With the valley a line
+  // of points first, the collapses run along it and onto it; a point on it
+  // is never collapsed onto one off it, nor taken out as a valence-three
+  // or flat apex.
+  std::vector<unsigned char> creasePoint;
+  {
+    CreaseCut cut;
+    CutCreases(field, fraction, options, pts, tris, creasePoint, cut);
+    report.numCreaseEdges = cut.numEdges;
+    report.numCreasePointsInserted = cut.numInserted;
+    report.numCreasePointsSnapped = cut.numSnapped;
+    report.numCreaseCutsRefused = cut.numRefused;
+    if (getenv("SV_CREASE_DEBUG") != nullptr) fprintf(stderr, "crease cut at %.3g: %lld edges, %lld split, %lld snapped (%lld flipped), %lld refused (no sheet %lld, ends %lld, facing %lld, under %lld, no level %lld, turns %lld, flip turns %lld, not under the chord %lld, through another %lld)\n", fraction, cut.numEdges, cut.numInserted, cut.numSnapped, cut.numFlipped, cut.numRefused, cut.refusedBy[0], cut.refusedBy[1], cut.refusedBy[2], cut.refusedBy[3], cut.refusedBy[4], cut.refusedBy[5], cut.refusedBy[6], cut.refusedBy[7], cut.refusedBy[8]);
+  }
   if (options.collapseRatio > 0.0)
   {
     ll nv = (ll)(pts.size()/3), nt = (ll)(tris.size()/3);
@@ -2301,7 +2852,8 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     ll ringU[64], ringV[64], shared[2];
     auto tryCollapse = [&](ll u, ll v) -> bool
     {
-      // u goes onto v
+      // u goes onto v; a point on a valley line goes only onto another on it
+      if ((size_t)u < creasePoint.size() && creasePoint[(size_t)u] && !((size_t)v < creasePoint.size() && creasePoint[(size_t)v])) return false;
       double moved = Distance(&pts[(size_t)3*u], &pts[(size_t)3*v]);
       int nu = 0, nvv = 0, ns = 0;
       for (size_t m = 0; m < incident[(size_t)u].size(); m++)
@@ -2617,6 +3169,7 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       ll numRemoved = 0;
       for (ll u = 0; u < nv; u++)
       {
+        if ((size_t)u < creasePoint.size() && creasePoint[(size_t)u]) continue;   // on a valley line
         ll live[3];
         int n = 0;
         bool tooMany = false;
@@ -2763,6 +3316,7 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
         }
         if (apexCorner < 0) continue;
         ll c = tris[(size_t)3*t0 + apexCorner], a = tris[(size_t)3*t0 + (apexCorner+1)%3], b = tris[(size_t)3*t0 + (apexCorner+2)%3];
+        if ((size_t)c < creasePoint.size() && creasePoint[(size_t)c]) continue;   // on a valley line
         // the ring around c, walked from (c, a, b) through the triangles (c, r_i, r_i+1)
         int k = 0;
         ringU[k++] = a;
@@ -3334,6 +3888,12 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
   }  // each level
   std::vector<double>().swap(cloud);
   std::vector<double>().swap(value);
+  // the levels nested where a valley cut into one crosses a chord left in the one under it (NestLevels)
+  if (options.creaseDegrees > 0.0 && surfaces.size() >= 2)
+  {
+    const ll moved = NestLevels(field, fractions, surfaces);
+    if (!reports.empty()) reports.back().numLevelPointsPulledIn = moved;
+  }
   return 0;
 }
 
@@ -4301,7 +4861,8 @@ int TrimSurfaceToZone(const Surface &level, double fraction, const OffsetField &
       {
         size_t c = (size_t)numGuard + m;
         // a crossing triangle has to go whatever it does to the boundary
-        if (c < crossing.size() && crossing[c]) { drop(which[m]); droppedForCrossing[(size_t)which[m]] = 1; dropped++; }
+        if (c < crossing.size() && crossing[c]) { drop(which[m]); droppedForCrossing[(size_t)which[m]] = 1; dropped++;
+        }
       }
       if (crossingGuards != nullptr)
       {
@@ -5505,9 +6066,11 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
 // shell too (a compacted one flags the points with a prismPoint), for the
 // relaxation to be studied apart from the builder.
 int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::vector<double> &fractions,
-    const std::vector<unsigned char> &fixed, const BandRelaxation &options)
+    const std::vector<unsigned char> &fixedIn, const BandRelaxation &options)
 {
-  if (fixed.size() != out.points.size()/3 || fractions.empty()) return 1;
+  if (fixedIn.size() != out.points.size()/3 || fractions.empty()) return 1;
+  std::vector<unsigned char> fixed(fixedIn);
+  std::set<std::pair<ll, ll> > creaseEdges;   // band edges on a crease, held (see below)
   const int rounds = options.rounds;
   const double bandJitter = options.jitter;
   if (rounds <= 0) return 0;
@@ -5667,7 +6230,7 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
     std::vector<unsigned char> touched(out.triangles.size()/3, 0);
     for (std::map<std::pair<ll, ll>, std::vector<ll> >::const_iterator it = onEdge.begin(); it != onEdge.end(); ++it)
     {
-      if (it->second.size() != 2) continue;
+      if (it->second.size() != 2 || creaseEdges.count(it->first)) continue;
       const ll t1 = it->second[0], t2 = it->second[1];
       if (touched[(size_t)t1] || touched[(size_t)t2]) continue;
       ll *T1 = &out.triangles[(size_t)3*t1], *T2 = &out.triangles[(size_t)3*t2];
@@ -6138,6 +6701,83 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
     double sf = 180.0;
     folded = ListFoldedEdges(out.points, live, foldDegrees, 1, fp, sf);
   };
+  // The creases: a band edge whose two triangles turn more than
+  // creaseDegrees is a valley cut into the level surface (CutCreases), or
+  // one the marching left; its points stay where they are and it is not
+  // flipped, or the smoothing would pull the valley line back into a zigzag
+  // (the user's picture of a branch root, 2026-10-20).
+  if (options.creaseDegrees > 0.0)
+  {
+    const double cosCrease = std::cos(options.creaseDegrees*M_PI/180.0);
+    std::map<std::pair<ll, ll>, std::vector<ll> > onEdge;
+    for (size_t i = 0; i < out.markers.size(); i++)
+    {
+      if (out.markers[i] == 1 || out.markers[i] >= 300) continue;
+      const ll *tri = &out.triangles[(size_t)3*i];
+      for (int j = 0; j < 3; j++) onEdge[std::make_pair(std::min(tri[j], tri[(j + 1)%3]), std::max(tri[j], tri[(j + 1)%3]))].push_back((ll)i);
+    }
+    // a triangle on the level: its centre within a tenth of its mean edge of it
+    auto onLevel = [&](ll t) -> bool
+    {
+      const ll *tri = &out.triangles[(size_t)3*t];
+      const int k = out.markers[(size_t)t] == 2 ? numLayers : out.markers[(size_t)t] - 100;
+      if (k < 1 || k > numLayers) return false;
+      double c[3] = {0.0, 0.0, 0.0}, edge = 0.0;
+      for (int j = 0; j < 3; j++)
+      {
+        for (int kk = 0; kk < 3; kk++) c[kk] += out.points[(size_t)3*tri[j] + kk]/3.0;
+        edge += Distance(&out.points[(size_t)3*tri[j]], &out.points[(size_t)3*tri[(j + 1)%3]])/3.0;
+      }
+      return std::abs(field.Evaluate(c, fractions[(size_t)k - 1])) <= 0.1*edge;
+    };
+    for (std::map<std::pair<ll, ll>, std::vector<ll> >::const_iterator it = onEdge.begin(); it != onEdge.end(); ++it)
+    {
+      if (it->second.size() != 2 || out.markers[(size_t)it->second[0]] != out.markers[(size_t)it->second[1]]) continue;
+      // the pieces' own edges: a strip (a triangle with a prism corner) is
+      // left to the relaxation and its undo, which mend the strips that
+      // cross (held, two strips at the end of a wrapped vessel stayed
+      // crossed through every attempt)
+      {
+        bool strip = false;
+        for (int q = 0; q < 2 && !strip; q++) for (int j = 0; j < 3; j++) if (fixedIn[(size_t)out.triangles[(size_t)3*it->second[q] + j]]) strip = true;
+        if (strip) continue;
+      }
+      double n1[3], n2[3];
+      normalOf(&out.triangles[(size_t)3*it->second[0]], n1);
+      normalOf(&out.triangles[(size_t)3*it->second[1]], n2);
+      const double l1 = Norm(n1), l2 = Norm(n2);
+      if (!(l1 > 0.0) || !(l2 > 0.0) || Dot(n1, n2) >= cosCrease*l1*l2) continue;
+      // only a valley cut into the level, both triangles on it: the sharp
+      // edges of a marched zigzag (chords left between two walls closing on
+      // each other) stay free for the smoothing, as they were (holding them
+      // too left 994 band triangles under 10 degrees where 54 had been)
+      if (!onLevel(it->second[0]) || !onLevel(it->second[1])) continue;
+      creaseEdges.insert(it->first);
+      if (!fixed[(size_t)it->first.first]) { fixed[(size_t)it->first.first] = 1; out.numBandCreasePoints++; }
+      if (!fixed[(size_t)it->first.second]) { fixed[(size_t)it->first.second] = 1; out.numBandCreasePoints++; }
+    }
+  }
+  // the chords: band triangles standing off the level at their centre by more than a tenth of their mean edge
+  auto countChords = [&]() -> ll
+  {
+    ll n = 0;
+    for (size_t i = 0; i < out.markers.size(); i++)
+    {
+      if (out.markers[i] == 1 || out.markers[i] >= 300 || dead[i]) continue;
+      const ll *tri = &out.triangles[(size_t)3*i];
+      const int k = out.markers[i] == 2 ? numLayers : out.markers[i] - 100;
+      if (k < 1 || k > numLayers) continue;
+      double c[3] = {0.0, 0.0, 0.0}, edge = 0.0;
+      for (int j = 0; j < 3; j++)
+      {
+        for (int kk = 0; kk < 3; kk++) c[kk] += out.points[(size_t)3*tri[j] + kk]/3.0;
+        edge += Distance(&out.points[(size_t)3*tri[j]], &out.points[(size_t)3*tri[(j + 1)%3]])/3.0;
+      }
+      if (std::abs(field.Evaluate(c, fractions[(size_t)k - 1])) > 0.1*edge) n++;
+    }
+    return n;
+  };
+  out.numBandChordsBefore = countChords();
   // Phase 1: rounds of flips and moves, per level
   for (int k = 1; k <= numLayers; k++)
   {
@@ -6290,6 +6930,7 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
       out.markers.swap(marks);
     }
   }
+  out.numBandChordsAfter = countChords();
   return 0;
 }
 

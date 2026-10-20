@@ -376,6 +376,46 @@ static void TestSeptum()
     if (!onOffset1 && !onOffset2) numOff++;
   }
   Check(numOff == 0, "every surface point lies on one of the two offsets");
+  // The valleys where the two offsets meet are cut into the surface
+  // (Options::creaseDegrees): a triangle chording over a valley stands off
+  // the level at its centre, as the contour as marched does along the whole
+  // valley (the teeth along a branch root in the user's picture, 2026-10-20).
+  auto chords = [&](const Surface &surf, const svoffset::OffsetField &field) -> ll
+  {
+    ll n = 0;
+    for (size_t i = 0; i + 2 < surf.triangles.size(); i += 3)
+    {
+      double c[3] = {0.0, 0.0, 0.0}, edge = 0.0;
+      for (int j = 0; j < 3; j++)
+      {
+        const double *p = &surf.points[(size_t)3*surf.triangles[i + j]], *q = &surf.points[(size_t)3*surf.triangles[i + (j + 1)%3]];
+        for (int k = 0; k < 3; k++) c[k] += p[k]/3.0;
+        edge += Dist(p, q)/3.0;
+      }
+      if (field.Evaluate(c) > 0.1*edge) n++;
+    }
+    return n;
+  };
+  Options asMarched = options;
+  asMarched.creaseDegrees = 0.0;
+  Surface s0; Report r0;
+  if (!Build(iface, asMarched, s0, r0)) return;
+  TrimAtPlanes(s0, 0.0, 8.0);
+  svoffset::OffsetField field;
+  svoffset::Report fieldReport;
+  std::string fieldError;
+  Check(field.Build(iface, fieldReport, fieldError, options.chordTolerance) == 0, "the field builds for the chord count");
+  const ll before = chords(s0, field), after = chords(s, field);
+  printf("  valley chords (triangles whose centre stands off the level by over a tenth of their edge): %lld as marched, %lld with the creases cut (%lld edges chorded a valley: %lld split there, %lld ends moved onto it, %lld left)\n",
+      before, after, r.numCreaseEdges, r.numCreasePointsInserted, r.numCreasePointsSnapped, r.numCreaseCutsRefused);
+  // The two offsets meet at 140 degrees here, a cusp with a slot 0.06 wide
+  // below it where the sheets run on side by side: most chords close over
+  // the slot away from the cusp and no cut at the cusp resolves them (the
+  // cut refuses them as not under the chord). The synthetic junction of
+  // test_hybrid, a branch root, is where the cut is measured.
+  Check(before > 0, "the contour as marched chords over the valleys");
+  Check(r.numCreaseEdges > 0 && r.numCreasePointsInserted + r.numCreasePointsSnapped > 0, "the cut found the valleys");
+  Check(after < before, "the cut leaves fewer chords than the contour as marched");
 }
 
 // The number of boundary loops of a surface.

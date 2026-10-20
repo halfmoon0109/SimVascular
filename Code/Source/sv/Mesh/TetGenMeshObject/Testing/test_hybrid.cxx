@@ -495,7 +495,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
       }
     }
     // with SV_HYBRID_DUMP_ATTEMPT set: the first shell built with faults goes to that file (points, triangles, markers, prism point ids) and the test stops
-    if (built && getenv("SV_HYBRID_DUMP_ATTEMPT") != nullptr)
+    if (built && getenv("SV_HYBRID_DUMP_ATTEMPT") != nullptr && (getenv("SV_HYBRID_DUMP_ATTEMPT_AT") == nullptr || atoi(getenv("SV_HYBRID_DUMP_ATTEMPT_AT")) == attempt + 1))
     {
       FILE *f = fopen(getenv("SV_HYBRID_DUMP_ATTEMPT"), "wb");
       if (f != nullptr)
@@ -507,9 +507,9 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
         writeVec(markers.data(), markers.size()*sizeof(ll), (ll)markers.size());
         writeVec(shell.prismPoint.data(), shell.prismPoint.size()*sizeof(ll), (ll)shell.prismPoint.size());
         fclose(f);
-        printf("  the faulted shell of attempt %d written to %s; stopping here\n", attempt + 1, getenv("SV_HYBRID_DUMP_ATTEMPT"));
+        printf("  the faulted shell of attempt %d written to %s%s\n", attempt + 1, getenv("SV_HYBRID_DUMP_ATTEMPT"), getenv("SV_HYBRID_DUMP_ATTEMPT_GO") != nullptr ? "" : "; stopping here");
       }
-      return;
+      if (getenv("SV_HYBRID_DUMP_ATTEMPT_GO") == nullptr) return;
     }
     std::vector<ll> seedPoints, seedTriangles; int rings = 1;
     std::vector<std::pair<std::vector<ll>, double> > wraps;   // loops wrapped round their vessels, each by its own distance
@@ -568,6 +568,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   { ll thin = 0, total = 0; for (size_t z = 0; z < shell.zips.size(); z++) { thin += shell.zips[z].trianglesUnder15; total += shell.zips[z].stripTriangles; }
     printf("  zipper strips: %lld triangles, %lld with an angle under 15 degrees (%.1f%%)\n", total, thin, total > 0 ? 100.0*thin/total : 0.0); }
   printf("  band relaxed: %lld flips, %lld moves; under 10 degrees %lld -> %lld of %lld, smallest %.2f -> %.2f; relaxed shell had %lld crossing, %lld folded; %lld triangles undone locally%s\n", shell.numBandFlips, shell.numBandPointsMoved, shell.numBandUnder10Before, shell.numBandUnder10After, shell.numBandTriangles, shell.bandSmallestAngleBefore, shell.bandSmallestAngleAfter, shell.relaxationCrossingsAfter, shell.relaxationFoldsAfter, shell.numRelaxationUndone, shell.relaxationReverted ? " (reverted whole)" : "");
+  printf("  creases: %lld band points held on crease edges; band triangles chording off the level %lld -> %lld\n", shell.numBandCreasePoints, shell.numBandChordsBefore, shell.numBandChordsAfter);
   printf("  band edges collapsed %lld, free points on three triangles removed %lld (%lld triangles gone)%s\n", shell.numBandCollapses, shell.numBandVerticesRemoved, shell.numBandTrianglesRemoved, shell.collapseReverted ? " (undone: the shell crossed or folded)" : "");
   {
     // the band triangles still under 10 degrees, by how many of their corners are prism points (fixed by the relaxation): 0 piece interior, 1-2 strip or on the loop, 3 all fixed
@@ -693,7 +694,62 @@ static void FillHybrid(const Interface &iface, int numLayers)
 {
   std::vector<double> fractions; for (int k = 1; k <= numLayers; k++) fractions.push_back((double)k/numLayers);
   std::vector<Surface> surfs; std::vector<Report> reps; std::string err; Options options;
+  if (getenv("SV_CREASE_DEGREES") != nullptr) options.creaseDegrees = atof(getenv("SV_CREASE_DEGREES"));   // 0 leaves the valleys as marched, for comparison
   if (BuildOffsetSurfaces(iface, options, fractions, Delaunay, nullptr, surfs, reps, err) != 0) { printf("  FAIL build: %s\n", err.c_str()); numFailed++; return; }
+  for (size_t k = 0; k < reps.size(); k++)
+    printf("  level %zu valleys: %lld edges chorded one as marched, %lld split at the valley, %lld corners moved onto it, %lld left\n", k + 1, reps[k].numCreaseEdges, reps[k].numCreasePointsInserted, reps[k].numCreasePointsSnapped, reps[k].numCreaseCutsRefused);
+  printf("  levels nested: %lld point moves pulling a level from under the valleys of the one over it\n", reps.back().numLevelPointsPulledIn);
+  for (size_t k = 1; k < surfs.size(); k++)
+  {
+    std::vector<double> pts(surfs[k-1].points); std::vector<ll> tris(surfs[k-1].triangles);
+    const ll base = (ll)(pts.size()/3);
+    pts.insert(pts.end(), surfs[k].points.begin(), surfs[k].points.end());
+    for (size_t i = 0; i < surfs[k].triangles.size(); i++) tris.push_back(surfs[k].triangles[i] + base);
+    std::vector<unsigned char> cr; double at[3];
+    const ll n = svenvelope::CountCrossingTriangles(pts, tris, cr, at);
+    printf("  levels %zu and %zu together: %lld crossing triangles\n", k, k + 1, n);
+    Check(n == 0, "consecutive levels do not cross each other");
+  }
+  // The valley where the branch meets its parent, cut into the outer level
+  // (Options::creaseDegrees) against the contour as marched: triangles whose
+  // centre stands off the level by over a tenth of their edge are chords
+  // over the valley, the teeth along a branch root in the user's picture of
+  // 2026-10-20.
+  if (options.creaseDegrees > 0.0)
+  {
+    OffsetField field; Report fieldReport; std::string fieldError;
+    if (field.Build(iface, fieldReport, fieldError, options.chordTolerance) == 0)
+    {
+      auto chords = [&](const Surface &surf) -> ll
+      {
+        ll n = 0;
+        for (size_t i = 0; i + 2 < surf.triangles.size(); i += 3)
+        {
+          double c[3] = {0.0, 0.0, 0.0}, edge = 0.0;
+          for (int j = 0; j < 3; j++)
+          {
+            const double *p = &surf.points[(size_t)3*surf.triangles[i + j]], *q = &surf.points[(size_t)3*surf.triangles[i + (j + 1)%3]];
+            for (int k = 0; k < 3; k++) c[k] += p[k]/3.0;
+            edge += Dist(p, q)/3.0;
+          }
+          double size, thickness; ll rim;
+          field.Local(c, size, thickness, rim);
+          if (rim >= 0) continue;   // the collars and their domes past the caps are trimmed away later
+          if (std::abs(field.Evaluate(c, fractions.back())) > 0.1*edge) n++;
+        }
+        return n;
+      };
+      Options asMarched = options; asMarched.creaseDegrees = 0.0;
+      std::vector<Surface> surfs0; std::vector<Report> reps0; std::string err0;
+      if (BuildOffsetSurfaces(iface, asMarched, fractions, Delaunay, nullptr, surfs0, reps0, err0) == 0)
+      {
+        const ll before = chords(surfs0.back()), after = chords(surfs.back());
+        printf("  valley chords on the outer level: %lld as marched, %lld with the valleys cut\n", before, after);
+        Check(before > 0, "the contour as marched chords over the branch root's valley");
+        Check(after*2 <= before, "the cut leaves at most half of the chords");
+      }
+    }
+  }
   std::vector<CapPlane> planes = PlanesFromRims(iface, surfs.back());
   for (size_t k = 0; k < surfs.size(); k++) { TrimReport tr; if (TrimSurfaceAtCaps(surfs[k], planes, 0.1, tr, err) != 0) { printf("  FAIL trim at caps: %s\n", err.c_str()); numFailed++; return; } }
   FillHybridWithLevels(iface, numLayers, surfs);

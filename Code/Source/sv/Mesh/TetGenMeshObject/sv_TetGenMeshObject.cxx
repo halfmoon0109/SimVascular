@@ -3244,6 +3244,8 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
             (long long)junction.numBandTriangles, (long long)junction.numBandFlips, (long long)junction.numBandPointsMoved,
             (long long)junction.numBandUnder10Before, (long long)junction.numBandUnder10After, junction.bandSmallestAngleBefore, junction.bandSmallestAngleAfter,
             junction.relaxationReverted ? " (undone whole: the relaxed shell crossed or folded)" : "");
+        fprintf(stdout,"      %lld band points held still on crease edges (the valleys cut into the level surfaces); band triangles chording off the level %lld -> %lld\n",
+            (long long)junction.numBandCreasePoints, (long long)junction.numBandChordsBefore, (long long)junction.numBandChordsAfter);
         fprintf(stdout,"      %lld short band edges collapsed and %lld free points on three triangles taken out (%lld triangles gone)%s\n",
             (long long)junction.numBandCollapses, (long long)junction.numBandVerticesRemoved, (long long)junction.numBandTrianglesRemoved,
             junction.collapseReverted ? " (undone: the shell crossed or folded)" : "");

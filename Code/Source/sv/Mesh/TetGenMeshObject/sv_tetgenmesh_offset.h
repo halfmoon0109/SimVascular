@@ -167,6 +167,36 @@ struct Options
   // triangles on one spot, which the volume mesher refuses). Zero keeps
   // every piece.
   double bubbleFactor = 3.0;
+  // Where two offset sheets meet in a valley (two vessels at a crotch, two
+  // walls closing on each other), the marched contour chords across it:
+  // its points lie on tetrahedron edges, each found by a search along its
+  // edge that lands on whichever sheet the edge meets first, never on the
+  // sheets' intersection, so in every tetrahedron the valley crosses the
+  // triangle joins sheet to sheet over it, alternately with ones lying on
+  // a sheet - a row of teeth along the valley (the user's picture of a
+  // branch root, 2026-10-20). Before the decimation every edge whose ends
+  // stand on sheets turned more than this many degrees from each other,
+  // with the field above the level at the chord's middle by more than
+  // creaseChord of the edge's length, is cut at the valley: the chord's
+  // point equidistant from the sheets is taken down between them to the
+  // level and slid along the valley to under the chord's middle; a corner
+  // of the triangles on the edge within creaseSnap of the edge's length
+  // is moved there (the edge flipped to the two apexes when that corner
+  // is an apex: the marching leaves many a corner just off the valley, a
+  // tent over it with the chord for its base), otherwise the edge is
+  // split there. A valley farther from the chord's middle than 0.6 of the
+  // edge is not under it (two walls closing on each other run on side by
+  // side below their cusp) and the chord stays, as does every chord between
+  // sheets turned more than 120 degrees from each other (two walls closing
+  // on each other): the levels are nested as marched, and a valley cut
+  // into one level under a chord left in the next crosses it (the user's
+  // model, 2026-10-20: 42 crossings between the outer two levels at the
+  // contact zones, which no widening of the junction zone could mend). The
+  // points on the valley stay on it through the decimation. Zero or less
+  // leaves the contour as marched.
+  double creaseDegrees = 35.0;
+  double creaseChord = 0.1;
+  double creaseSnap = 0.5;
 };
 
 /**
@@ -217,6 +247,11 @@ struct Report
   long long numCollapsed = 0;            // edges collapsed by the decimation
   long long numRefusedForCrossing = 0;   // decimation operations refused because a triangle they would make passes through a live triangle near it
   long long numWelded = 0;               // fins (a folded pair whose apexes lie on one spot) whose apexes were welded after the decimation (WeldFoldedApexes)
+  long long numCreaseEdges = 0;          // edges chording a valley between two sheets (Options::creaseDegrees), after the decimation
+  long long numCreasePointsInserted = 0; // of them, split at the valley
+  long long numCreasePointsSnapped = 0;  // of them, an end moved onto the valley instead
+  long long numCreaseCutsRefused = 0;    // of them, left as they were: the valley not found under the chord
+  long long numLevelPointsPulledIn = 0;  // on the last level's report: point moves of the lower levels pulling their triangles from under a valley cut into the level over them (NestLevels)
   long long numUnfolded = 0;             // edges whose two triangles lay on each other within a degree, flipped, collapsed or taken out with the spike point they stand on by the decimation's last pass
   long long numFoldedEdges = 0;          // of the result: edges whose two triangles still lie on each other within foldDegrees, which the volume mesher refuses
   double smallestFoldDegrees = 180.0;    // of the result: the smallest angle between the two triangles on an edge (180 is flat, 0 is folded)
@@ -350,6 +385,15 @@ public:
   /// vessel). Negative when the ray meets nothing within the limit.
   double LumenChord(const double p[3], const double n[3], double start, double limit) const;
 
+  /// The field's term (the distance less the scaled wall) over the
+  /// triangles whose face normal lies within the cone around coneNormal
+  /// (dot at least coneCos): one sheet of the offset at x where two meet
+  /// in a valley. Returns the term, the closest point of that sheet in q
+  /// and its triangle in owner (-1, with a huge term, when the cone holds
+  /// no triangle).
+  double SheetTerm(const double x[3], double thicknessScale, const double coneNormal[3], double coneCos,
+      double q[3], long long &owner) const;
+
 
   /// How far from the field's surface a point is surely outside the wall.
   double Reach() const;
@@ -360,6 +404,7 @@ public:
   /// The field's surface: the interface followed by the collars.
   const std::vector<double> &Points() const;
   const std::vector<double> &Normals() const;
+  const std::vector<double> &FaceNormals() const;   // unit, per triangle
   const std::vector<double> &Thickness() const;
   const std::vector<long long> &Triangles() const;
 
@@ -670,6 +715,9 @@ struct JunctionShell
   // pieces' points projected back onto the level, the prism rings fixed.
   long long numBandFlips = 0;
   long long numBandPointsMoved = 0;
+  long long numBandCreasePoints = 0;     // band points held still for lying on a crease edge (BandRelaxation::creaseDegrees)
+  long long numBandChordsBefore = 0;     // band triangles whose centre stands off the level by more than a tenth of their mean edge (a chord over a valley), before the relaxation
+  long long numBandChordsAfter = 0;      // and after it
   long long numBandTriangles = 0;
   long long numBandUnder10Before = 0;    // band triangles with an angle under 10 degrees, before and after
   long long numBandUnder10After = 0;
@@ -719,6 +767,7 @@ struct BandRelaxation
   double collapseFraction = 0.3;  // an edge under this fraction of its two triangles' other edges is collapsed (two free points)
   bool removeDegree3 = true;      // a free point on three triangles, one of them under 10 degrees, is taken out
   bool freeThinCaps = true;       // a triangle under 5 degrees keeps neither its normal nor its creases when its point moves
+  double creaseDegrees = 35.0;    // the points on a band edge whose two triangles turn more than this, both lying on the level, stay where they are and the edge is not flipped: a valley cut into the level surface (Options::creaseDegrees) would otherwise be smoothed back into a zigzag; zero or less holds nothing
 };
 
 /**
