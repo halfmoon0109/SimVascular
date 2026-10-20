@@ -6771,14 +6771,28 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
     for (size_t z = 0; z < out.zips.size(); z++)
     {
       const ll first = -out.zips[z].crossingTriangles;
-      ll n = 0, nf = 0;
+      ll n = 0, nf = 0, thin = 0;
       for (ll i = first; i < first + out.zips[z].stripTriangles && (size_t)i < crossing.size(); i++)
       {
         if (crossing[(size_t)i]) n++;
         nf += foldedOf[(size_t)i];
+        // the smallest angle of the triangle
+        const ll *T = &out.triangles[(size_t)3*i];
+        double smallest = 180.0;
+        for (int j = 0; j < 3; j++)
+        {
+          double e1[3], e2[3];
+          Sub(&out.points[(size_t)3*T[(j + 1)%3]], &out.points[(size_t)3*T[j]], e1);
+          Sub(&out.points[(size_t)3*T[(j + 2)%3]], &out.points[(size_t)3*T[j]], e2);
+          const double l1 = Norm(e1), l2 = Norm(e2);
+          if (!(l1 > 0.0 && l2 > 0.0)) { smallest = 0.0; break; }
+          smallest = std::min(smallest, std::acos(std::max(-1.0, std::min(1.0, Dot(e1, e2)/(l1*l2))))*(180.0/3.14159265358979323846));
+        }
+        if (smallest < 15.0) thin++;
       }
       out.zips[z].crossingTriangles = n;
       out.zips[z].foldedEdges = nf;
+      out.zips[z].trianglesUnder15 = thin;
     }
   }
   // 4. compact the points to those used

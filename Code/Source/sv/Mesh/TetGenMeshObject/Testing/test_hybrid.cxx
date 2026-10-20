@@ -565,6 +565,8 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   ll nb, nn, nm; CountEdges(shell.triangles, nb, nn, nm);
   std::vector<unsigned char> cr; double at[3]; ll crossings = svenvelope::CountCrossingTriangles(shell.points, shell.triangles, cr, at);
   std::map<int, ll> byMarker; for (size_t i = 0; i < shell.markers.size(); i++) byMarker[shell.markers[i]]++;
+  { ll thin = 0, total = 0; for (size_t z = 0; z < shell.zips.size(); z++) { thin += shell.zips[z].trianglesUnder15; total += shell.zips[z].stripTriangles; }
+    printf("  zipper strips: %lld triangles, %lld with an angle under 15 degrees (%.1f%%)\n", total, thin, total > 0 ? 100.0*thin/total : 0.0); }
   printf("  band relaxed: %lld flips, %lld moves; under 10 degrees %lld -> %lld of %lld, smallest %.2f -> %.2f; relaxed shell had %lld crossing, %lld folded; %lld triangles undone locally%s\n", shell.numBandFlips, shell.numBandPointsMoved, shell.numBandUnder10Before, shell.numBandUnder10After, shell.numBandTriangles, shell.bandSmallestAngleBefore, shell.bandSmallestAngleAfter, shell.relaxationCrossingsAfter, shell.relaxationFoldsAfter, shell.numRelaxationUndone, shell.relaxationReverted ? " (reverted whole)" : "");
   printf("  band edges collapsed %lld, free points on three triangles removed %lld (%lld triangles gone)%s\n", shell.numBandCollapses, shell.numBandVerticesRemoved, shell.numBandTrianglesRemoved, shell.collapseReverted ? " (undone: the shell crossed or folded)" : "");
   {

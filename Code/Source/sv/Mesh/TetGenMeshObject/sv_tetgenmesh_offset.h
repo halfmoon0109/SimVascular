@@ -653,6 +653,7 @@ struct ZipReport
   long long stripTriangles = 0;
   long long crossingTriangles = 0;      // of the strip's, passing through another shell triangle
   long long foldedEdges = 0;            // edges of the strip's triangles whose two triangles lie on each other
+  long long trianglesUnder15 = 0;       // of the strip's, with an angle under 15 degrees after the relaxation (long triangles fanned at a corner of the loop)
   std::vector<long long> loop;          // the zone boundary loop's interface points, for WidenJunctionZone when the strip is at fault
 };
 
