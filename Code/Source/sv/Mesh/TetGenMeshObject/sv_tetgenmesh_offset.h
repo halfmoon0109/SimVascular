@@ -405,6 +405,10 @@ public:
   const std::vector<double> &Points() const;
   const std::vector<double> &Normals() const;
   const std::vector<double> &FaceNormals() const;   // unit, per triangle
+  /// The plane of a cap rim as the field has it: the rim's centroid, its
+  /// outward direction, its radius (the farthest rim point from the
+  /// centroid) and the length of the collar continued past it.
+  bool RimPlane(size_t rim, double origin[3], double outward[3], double &radius, double &collarLength) const;
   const std::vector<double> &Thickness() const;
   const std::vector<long long> &Triangles() const;
 

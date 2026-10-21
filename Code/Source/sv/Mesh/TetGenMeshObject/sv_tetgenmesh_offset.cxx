@@ -1733,6 +1733,18 @@ const std::vector<std::vector<long long> > &OffsetField::Rims() const
 
 const std::vector<double> &OffsetField::Points() const { return data_->points; }
 const std::vector<double> &OffsetField::Normals() const { return data_->normals; }
+bool OffsetField::RimPlane(size_t rim, double origin[3], double outward[3], double &radius, double &collarLength) const
+{
+  const Data &d = *data_;
+  if (rim >= d.rims.size() || d.rims[rim].empty() || 3*rim + 2 >= d.rimOutward.size() || rim >= d.collarLength.size()) return false;
+  for (int k = 0; k < 3; k++) origin[k] = 0.0;
+  for (size_t m = 0; m < d.rims[rim].size(); m++) for (int k = 0; k < 3; k++) origin[k] += d.points[(size_t)3*d.rims[rim][m] + k]/(double)d.rims[rim].size();
+  radius = 0.0;
+  for (size_t m = 0; m < d.rims[rim].size(); m++) radius = std::max(radius, Distance(origin, &d.points[(size_t)3*d.rims[rim][m]]));
+  for (int k = 0; k < 3; k++) outward[k] = d.rimOutward[3*rim + k];
+  collarLength = d.collarLength[rim];
+  return true;
+}
 const std::vector<double> &OffsetField::FaceNormals() const { return data_->faceNormals; }
 const std::vector<double> &OffsetField::Thickness() const { return data_->thickness; }
 const std::vector<long long> &OffsetField::Triangles() const { return data_->triangles; }
@@ -2140,6 +2152,13 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
 static ll NestLevels(const OffsetField &field, const std::vector<double> &fractions, std::vector<Surface> &surfaces)
 {
   ll numMoved = 0;
+  struct Plane { double origin[3], outward[3], radius, collar; };
+  std::vector<Plane> planes;
+  for (size_t r = 0; r < field.Rims().size(); r++)
+  {
+    Plane plane;
+    if (field.RimPlane(r, plane.origin, plane.outward, plane.radius, plane.collar)) planes.push_back(plane);
+  }
   for (size_t k = surfaces.size(); k >= 2; k--)
   {
     Surface &lower = surfaces[k - 2];
@@ -2178,6 +2197,29 @@ static ll NestLevels(const OffsetField &field, const std::vector<double> &fracti
         if (lo >= ntLower) std::swap(lo, up);
         if (lo >= ntLower || up < ntLower) continue;   // both in one level: not this step's
         const ll *T = &tris[(size_t)3*lo], *U = &tris[(size_t)3*up];
+        // not at a vessel end: the domes over the collars cross between
+        // the levels and come off with the trim, and a point pulled in
+        // there ended on a cap plane, where the trim left a loop of four
+        // points for a fifteenth rim (the user's run of 2026-10-21). A
+        // triangle within a collar's length of a cap plane, on either
+        // side, and within the rim's radius and a collar of its axis, is
+        // left alone.
+        {
+          double c[3] = {0.0, 0.0, 0.0};
+          for (int j = 0; j < 3; j++) for (int k = 0; k < 3; k++) c[k] += pts[(size_t)3*T[j] + k]/3.0;
+          bool atEnd = false;
+          for (size_t r = 0; r < planes.size() && !atEnd; r++)
+          {
+            double d[3];
+            Sub(c, &planes[r].origin[0], d);
+            const double along = Dot(d, &planes[r].outward[0]);
+            if (along <= -planes[r].collar) continue;
+            double across[3];
+            for (int k = 0; k < 3; k++) across[k] = d[k] - along*planes[r].outward[k];
+            if (Norm(across) <= planes[r].radius + planes[r].collar) atEnd = true;
+          }
+          if (atEnd) continue;
+        }
         double edge = 0.0;
         for (int j = 0; j < 3; j++) edge += Distance(&pts[(size_t)3*T[j]], &pts[(size_t)3*T[(j + 1)%3]])/3.0;
         for (int step = 0; step < 4 && svenvelope::TrianglesCross(pts, T, U); step++)
