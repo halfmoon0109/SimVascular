@@ -1782,6 +1782,34 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
   const double cosCrease = std::cos(options.creaseDegrees*M_PI/180.0);
   const ll np = (ll)(pts.size()/3), nt = (ll)(tris.size()/3);
   const std::vector<double> &faceNormals = field.FaceNormals();
+  // Not at a vessel end: within a cap rim's radius and a collar of its
+  // axis, a collar's length either side of its plane, the contour is left
+  // as marched. A valley cut there reshaped the trimmed rim and the piece's
+  // chain beside it, and the strip from the zone loop touching the aortic
+  // outlet crossed the piece through every attempt (the user's run of
+  // 2026-10-21, the thicker wall set), where the run before the cut had
+  // closed.
+  struct Cap { double origin[3], outward[3], radius, collar; };
+  std::vector<Cap> caps;
+  for (size_t r = 0; r < field.Rims().size(); r++)
+  {
+    Cap cap;
+    if (field.RimPlane(r, cap.origin, cap.outward, cap.radius, cap.collar)) caps.push_back(cap);
+  }
+  auto atEnd = [&](const double x[3]) -> bool
+  {
+    for (size_t r = 0; r < caps.size(); r++)
+    {
+      double d[3];
+      Sub(x, caps[r].origin, d);
+      const double along = Dot(d, caps[r].outward);
+      if (along <= -caps[r].collar) continue;
+      double across[3];
+      for (int k = 0; k < 3; k++) across[k] = d[k] - along*caps[r].outward[k];
+      if (Norm(across) <= caps[r].radius + caps[r].collar) return true;
+    }
+    return false;
+  };
   // each point's sheet: the normal of the field triangle its offset stands on
   std::vector<ll> owner((size_t)np, -1);
   std::vector<double> ref((size_t)3*np, 0.0);   // per point: the way out of the wall there, the owner's face normal (a valley point gets its sheets' bisector)
@@ -1807,6 +1835,7 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
       if (!(length > 0.0)) continue;
       double mid[3];
       for (int k = 0; k < 3; k++) mid[k] = 0.5*(pa[k] + pb[k]);
+      if (atEnd(mid)) continue;
       if (Dot(na, nb) >= cosCrease) continue;   // the two ends stand on one sheet, or on sheets nearly parallel
       if (Dot(na, nb) < -0.5) continue;   // sheets turned more than 120 degrees: two walls closing on each other, left as marched at every level (see Options::creaseDegrees)
       if (field.Evaluate(mid, fraction) <= options.creaseChord*length) continue;   // the chord lies on or under the level: no valley under it
