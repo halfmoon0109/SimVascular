@@ -343,6 +343,12 @@ static double TetVolume(const std::vector<double> &pts, const ll *q)
 
 // The faces of a set of tetrahedra by how many tetrahedra share them; the
 // boundary is the faces on one.
+static double TetVolume6(const std::vector<double> &p, const ll *q)
+{
+  double a[3], b[3], c[3];
+  for (int k = 0; k < 3; k++) { a[k] = p[3*q[1]+k]-p[3*q[0]+k]; b[k] = p[3*q[2]+k]-p[3*q[0]+k]; c[k] = p[3*q[3]+k]-p[3*q[0]+k]; }
+  return (a[1]*b[2]-a[2]*b[1])*c[0] + (a[2]*b[0]-a[0]*b[2])*c[1] + (a[0]*b[1]-a[1]*b[0])*c[2];
+}
 static void FaceCensus(const std::vector<ll> &tets, std::map<std::array<ll,3>, int> &count)
 {
   const int faces[4][3] = {{1,2,3},{0,3,2},{0,1,3},{0,2,1}};
@@ -625,6 +631,28 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   std::vector<ll> steinerToAll;
   for (int i = nIn; i < out.numberofpoints; i++) { steinerToAll.push_back((ll)(pts.size()/3)); for (int k = 0; k < 3; k++) pts.push_back(out.pointlist[3*i+k]); }
   std::vector<ll> zoneTets; for (int t = 0; t < out.numberoftetrahedra; t++) for (int m = 0; m < 4; m++) { ll v = out.tetrahedronlist[4*t+m]; zoneTets.push_back(v < nIn ? shellToAll[v] : steinerToAll[v - nIn]); }
+  // the slivers of the fill eased as the fill flow does it: flips, then the free corners moved a little - the
+  // pieces' own points and the mesher's own; the prism mesh's points (the interface's and the zone walls') not
+  {
+    std::vector<unsigned char> fixedPts(pts.size()/3, 0);
+    for (size_t v = 0; v < pm.points.size()/3 && v < fixedPts.size(); v++) fixedPts[v] = 1;
+    // the shell's triangles are the facets, and every shell point not on the outer surface alone stays
+    std::vector<ll> facets;
+    for (size_t i = 0; i + 2 < shell.triangles.size(); i += 3)
+    {
+      for (int j = 0; j < 3; j++) { facets.push_back(shellToAll[shell.triangles[i + j]]); if (shell.markers[i/3] != 2) fixedPts[(size_t)shellToAll[shell.triangles[i + j]]] = 1; }
+    }
+    double volumeBefore = 0.0; ll turnedBefore = 0;
+    for (size_t t = 0; t + 3 < zoneTets.size(); t += 4) { const double v = TetVolume6(pts, &zoneTets[t]); volumeBefore += std::fabs(v); if (v < 0.0) turnedBefore++; }
+    SliverReport sliver;
+    ImproveSlivers(pts, zoneTets, fixedPts, facets, b.mindihedral, 5, 0.35, sliver);
+    double volumeAfter = 0.0; ll turnedAfter = 0;
+    for (size_t t = 0; t + 3 < zoneTets.size(); t += 4) { const double v = TetVolume6(pts, &zoneTets[t]); volumeAfter += std::fabs(v); if (v < 0.0) turnedAfter++; }
+    printf("  slivers eased: %lld flips across a face, %lld around an edge (%lld tetrahedra -> %lld), %lld moves of %lld points; under %.0f degrees %lld -> %lld, under 1 degree %lld -> %lld, smallest %.3f -> %.3f; volume %.6g -> %.6g, turned %lld -> %lld\n",
+        sliver.numFlips23, sliver.numFlips32, sliver.numTetrahedra, sliver.numTetrahedraAfter, sliver.numMoves, sliver.numPointsMoved, b.mindihedral, sliver.numUnderBefore, sliver.numUnderAfter, sliver.numUnder1Before, sliver.numUnder1After, sliver.smallestBefore, sliver.smallestAfter, volumeBefore/6, volumeAfter/6, turnedBefore, turnedAfter);
+    Check(sliver.numUnderAfter < sliver.numUnderBefore, "easing the slivers leaves fewer of them");
+    Check(turnedAfter == 0 && std::fabs(volumeAfter - volumeBefore) < 1.0e-3*volumeBefore, "easing the slivers turns no tetrahedron and keeps the zones' volume to a thousandth");
+  }
   std::vector<ll> all = pm.tetrahedra; all.insert(all.end(), zoneTets.begin(), zoneTets.end());
   std::map<std::array<ll,3>, int> count; FaceCensus(all, count);
   ll numBoundary = 0, numOver = 0; for (std::map<std::array<ll,3>, int>::const_iterator it = count.begin(); it != count.end(); ++it) { if (it->second == 1) numBoundary++; if (it->second > 2) numOver++; }

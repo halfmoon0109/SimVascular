@@ -3529,6 +3529,132 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     }
   }
 
+  // The fill's slivers eased. The mesher may put no point on a facet, so
+  // between the interface and the surfaces facing it, and where two of its
+  // facets meet at a slight fold, it leaves tetrahedra flatter than its own
+  // bound that it cannot mend from inside (the junction zones of 2026-10-21:
+  // 32,480 of 4.07M under 10 degrees, 949 under 5, 86 under 1, the smallest
+  // 0.06). Each is taken out by a local flip where its cavity allows one -
+  // the ones on a fold by the removal of their one inner edge - and else its
+  // free corners are moved a little: the mesher's own points and the shell
+  // points on the outer surface alone. The interface's points are the fluid
+  // mesh's, the vessel ends' close the wall and the prism walls' are matched
+  // by position when the prism layers are joined on, so those all stay; the
+  // fill's boundary triangles are kept as they are, so the tagging below
+  // still finds them on the shell's. The shell's own points are moved with
+  // the fill's so that the tagging, which matches by position, still does.
+  if (shellInMesh != nullptr && shellOutMesh != nullptr && shellOutMesh->numberoftetrahedra > 0 &&
+      shellOutMesh->numberofcorners == 4 && shellOutMesh->pointlist != nullptr && shellOutMesh->tetrahedronlist != nullptr &&
+      shellOutMesh->numberofpoints >= shellInMesh->numberofpoints &&
+      (vtkIdType)shellInMesh->numberofpoints == fillShell->GetNumberOfPoints())
+  {
+    const long long numIn = shellInMesh->numberofpoints;
+    const long long numOut = shellOutMesh->numberofpoints;
+    const long long numTets = shellOutMesh->numberoftetrahedra;
+    bool inputMoved = false;
+    for (long long i = 0; i < 3*numIn && !inputMoved; i++)
+    {
+      if (shellInMesh->pointlist[i] != shellOutMesh->pointlist[i]) inputMoved = true;
+    }
+    if (inputMoved)
+    {
+      fprintf(stdout,"  the mesher handed its input points back moved or renumbered, so the fill's slivers are left as they are\n");
+    }
+    else
+    {
+      std::vector<double> fillPoints(shellOutMesh->pointlist, shellOutMesh->pointlist + 3*numOut);
+      std::vector<long long> fillTets(shellOutMesh->tetrahedronlist, shellOutMesh->tetrahedronlist + 4*numTets);
+      std::vector<unsigned char> fillFixed((size_t)numOut, 0);
+      for (vtkIdType cellId = 0; cellId < fillShell->GetNumberOfCells(); cellId++)
+      {
+        if ((size_t)cellId < shellRole.size() && shellRole[(size_t)cellId] == outerSurfaceCellId)
+        {
+          continue;
+        }
+        vtkIdType npts;
+        const vtkIdType *pts;
+        fillShell->GetCellPoints(cellId, npts, pts);
+        for (vtkIdType j = 0; j < npts; j++)
+        {
+          if (pts[j] >= 0 && (long long)pts[j] < numIn) fillFixed[(size_t)pts[j]] = 1;
+        }
+      }
+      long long numShellFree = 0;
+      for (long long i = 0; i < numIn; i++)
+      {
+        if (!fillFixed[(size_t)i]) numShellFree++;
+      }
+      const double sliverDegrees = shellBehavior != nullptr ? shellBehavior->mindihedral : 10.0;
+      // The facets as the mesher handed them back, on the boundary and
+      // inside the fill, which no flip may take away. A flip rewrites the
+      // tetrahedra, which a fill with attributes on them cannot have.
+      std::vector<long long> fillFacets;
+      if (shellOutMesh->numberoftrifaces > 0 && shellOutMesh->trifacelist != nullptr)
+      {
+        fillFacets.assign(shellOutMesh->trifacelist, shellOutMesh->trifacelist + 3*(long long)shellOutMesh->numberoftrifaces);
+      }
+      const bool withFlips = shellOutMesh->numberoftetrahedronattributes == 0 && !fillFacets.empty();
+      svoffset::SliverReport sliver;
+      if (withFlips)
+      {
+        svoffset::ImproveSlivers(fillPoints, fillTets, fillFixed, fillFacets, sliverDegrees, 5, 0.35, sliver);
+      }
+      else
+      {
+        svoffset::ExudeSlivers(fillPoints, fillTets, fillFixed, sliverDegrees, 5, 0.35, sliver);
+      }
+      fprintf(stdout,"  the fill's slivers eased: tetrahedra under %.3g degrees %lld -> %lld, under 1 degree %lld -> %lld, the smallest dihedral angle %.3f -> %.3f; %lld flips across a face and %lld around an edge (%lld tetrahedra -> %lld), %lld moves of %lld points (%lld of the shell's points, on the outer surface alone, and the mesher's %lld were free)\n",
+          sliverDegrees, sliver.numUnderBefore, sliver.numUnderAfter, sliver.numUnder1Before, sliver.numUnder1After,
+          sliver.smallestBefore, sliver.smallestAfter, sliver.numFlips23, sliver.numFlips32, sliver.numTetrahedra, sliver.numTetrahedraAfter,
+          sliver.numMoves, sliver.numPointsMoved, numShellFree, numOut - numIn);
+      if (sliver.numMoves > 0)
+      {
+        for (long long i = 0; i < 3*numOut; i++)
+        {
+          shellOutMesh->pointlist[i] = fillPoints[(size_t)i];
+        }
+        vtkPoints *shellPoints = fillShell->GetPoints();
+        for (long long i = 0; i < numIn; i++)
+        {
+          if (!fillFixed[(size_t)i]) shellPoints->SetPoint((vtkIdType)i, &fillPoints[(size_t)3*i]);
+        }
+        shellPoints->Modified();
+        if (hybridActive && hybridWall.shell.points.size() == (size_t)3*numIn)
+        {
+          for (long long i = 0; i < numIn; i++)
+          {
+            if (fillFixed[(size_t)i]) continue;
+            for (int k = 0; k < 3; k++) hybridWall.shell.points[(size_t)3*i + k] = fillPoints[(size_t)3*i + k];
+          }
+        }
+      }
+      if (sliver.numFlips23 + sliver.numFlips32 > 0)
+      {
+        delete [] shellOutMesh->tetrahedronlist;
+        shellOutMesh->numberoftetrahedra = (int)(fillTets.size()/4);
+        shellOutMesh->tetrahedronlist = new int[fillTets.size()];
+        for (size_t i = 0; i < fillTets.size(); i++)
+        {
+          shellOutMesh->tetrahedronlist[i] = (int)fillTets[i];
+        }
+        // The neighbours the mesher listed no longer hold; the tetrahedra on
+        // each boundary face, which the conversion reads, are found again.
+        delete [] shellOutMesh->neighborlist;
+        shellOutMesh->neighborlist = nullptr;
+        if (shellOutMesh->numberoftrifaces > 0 && shellOutMesh->trifacelist != nullptr && shellOutMesh->adjtetlist != nullptr)
+        {
+          std::vector<long long> faces(shellOutMesh->trifacelist, shellOutMesh->trifacelist + 3*(long long)shellOutMesh->numberoftrifaces);
+          std::vector<long long> adjacent;
+          svoffset::FindTetrahedraOnFaces(fillTets, numOut, faces, adjacent);
+          for (size_t i = 0; i < adjacent.size(); i++)
+          {
+            shellOutMesh->adjtetlist[i] = (int)adjacent[i];
+          }
+        }
+      }
+    }
+  }
+
   if (wallmesh_ != nullptr)
   {
     wallmesh_->Delete();

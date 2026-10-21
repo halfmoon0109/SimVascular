@@ -898,6 +898,97 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
  * prismPoint is not -1. Fills the shell's numBand* and relaxation* fields.
  * @return 0, or 1 when the flags do not match the points.
  */
+/**
+ * @brief The slivers of a filled zone eased by moving the points that are
+ * free to move.
+ *
+ * TetGen fills the junction zones between the layer surfaces' pieces,
+ * facets it may not touch (-Y), so where two pieces lie a layer apart with
+ * triangles that do not match it has to make tetrahedra with all four
+ * corners on the two, some of them flat (the user's model, 2026-10-21: 73
+ * under a degree, 780 under 5, 99% with every corner on the shell). The
+ * pieces' points are nobody's but the wall's own, so a corner of such a
+ * tetrahedron is moved off its level a little: each tetrahedron under the
+ * threshold has its free corners tried, each along the normal of the face
+ * opposite it, both ways, by steps of a fraction of the point's shortest
+ * edge, and a move stays only when the smallest dihedral angle over every
+ * tetrahedron at the point rises and none turns over. Points flagged fixed
+ * (the prism mesh's, the interface's) never move; the mesher's own points
+ * may. Repeated for the passes given.
+ * @param maxMoveFraction The farthest a point goes in all, as a fraction of
+ * its shortest edge (0.2: a fifth of the layer spacing where that is the
+ * shortest edge).
+ * @return The number of point moves made.
+ */
+/**
+ * @brief What easing a fill's slivers did: the tetrahedra under the
+ * threshold and under one degree before and after, the smallest dihedral
+ * angle, the flips taken and the points moved.
+ */
+struct SliverReport
+{
+  long long numTetrahedra = 0, numTetrahedraAfter = 0;
+  long long numUnderBefore = 0, numUnderAfter = 0;   // under the threshold
+  long long numUnder1Before = 0, numUnder1After = 0; // under one degree
+  double smallestBefore = 180.0, smallestAfter = 180.0;
+  long long numFlips23 = 0, numFlips32 = 0;
+  long long numPointsMoved = 0;
+  long long numMoves = 0;
+};
+
+/**
+ * @brief Ease the slivers of a tetrahedral fill by moving their free corners.
+ *
+ * A mesher that may put no point on its input facets leaves, where the
+ * facets of a thin region are close, flat tetrahedra it cannot mend from
+ * inside. Every tetrahedron whose smallest dihedral angle is under the
+ * threshold has each of its corners that is not fixed moved along the
+ * normal of the face opposite it, by at most the given fraction of the
+ * shortest edge at that corner over all the passes, as far as that makes
+ * the sliver better without turning any tetrahedron at the corner inside
+ * out, pushing one under the threshold or, if one is under already, making
+ * it worse. Returns the number of moves.
+ */
+long long ExudeSlivers(std::vector<double> &points, const std::vector<long long> &tetrahedra,
+    const std::vector<unsigned char> &fixed, double thresholdDegrees, int passes, double maxMoveFraction,
+    SliverReport &report);
+
+/**
+ * @brief Take the slivers of a tetrahedral fill out by local flips.
+ *
+ * A sliver with all its corners on the facets - two of its faces on
+ * them, where two facets meet at a slight fold - no move can mend, but
+ * the cavity of the sliver and a tetrahedron beyond one of its faces, or
+ * of the sliver and the others closing around one of its edges, can be
+ * filled another way (a 2-3 flip, or the removal of the edge: 3-2 for
+ * three around it, 2(n-2) for n, at most eight). Each tetrahedron under
+ * the threshold is flipped the way that makes the smallest dihedral angle
+ * in its cavity largest, when that is larger than it was and the new
+ * tetrahedra keep the mesh's orientation. Faces and edges on the boundary
+ * are never flipped, nor those on the given facets (the triangles the
+ * mesher was told to keep, inside the fill as well as on its boundary), so
+ * all of those are kept. The tetrahedra are rewritten (their number
+ * changes; the points do not). Returns the number of flips.
+ */
+long long FlipSlivers(const std::vector<double> &points, std::vector<long long> &tetrahedra,
+    const std::vector<long long> &facets, double thresholdDegrees, int passes, SliverReport &report);
+
+/**
+ * @brief FlipSlivers, ExudeSlivers, then FlipSlivers again for what the
+ * moves left; the report sums the three up. Returns flips plus moves.
+ */
+long long ImproveSlivers(std::vector<double> &points, std::vector<long long> &tetrahedra,
+    const std::vector<unsigned char> &fixed, const std::vector<long long> &facets, double thresholdDegrees,
+    int passes, double maxMoveFraction, SliverReport &report);
+
+/**
+ * @brief The tetrahedra on each of the given triangles, up to two per
+ * triangle (-1 where there is none), for a face list whose tetrahedra
+ * were rewritten. Returns the number of triangles on a tetrahedron.
+ */
+long long FindTetrahedraOnFaces(const std::vector<long long> &tetrahedra, long long numPoints,
+    const std::vector<long long> &faces, std::vector<long long> &adjacent);
+
 int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::vector<double> &fractions,
     const std::vector<unsigned char> &fixed, const BandRelaxation &options);
 

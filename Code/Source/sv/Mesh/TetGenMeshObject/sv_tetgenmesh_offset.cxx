@@ -7005,6 +7005,516 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
   return 0;
 }
 
+//---------------
+// ExudeSlivers
+//---------------
+// See the header. The smallest dihedral angle of a tetrahedron is the
+// smallest angle between the inward normals of two of its faces; its
+// orientation is the sign of its volume, which no move may change.
+static double TetrahedronMinDihedral(const std::vector<double> &pts, const ll *q)
+{
+  const double *P[4];
+  for (int m = 0; m < 4; m++) P[m] = &pts[(size_t)3*q[m]];
+  const int faces[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
+  double N[4][3];
+  for (int f = 0; f < 4; f++)
+  {
+    double u[3], v[3];
+    Sub(P[faces[f][1]], P[faces[f][0]], u);
+    Sub(P[faces[f][2]], P[faces[f][0]], v);
+    Cross(u, v, N[f]);
+    const double l = Norm(N[f]);
+    if (!(l > 0.0)) return 0.0;
+    for (int k = 0; k < 3; k++) N[f][k] /= l;
+  }
+  double tetMin = 180.0;
+  for (int f = 0; f < 4; f++)
+    for (int g = f + 1; g < 4; g++)
+    {
+      const double c = std::max(-1.0, std::min(1.0, -Dot(N[f], N[g])));
+      tetMin = std::min(tetMin, std::acos(c)*180.0/M_PI);
+    }
+  return tetMin;
+}
+static double TetrahedronVolume6(const std::vector<double> &pts, const ll *q)
+{
+  double a[3], b[3], c[3], n[3];
+  Sub(&pts[(size_t)3*q[1]], &pts[(size_t)3*q[0]], a);
+  Sub(&pts[(size_t)3*q[2]], &pts[(size_t)3*q[0]], b);
+  Sub(&pts[(size_t)3*q[3]], &pts[(size_t)3*q[0]], c);
+  Cross(a, b, n);
+  return Dot(n, c);
+}
+long long ExudeSlivers(std::vector<double> &points, const std::vector<long long> &tetrahedra,
+    const std::vector<unsigned char> &fixed, double thresholdDegrees, int passes, double maxMoveFraction,
+    SliverReport &report)
+{
+  const ll np = (ll)(points.size()/3), nt = (ll)(tetrahedra.size()/4);
+  report = SliverReport();
+  report.numTetrahedra = nt;
+  if (np == 0 || nt == 0 || fixed.size() != (size_t)np) return 0;
+  std::vector<std::vector<ll> > incident((size_t)np);
+  for (ll t = 0; t < nt; t++) for (int m = 0; m < 4; m++) incident[(size_t)tetrahedra[(size_t)4*t + m]].push_back(t);
+  std::vector<double> angle((size_t)nt);
+  std::vector<char> sign((size_t)nt);
+  for (ll t = 0; t < nt; t++)
+  {
+    angle[(size_t)t] = TetrahedronMinDihedral(points, &tetrahedra[(size_t)4*t]);
+    sign[(size_t)t] = TetrahedronVolume6(points, &tetrahedra[(size_t)4*t]) >= 0.0 ? 1 : -1;
+    if (angle[(size_t)t] < thresholdDegrees) report.numUnderBefore++;
+    if (angle[(size_t)t] < 1.0) report.numUnder1Before++;
+    report.smallestBefore = std::min(report.smallestBefore, angle[(size_t)t]);
+  }
+  // each point's allowance: a fraction of its shortest edge, spent as it moves
+  std::vector<double> allowance((size_t)np, 0.0), spent((size_t)np, 0.0);
+  for (ll t = 0; t < nt; t++)
+  {
+    const ll *q = &tetrahedra[(size_t)4*t];
+    for (int m = 0; m < 4; m++)
+      for (int n = m + 1; n < 4; n++)
+      {
+        const double e = Distance(&points[(size_t)3*q[m]], &points[(size_t)3*q[n]]);
+        if (allowance[(size_t)q[m]] == 0.0 || e < allowance[(size_t)q[m]]) allowance[(size_t)q[m]] = e;
+        if (allowance[(size_t)q[n]] == 0.0 || e < allowance[(size_t)q[n]]) allowance[(size_t)q[n]] = e;
+      }
+  }
+  for (ll v = 0; v < np; v++) allowance[(size_t)v] *= maxMoveFraction;
+  std::vector<unsigned char> moved((size_t)np, 0);
+  const int faces[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
+  for (int pass = 0; pass < passes; pass++)
+  {
+    ll movesThisPass = 0;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (angle[(size_t)t] >= thresholdDegrees) continue;
+      const ll *q = &tetrahedra[(size_t)4*t];
+      for (int m = 0; m < 4; m++)
+      {
+        const ll v = q[m];
+        if (fixed[(size_t)v] || spent[(size_t)v] >= allowance[(size_t)v]) continue;
+        if (angle[(size_t)t] >= thresholdDegrees) break;   // mended by an earlier corner
+        // the way out of the sliver's plane: the normal of the face opposite the corner
+        double u[3], w[3], n[3];
+        Sub(&points[(size_t)3*q[faces[m][1]]], &points[(size_t)3*q[faces[m][0]]], u);
+        Sub(&points[(size_t)3*q[faces[m][2]]], &points[(size_t)3*q[faces[m][0]]], w);
+        Cross(u, w, n);
+        const double ln = Norm(n);
+        if (!(ln > 0.0)) continue;
+        for (int k = 0; k < 3; k++) n[k] /= ln;
+        const double was[3] = {points[(size_t)3*v], points[(size_t)3*v + 1], points[(size_t)3*v + 2]};
+        bool done = false;
+        for (double step = allowance[(size_t)v] - spent[(size_t)v]; step > 0.05*allowance[(size_t)v] && !done; step *= 0.5)
+        {
+          for (int dir = -1; dir <= 1 && !done; dir += 2)
+          {
+            for (int k = 0; k < 3; k++) points[(size_t)3*v + k] = was[k] + dir*step*n[k];
+            // every tetrahedron at the point keeps its orientation, this one
+            // gets better, and no other falls under the threshold or, if it
+            // was under already, gets worse
+            bool refused = false;
+            std::vector<double> after(incident[(size_t)v].size());
+            for (size_t i = 0; i < incident[(size_t)v].size() && !refused; i++)
+            {
+              const ll u2 = incident[(size_t)v][i];
+              const double vol = TetrahedronVolume6(points, &tetrahedra[(size_t)4*u2]);
+              if ((vol >= 0.0 ? 1 : -1) != sign[(size_t)u2] || vol == 0.0) { refused = true; break; }
+              after[i] = TetrahedronMinDihedral(points, &tetrahedra[(size_t)4*u2]);
+              if (u2 == t) { if (!(after[i] > angle[(size_t)t] + 1.0e-3)) refused = true; }
+              else if (after[i] < std::min(thresholdDegrees, angle[(size_t)u2]) - 1.0e-9) refused = true;
+            }
+            if (refused)
+            {
+              for (int k = 0; k < 3; k++) points[(size_t)3*v + k] = was[k];
+              continue;
+            }
+            for (size_t i = 0; i < incident[(size_t)v].size(); i++)
+            {
+              const ll u2 = incident[(size_t)v][i];
+              angle[(size_t)u2] = TetrahedronMinDihedral(points, &tetrahedra[(size_t)4*u2]);
+            }
+            spent[(size_t)v] += step;
+            if (!moved[(size_t)v]) { moved[(size_t)v] = 1; report.numPointsMoved++; }
+            report.numMoves++;
+            movesThisPass++;
+            done = true;
+          }
+        }
+      }
+    }
+    if (movesThisPass == 0) break;
+  }
+  for (ll t = 0; t < nt; t++)
+  {
+    if (angle[(size_t)t] < thresholdDegrees) report.numUnderAfter++;
+    if (angle[(size_t)t] < 1.0) report.numUnder1After++;
+    report.smallestAfter = std::min(report.smallestAfter, angle[(size_t)t]);
+  }
+  return report.numMoves;
+}
+
+//--------------
+// FlipSlivers
+//--------------
+// See the header. A flat tetrahedron is taken out with the tetrahedra
+// around it and the cavity refilled another way: across one of its faces
+// with the tetrahedron beyond it, the two become three on the edge between
+// their far corners (a 2-3 flip); around one of its edges, the n tetrahedra
+// closing around that edge become 2(n-2) on a triangulation of the ring of
+// their far corners, each triangle joined to the edge's two ends (a 3-2
+// flip for three, edge removal in general; Shewchuk 2002). A flip is taken
+// only when every new tetrahedron keeps the mesh's orientation, which is
+// what makes the new tetrahedra fill the cavity exactly, and when the
+// smallest dihedral angle among them is larger than it was among the old.
+// No face on the boundary is crossed, no edge on the boundary is unwound
+// (its ring does not close), and no face or edge on a facet inside the fill
+// (a layer surface, a zone wall) is either, so the facets' triangles and
+// their points are as they were.
+long long FlipSlivers(const std::vector<double> &points, std::vector<long long> &tetrahedra,
+    const std::vector<long long> &facets, double thresholdDegrees, int passes, SliverReport &report)
+{
+  const ll np = (ll)(points.size()/3);
+  report = SliverReport();
+  report.numTetrahedra = (ll)(tetrahedra.size()/4);
+  report.numTetrahedraAfter = report.numTetrahedra;
+  if (np == 0 || report.numTetrahedra == 0) return 0;
+  // the facets, sorted for the lookup: no flip may take one away
+  std::vector<std::array<ll, 3> > facetSet;
+  facetSet.reserve(facets.size()/3);
+  for (size_t i = 0; i + 2 < facets.size(); i += 3)
+  {
+    std::array<ll, 3> key = {facets[i], facets[i + 1], facets[i + 2]};
+    std::sort(key.begin(), key.end());
+    facetSet.push_back(key);
+  }
+  std::sort(facetSet.begin(), facetSet.end());
+  auto isFacet = [&](ll a, ll b, ll c) -> bool
+  {
+    std::array<ll, 3> key = {a, b, c};
+    std::sort(key.begin(), key.end());
+    return std::binary_search(facetSet.begin(), facetSet.end(), key);
+  };
+  std::vector<std::vector<ll> > incident((size_t)np);
+  std::vector<double> angle;
+  std::vector<char> sign;
+  for (ll t = 0; t < report.numTetrahedra; t++)
+  {
+    const ll *q = &tetrahedra[(size_t)4*t];
+    for (int m = 0; m < 4; m++) incident[(size_t)q[m]].push_back(t);
+    angle.push_back(TetrahedronMinDihedral(points, q));
+    sign.push_back(TetrahedronVolume6(points, q) >= 0.0 ? 1 : -1);
+    if (angle.back() < thresholdDegrees) report.numUnderBefore++;
+    if (angle.back() < 1.0) report.numUnder1Before++;
+    report.smallestBefore = std::min(report.smallestBefore, angle.back());
+  }
+  auto alive = [&](ll t) { return tetrahedra[(size_t)4*t] >= 0; };
+  // the tetrahedra on a face, up to two of them
+  auto onFace = [&](ll a, ll b, ll c, ll out[2]) -> int
+  {
+    int n = 0;
+    for (size_t i = 0; i < incident[(size_t)a].size(); i++)
+    {
+      const ll t = incident[(size_t)a][i];
+      if (!alive(t)) continue;
+      const ll *q = &tetrahedra[(size_t)4*t];
+      int hits = 0;
+      for (int m = 0; m < 4; m++) if (q[m] == b || q[m] == c) hits++;
+      if (hits == 2) { if (n < 2) out[n] = t; n++; }
+    }
+    return n;
+  };
+  auto onEdge = [&](ll a, ll b, std::vector<ll> &out)
+  {
+    out.clear();
+    for (size_t i = 0; i < incident[(size_t)a].size(); i++)
+    {
+      const ll t = incident[(size_t)a][i];
+      if (!alive(t)) continue;
+      const ll *q = &tetrahedra[(size_t)4*t];
+      for (int m = 0; m < 4; m++) if (q[m] == b) { out.push_back(t); break; }
+    }
+  };
+  auto removeTet = [&](ll t)
+  {
+    ll q[4];
+    for (int m = 0; m < 4; m++) q[m] = tetrahedra[(size_t)4*t + m];
+    for (int m = 0; m < 4; m++)
+    {
+      std::vector<ll> &list = incident[(size_t)q[m]];
+      for (size_t i = 0; i < list.size(); i++) if (list[i] == t) { list[i] = list.back(); list.pop_back(); break; }
+    }
+    tetrahedra[(size_t)4*t] = -1;
+  };
+  auto addTet = [&](const ll q[4]) -> ll
+  {
+    const ll t = (ll)(tetrahedra.size()/4);
+    for (int m = 0; m < 4; m++) tetrahedra.push_back(q[m]);
+    for (int m = 0; m < 4; m++) incident[(size_t)q[m]].push_back(t);
+    angle.push_back(TetrahedronMinDihedral(points, q));
+    sign.push_back(TetrahedronVolume6(points, q) >= 0.0 ? 1 : -1);
+    return t;
+  };
+  // a candidate: the tetrahedra to take out, the ones to put in
+  const int ringMax = 8;
+  struct Candidate { ll remove[8]; int numRemove; ll insert[12][4]; int numInsert; double newMin; bool is23; };
+  const int faces[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
+  const int edges[6][2] = {{0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 3}};
+  std::vector<ll> around;
+  for (int pass = 0; pass < passes; pass++)
+  {
+    ll flipsThisPass = 0;
+    const ll ntNow = (ll)(tetrahedra.size()/4);
+    for (ll t = 0; t < ntNow; t++)
+    {
+      if (!alive(t) || angle[(size_t)t] >= thresholdDegrees) continue;
+      const ll q0[4] = {tetrahedra[(size_t)4*t], tetrahedra[(size_t)4*t + 1], tetrahedra[(size_t)4*t + 2], tetrahedra[(size_t)4*t + 3]};
+      const char s = sign[(size_t)t];
+      Candidate best; best.numRemove = 0; best.numInsert = 0; best.newMin = -1.0; best.is23 = false;
+      // across each face: 2-3
+      for (int f = 0; f < 4; f++)
+      {
+        const ll a = q0[f];
+        ll b = q0[faces[f][0]], c = q0[faces[f][1]], d = q0[faces[f][2]];
+        ll pair[2];
+        if (onFace(b, c, d, pair) != 2 || isFacet(b, c, d)) continue;
+        const ll u = pair[0] == t ? pair[1] : pair[0];
+        if (sign[(size_t)u] != s) continue;
+        const ll *qu = &tetrahedra[(size_t)4*u];
+        ll e = -1;
+        for (int m = 0; m < 4; m++) if (qu[m] != b && qu[m] != c && qu[m] != d) e = qu[m];
+        if (e < 0 || e == a) continue;
+        // T as (a, b, c, d) in the mesh's orientation
+        {
+          const ll abcd[4] = {a, b, c, d};
+          const double v = TetrahedronVolume6(points, abcd);
+          if (v == 0.0) continue;
+          if ((v >= 0.0 ? 1 : -1) != s) std::swap(c, d);
+        }
+        // e beyond the face from a, and inside the cone of T at a: then the
+        // segment a-e crosses the face and the three new tetrahedra fill the two
+        const ll bcda[4] = {b, c, d, a}, bcde[4] = {b, c, d, e};
+        const double va = TetrahedronVolume6(points, bcda), ve = TetrahedronVolume6(points, bcde);
+        if (va == 0.0 || ve == 0.0 || (va > 0.0) == (ve > 0.0)) continue;
+        const ll n1[4] = {a, b, c, e}, n2[4] = {a, c, d, e}, n3[4] = {a, d, b, e};
+        const ll *news[3] = {n1, n2, n3};
+        bool valid = true;
+        double newMin = 180.0;
+        for (int i = 0; i < 3 && valid; i++)
+        {
+          const double v = TetrahedronVolume6(points, news[i]);
+          if (v == 0.0 || (v >= 0.0 ? 1 : -1) != s) { valid = false; break; }
+          newMin = std::min(newMin, TetrahedronMinDihedral(points, news[i]));
+        }
+        if (!valid) continue;
+        const double oldMin = std::min(angle[(size_t)t], angle[(size_t)u]);
+        if (!(newMin > oldMin + 1.0e-3) || newMin <= best.newMin) continue;
+        best.numRemove = 2; best.remove[0] = t; best.remove[1] = u;
+        best.numInsert = 3;
+        for (int i = 0; i < 3; i++) for (int m = 0; m < 4; m++) best.insert[i][m] = news[i][m];
+        best.newMin = newMin; best.is23 = true;
+      }
+      // around each edge: the tetrahedra closing around it taken out and the
+      // ring of their far corners triangulated, each triangle joined to the
+      // edge's two ends (3-2 for three, 2(n-2) for n of them); the
+      // triangulation whose worst new tetrahedron is best, by Klincsek's
+      // dynamic programme over the ring
+      for (int e2 = 0; e2 < 6; e2++)
+      {
+        const ll x = q0[edges[e2][0]], y = q0[edges[e2][1]];
+        onEdge(x, y, around);
+        const int n = (int)around.size();
+        if (n < 3 || n > ringMax) continue;
+        bool ok = true;
+        for (int i = 0; i < n && ok; i++) if (sign[(size_t)around[i]] != s) ok = false;
+        if (!ok) continue;
+        // the ring walked around the edge so that (x, y, p[i], p[i+1]) has the
+        // mesh's orientation; it must close through every tetrahedron
+        ll ring[ringMax];
+        ll ringTet[ringMax];
+        {
+          const ll *qa = &tetrahedra[(size_t)4*around[0]];
+          ll u = -1, v = -1;
+          for (int m = 0; m < 4; m++) if (qa[m] != x && qa[m] != y) { if (u < 0) u = qa[m]; else v = qa[m]; }
+          const ll xyuv[4] = {x, y, u, v};
+          const double vol = TetrahedronVolume6(points, xyuv);
+          if (vol == 0.0) continue;
+          if ((vol >= 0.0 ? 1 : -1) != s) std::swap(u, v);
+          ring[0] = u; ring[1] = v; ringTet[0] = around[0];
+          int count = 1;
+          ll prev = around[0];
+          while (count < n)
+          {
+            ll pair[2];
+            if (onFace(x, y, ring[count], pair) != 2) { ok = false; break; }
+            const ll next = pair[0] == prev ? pair[1] : pair[0];
+            const ll *qn = &tetrahedra[(size_t)4*next];
+            ll w = -1;
+            for (int m = 0; m < 4; m++) if (qn[m] != x && qn[m] != y && qn[m] != ring[count]) w = qn[m];
+            if (w < 0) { ok = false; break; }
+            ringTet[count] = next;
+            count++;
+            if (count == n) { if (w != ring[0]) ok = false; break; }
+            ring[count] = w;
+            prev = next;
+          }
+          if (!ok) continue;
+          // every tetrahedron around the edge is in the ring once
+          for (int i = 0; i < n && ok; i++)
+          {
+            bool found = false;
+            for (int j = 0; j < n; j++) if (ringTet[j] == around[i]) { found = true; break; }
+            if (!found) ok = false;
+          }
+          for (int i = 0; i < n && ok; i++) for (int j = i + 1; j < n; j++) if (ring[i] == ring[j]) ok = false;
+          // the faces on the edge go; none may be a facet
+          for (int i = 0; i < n && ok; i++) if (isFacet(x, y, ring[i])) ok = false;
+          if (!ok) continue;
+        }
+        // the quality of a triangle (i, k, j) of the ring with the edge's ends:
+        // negative when either new tetrahedron would be turned or flat
+        auto triangleQuality = [&](int i, int k, int j) -> double
+        {
+          const ll withY[4] = {ring[i], ring[k], ring[j], y}, withX[4] = {ring[i], ring[j], ring[k], x};
+          const double vy = TetrahedronVolume6(points, withY), vx = TetrahedronVolume6(points, withX);
+          if (vy == 0.0 || vx == 0.0 || (vy >= 0.0 ? 1 : -1) != s || (vx >= 0.0 ? 1 : -1) != s) return -1.0;
+          return std::min(TetrahedronMinDihedral(points, withY), TetrahedronMinDihedral(points, withX));
+        };
+        double Q[ringMax][ringMax];
+        int K[ringMax][ringMax];
+        for (int i = 0; i + 1 < n; i++) { Q[i][i + 1] = 1.0e9; K[i][i + 1] = -1; }
+        for (int span = 2; span < n; span++)
+          for (int i = 0; i + span < n; i++)
+          {
+            const int j = i + span;
+            Q[i][j] = -1.0; K[i][j] = -1;
+            for (int k = i + 1; k < j; k++)
+            {
+              const double q = std::min(std::min(Q[i][k], Q[k][j]), triangleQuality(i, k, j));
+              if (q > Q[i][j]) { Q[i][j] = q; K[i][j] = k; }
+            }
+          }
+        const double newMin = Q[0][n - 1];
+        if (!(newMin > 0.0)) continue;
+        double oldMin = 180.0;
+        for (int i = 0; i < n; i++) oldMin = std::min(oldMin, angle[(size_t)around[i]]);
+        if (!(newMin > oldMin + 1.0e-3) || newMin <= best.newMin) continue;
+        best.numRemove = n;
+        for (int i = 0; i < n; i++) best.remove[i] = around[i];
+        best.numInsert = 0;
+        // the triangulation read back from the programme's choices
+        int stack[2*ringMax][2];
+        int top = 0;
+        stack[top][0] = 0; stack[top][1] = n - 1; top++;
+        while (top > 0)
+        {
+          top--;
+          const int i = stack[top][0], j = stack[top][1];
+          if (j <= i + 1) continue;
+          const int k = K[i][j];
+          const ll withY[4] = {ring[i], ring[k], ring[j], y}, withX[4] = {ring[i], ring[j], ring[k], x};
+          for (int m = 0; m < 4; m++) { best.insert[best.numInsert][m] = withY[m]; best.insert[best.numInsert + 1][m] = withX[m]; }
+          best.numInsert += 2;
+          stack[top][0] = i; stack[top][1] = k; top++;
+          stack[top][0] = k; stack[top][1] = j; top++;
+        }
+        best.newMin = newMin; best.is23 = false;
+      }
+      if (best.numRemove == 0) continue;
+      for (int i = 0; i < best.numRemove; i++) removeTet(best.remove[i]);
+      for (int i = 0; i < best.numInsert; i++) addTet(best.insert[i]);
+      if (best.is23) report.numFlips23++; else report.numFlips32++;
+      flipsThisPass++;
+    }
+    if (flipsThisPass == 0) break;
+  }
+  // the live tetrahedra closed up
+  std::vector<ll> compact;
+  compact.reserve(tetrahedra.size());
+  for (size_t t = 0; t < tetrahedra.size()/4; t++)
+  {
+    if (tetrahedra[4*t] < 0) continue;
+    for (int m = 0; m < 4; m++) compact.push_back(tetrahedra[4*t + m]);
+    if (angle[t] < thresholdDegrees) report.numUnderAfter++;
+    if (angle[t] < 1.0) report.numUnder1After++;
+    report.smallestAfter = std::min(report.smallestAfter, angle[t]);
+  }
+  tetrahedra.swap(compact);
+  report.numTetrahedraAfter = (ll)(tetrahedra.size()/4);
+  return report.numFlips23 + report.numFlips32;
+}
+
+//-----------------
+// ImproveSlivers
+//-----------------
+// See the header: flips, then the moves, then flips again for what the
+// moves left.
+long long ImproveSlivers(std::vector<double> &points, std::vector<long long> &tetrahedra,
+    const std::vector<unsigned char> &fixed, const std::vector<long long> &facets, double thresholdDegrees,
+    int passes, double maxMoveFraction, SliverReport &report)
+{
+  SliverReport first, moves, last;
+  FlipSlivers(points, tetrahedra, facets, thresholdDegrees, passes, first);
+  ExudeSlivers(points, tetrahedra, fixed, thresholdDegrees, passes, maxMoveFraction, moves);
+  FlipSlivers(points, tetrahedra, facets, thresholdDegrees, passes, last);
+  report = SliverReport();
+  report.numTetrahedra = first.numTetrahedra;
+  report.numTetrahedraAfter = last.numTetrahedraAfter;
+  report.numUnderBefore = first.numUnderBefore;
+  report.numUnder1Before = first.numUnder1Before;
+  report.smallestBefore = first.smallestBefore;
+  report.numUnderAfter = last.numUnderAfter;
+  report.numUnder1After = last.numUnder1After;
+  report.smallestAfter = last.smallestAfter;
+  report.numFlips23 = first.numFlips23 + last.numFlips23;
+  report.numFlips32 = first.numFlips32 + last.numFlips32;
+  report.numPointsMoved = moves.numPointsMoved;
+  report.numMoves = moves.numMoves;
+  return report.numFlips23 + report.numFlips32 + report.numMoves;
+}
+
+//------------------------
+// FindTetrahedraOnFaces
+//------------------------
+// See the header.
+long long FindTetrahedraOnFaces(const std::vector<long long> &tetrahedra, long long numPoints,
+    const std::vector<long long> &faces, std::vector<long long> &adjacent)
+{
+  const ll nt = (ll)(tetrahedra.size()/4), nf = (ll)(faces.size()/3);
+  adjacent.assign((size_t)2*nf, -1);
+  if (numPoints <= 0) return 0;
+  std::vector<ll> start((size_t)numPoints + 1, 0);
+  for (ll t = 0; t < nt; t++)
+    for (int m = 0; m < 4; m++)
+    {
+      const ll v = tetrahedra[(size_t)4*t + m];
+      if (v >= 0 && v < numPoints) start[(size_t)v + 1]++;
+    }
+  for (ll v = 0; v < numPoints; v++) start[(size_t)v + 1] += start[(size_t)v];
+  std::vector<ll> list((size_t)start[(size_t)numPoints]), fill(start.begin(), start.end() - 1);
+  for (ll t = 0; t < nt; t++)
+    for (int m = 0; m < 4; m++)
+    {
+      const ll v = tetrahedra[(size_t)4*t + m];
+      if (v >= 0 && v < numPoints) list[(size_t)fill[(size_t)v]++] = t;
+    }
+  ll numFound = 0;
+  for (ll f = 0; f < nf; f++)
+  {
+    const ll a = faces[(size_t)3*f], b = faces[(size_t)3*f + 1], c = faces[(size_t)3*f + 2];
+    if (a < 0 || a >= numPoints || b < 0 || b >= numPoints || c < 0 || c >= numPoints) continue;
+    int n = 0;
+    for (ll i = start[(size_t)a]; i < start[(size_t)a + 1] && n < 2; i++)
+    {
+      const ll t = list[(size_t)i];
+      const ll *q = &tetrahedra[(size_t)4*t];
+      int hits = 0;
+      for (int m = 0; m < 4; m++) if (q[m] == b || q[m] == c) hits++;
+      if (hits == 2) adjacent[(size_t)2*f + n++] = t;
+    }
+    if (n > 0) numFound++;
+  }
+  return numFound;
+}
+
 //--------------------
 // BuildJunctionShell
 //--------------------
