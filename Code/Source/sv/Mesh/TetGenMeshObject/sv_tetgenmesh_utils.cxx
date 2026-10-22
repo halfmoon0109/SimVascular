@@ -5107,10 +5107,11 @@ int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface, vtkPolyData *outer,
       return SV_ERROR;
     }
   }
-  fprintf(stdout,"    %lld triangles past a plane removed, %lld split along one, %lld dropped for touching the kept side only along an edge or at a point or for lying flat in the plane; %lld -> %lld points, %lld -> %lld triangles; %lld rim edges, the shortest %.3f of the local edge, the smallest angle between a rim triangle and its plane %.2f degrees\n",
+  fprintf(stdout,"    %lld triangles past a plane removed, %lld split along one, %lld dropped for touching the kept side only along an edge or at a point or for lying flat in the plane; %lld -> %lld points, %lld -> %lld triangles; %lld rim edges, the shortest %.3f of the local edge, the smallest angle between a rim triangle and its plane %.2f degrees; %lld flat caps flipped before the cut, %lld snaps and %lld rim edge collapses refused as folding a triangle\n",
       trimReport.numRemoved, trimReport.numSplit, trimReport.numDropped, trimReport.numPointsBefore, trimReport.numPointsAfter,
       trimReport.numTrianglesBefore, trimReport.numTrianglesAfter, trimReport.numRimEdges,
-      trimReport.shortestRimEdgeRatio, trimReport.smallestRimAngleDegrees);
+      trimReport.shortestRimEdgeRatio, trimReport.smallestRimAngleDegrees,
+      trimReport.numCapsFlipped, trimReport.numSnapsRefused, trimReport.numMergesRefused);
   if (trimReport.smallestRimAngleDegrees < 0.5)
   {
     fprintf(stderr,"A triangle of the trimmed offset surface leans over the annulus at %.4f degrees, which TetGen would refuse as two facets folded onto each other\n",

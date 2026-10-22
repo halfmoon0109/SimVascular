@@ -329,6 +329,127 @@ void NoteFault(Report &report, const char *what, const double at[3])
 // -------------------------------------
 // TrimSurfaceAtCaps
 // -------------------------------------
+//---------------
+// FlipFlatCaps
+//---------------
+// A flat cap - a triangle whose apex lies over its longest edge within a
+// small fraction of that edge's length - folds over when one end of that
+// edge moves by as little as the trim's snap band (the user's model,
+// 2026-10-22: a cap of height 0.004 on an edge of 0.065 at a cap rim of a
+// vessel 0.3 across, whose end the snap moved 0.004 onto the plane, came
+// out with its three corners on one line and its normal reversed, and the
+// shell check refused the surface for the crossing). Each such cap has its
+// long edge flipped with the triangle beyond it, when the two are nearly
+// coplanar, the new pair faces the way the neighbour does, is thicker than
+// the cap was, and the new edge is not an edge already. Returns the number
+// of flips.
+static ll FlipFlatCaps(const std::vector<double> &pts, std::vector<ll> &tris, double heightFraction, double minCos)
+{
+  ll numFlipped = 0;
+  struct EdgeUse { ll a, b, t; };
+  for (int pass = 0; pass < 3; pass++)
+  {
+    const ll nt = (ll)(tris.size()/3);
+    std::vector<EdgeUse> uses;
+    uses.reserve((size_t)3*nt);
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++)
+      {
+        const ll a = tris[(size_t)3*t + j], b = tris[(size_t)3*t + (j+1)%3];
+        EdgeUse u = {std::min(a, b), std::max(a, b), t};
+        uses.push_back(u);
+      }
+    }
+    std::sort(uses.begin(), uses.end(), [](const EdgeUse &x, const EdgeUse &y) { return x.a != y.a ? x.a < y.a : (x.b != y.b ? x.b < y.b : x.t < y.t); });
+    auto range = [&](ll a, ll b, size_t &lo, size_t &hi)
+    {
+      EdgeUse key = {std::min(a, b), std::max(a, b), -1};
+      lo = (size_t)(std::lower_bound(uses.begin(), uses.end(), key, [](const EdgeUse &x, const EdgeUse &y) { return x.a != y.a ? x.a < y.a : x.b < y.b; }) - uses.begin());
+      hi = lo;
+      while (hi < uses.size() && uses[hi].a == key.a && uses[hi].b == key.b) hi++;
+    };
+    auto normalOf = [&](ll a, ll b, ll c, double n[3])
+    {
+      double u[3], v[3];
+      Sub(&pts[(size_t)3*b], &pts[(size_t)3*a], u);
+      Sub(&pts[(size_t)3*c], &pts[(size_t)3*a], v);
+      Cross(u, v, n);
+    };
+    auto heightOf = [&](ll a, ll b, ll c) -> double
+    {
+      double n[3];
+      normalOf(a, b, c, n);
+      const double longest = std::max(Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]),
+          std::max(Distance(&pts[(size_t)3*b], &pts[(size_t)3*c]), Distance(&pts[(size_t)3*c], &pts[(size_t)3*a])));
+      return longest > 0.0 ? Norm(n)/longest : 0.0;
+    };
+    std::vector<unsigned char> touched((size_t)nt, 0);
+    ll flipsThisPass = 0;
+    for (ll t = 0; t < nt; t++)
+    {
+      if (touched[(size_t)t]) continue;
+      // the longest edge (a, b) in the triangle's own order, the apex c over it
+      int longestAt = -1;
+      double longest = 0.0;
+      for (int j = 0; j < 3; j++)
+      {
+        const double L = Distance(&pts[(size_t)3*tris[(size_t)3*t + j]], &pts[(size_t)3*tris[(size_t)3*t + (j+1)%3]]);
+        if (L > longest) { longest = L; longestAt = j; }
+      }
+      if (longestAt < 0 || !(longest > 0.0)) continue;
+      const ll a = tris[(size_t)3*t + longestAt], b = tris[(size_t)3*t + (longestAt+1)%3], c = tris[(size_t)3*t + (longestAt+2)%3];
+      double nT[3];
+      normalOf(a, b, c, nT);
+      const double height = Norm(nT)/longest;
+      if (height >= heightFraction*longest) continue;
+      // over the edge, not beyond one of its ends (that is a needle, not a cap)
+      double ab[3], ac[3];
+      Sub(&pts[(size_t)3*b], &pts[(size_t)3*a], ab);
+      Sub(&pts[(size_t)3*c], &pts[(size_t)3*a], ac);
+      const double along = Dot(ab, ac)/(longest*longest);
+      if (!(along > 0.0 && along < 1.0)) continue;
+      // the one triangle beyond the edge, wound against this one
+      size_t lo, hi;
+      range(a, b, lo, hi);
+      if (hi - lo != 2) continue;
+      const ll u = uses[lo].t == t ? uses[lo + 1].t : uses[lo].t;
+      if (u == t || touched[(size_t)u]) continue;
+      ll d = -1;
+      bool against = false;
+      for (int j = 0; j < 3; j++)
+      {
+        if (tris[(size_t)3*u + j] == b && tris[(size_t)3*u + (j+1)%3] == a) { against = true; d = tris[(size_t)3*u + (j+2)%3]; }
+      }
+      if (!against || d < 0 || d == c) continue;
+      double nU[3];
+      normalOf(b, a, d, nU);
+      const double lU = Norm(nU), lT = Norm(nT);
+      if (!(lU > 0.0)) continue;
+      if (lT > 0.0 && Dot(nT, nU) < minCos*lT*lU) continue;   // a fold or a crease, not a flat pair
+      // the new edge must be new
+      range(c, d, lo, hi);
+      if (hi != lo) continue;
+      // the new pair: (a, d, c) and (d, b, c), facing the way the neighbour does and thicker than the cap
+      double m1[3], m2[3];
+      normalOf(a, d, c, m1);
+      normalOf(d, b, c, m2);
+      const double l1 = Norm(m1), l2 = Norm(m2);
+      if (!(l1 > 0.0 && l2 > 0.0)) continue;
+      if (Dot(m1, nU) < 0.5*l1*lU || Dot(m2, nU) < 0.5*l2*lU) continue;
+      if (!(std::min(heightOf(a, d, c), heightOf(d, b, c)) > height)) continue;
+      tris[(size_t)3*t] = a; tris[(size_t)3*t + 1] = d; tris[(size_t)3*t + 2] = c;
+      tris[(size_t)3*u] = d; tris[(size_t)3*u + 1] = b; tris[(size_t)3*u + 2] = c;
+      touched[(size_t)t] = 1;
+      touched[(size_t)u] = 1;
+      flipsThisPass++;
+    }
+    numFlipped += flipsThisPass;
+    if (flipsThisPass == 0) break;
+  }
+  return numFlipped;
+}
+
 int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, double snapFraction,
     TrimReport &report, std::string &error)
 {
@@ -355,6 +476,8 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
   report.numCut.assign(planes.size(), 0);
   report.numSnapped.assign(planes.size(), 0);
   report.numPushedOff.assign(planes.size(), 0);
+  // The flat caps flipped first, so that no snap below folds one.
+  report.numCapsFlipped = FlipFlatCaps(pts, tris, 0.12, std::cos(20.0*M_PI/180.0));
 
   // The mean edge at each point, which sizes the band a point is snapped
   // onto the plane from.
@@ -390,6 +513,12 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
     // it to a point coming off is cut somewhere along itself rather than at
     // infinity.
     std::vector<double> s((size_t)np, 0.0);
+    // the triangles at each point, for the check that a snap folds none of them
+    std::vector<std::vector<ll> > incident((size_t)np);
+    for (ll t = 0; t < nt; t++)
+    {
+      for (int j = 0; j < 3; j++) incident[(size_t)tris[(size_t)3*t + j]].push_back(t);
+    }
     for (ll v = 0; v < np; v++)
     {
       double off[3];
@@ -399,12 +528,44 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
       {
         if (std::abs(sv) <= snapFraction*meanEdge[(size_t)v])
         {
+          // The move folds no triangle at the point (its normal turned past
+          // 78 degrees or its area down to a tenth): a flat triangle the
+          // cap flip above could not mend is cut like any other instead.
+          const double was[3] = {pts[(size_t)3*v], pts[(size_t)3*v + 1], pts[(size_t)3*v + 2]};
+          std::vector<double> before(incident[(size_t)v].size()*3);
+          for (size_t i = 0; i < incident[(size_t)v].size(); i++)
+          {
+            const ll *q = &tris[(size_t)3*incident[(size_t)v][i]];
+            double u[3], w[3];
+            Sub(&pts[(size_t)3*q[1]], &pts[(size_t)3*q[0]], u);
+            Sub(&pts[(size_t)3*q[2]], &pts[(size_t)3*q[0]], w);
+            Cross(u, w, &before[3*i]);
+          }
           for (int k = 0; k < 3; k++)
           {
             pts[(size_t)3*v + k] += sv*plane.outward[k];
           }
-          sv = 0.0;
-          report.numSnapped[p]++;
+          bool folds = false;
+          for (size_t i = 0; i < incident[(size_t)v].size() && !folds; i++)
+          {
+            const ll *q = &tris[(size_t)3*incident[(size_t)v][i]];
+            double u[3], w[3], after[3];
+            Sub(&pts[(size_t)3*q[1]], &pts[(size_t)3*q[0]], u);
+            Sub(&pts[(size_t)3*q[2]], &pts[(size_t)3*q[0]], w);
+            Cross(u, w, after);
+            const double lb = Norm(&before[3*i]), la = Norm(after);
+            if (lb > 0.0 && (la < 0.1*lb || Dot(&before[3*i], after) < 0.2*lb*la)) folds = true;
+          }
+          if (folds)
+          {
+            for (int k = 0; k < 3; k++) pts[(size_t)3*v + k] = was[k];
+            report.numSnapsRefused++;
+          }
+          else
+          {
+            sv = 0.0;
+            report.numSnapped[p]++;
+          }
         }
         if (sv < 0.0)
         {
@@ -620,6 +781,24 @@ int TrimSurfaceAtCaps(Surface &surface, const std::vector<CapPlane> &planes, dou
             }
           }
           if (!ok) continue;
+          // the triangles moving with u keep facing the way they do, and their area
+          for (size_t m = 0; m < incident[(size_t)u].size() && ok; m++)
+          {
+            ll tu = incident[(size_t)u][m];
+            if (deadTri[(size_t)tu] || tu == t) continue;
+            ll q0[3], q1[3];
+            for (int q = 0; q < 3; q++) { q0[q] = tris[(size_t)3*tu + q]; q1[q] = q0[q] == u ? v : q0[q]; }
+            double e0[3], e1[3], n0[3], n1[3];
+            Sub(&pts[(size_t)3*q0[1]], &pts[(size_t)3*q0[0]], e0);
+            Sub(&pts[(size_t)3*q0[2]], &pts[(size_t)3*q0[0]], e1);
+            Cross(e0, e1, n0);
+            Sub(&pts[(size_t)3*q1[1]], &pts[(size_t)3*q1[0]], e0);
+            Sub(&pts[(size_t)3*q1[2]], &pts[(size_t)3*q1[0]], e1);
+            Cross(e0, e1, n1);
+            const double l0 = Norm(n0), l1 = Norm(n1);
+            if (l0 > 0.0 && (l1 < 0.1*l0 || Dot(n0, n1) < 0.2*l0*l1)) ok = false;
+          }
+          if (!ok) { report.numMergesRefused++; continue; }
           for (size_t m = 0; m < incident[(size_t)u].size(); m++)
           {
             ll tu = incident[(size_t)u][m];

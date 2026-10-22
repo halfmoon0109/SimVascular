@@ -857,6 +857,77 @@ static void TestBubbles()
 // trimmed at the cap planes, must nest without crossing one another or the
 // interface, each a layer thick from the interface, at one size (the chord
 // tolerance scaled by the reciprocal of the fraction).
+// The trim's snap must not fold a flat cap at a rim: the user's model of
+// 2026-10-22 had a triangle whose apex lay 0.004 over its 0.065 edge at the
+// rim of a vessel 0.3 across; the snap moved one end of that edge 0.004 onto
+// the cap plane, the apex crossed the edge, and the trimmed surface had a
+// folded triangle the shell check counted as a crossing. A patch of a wall
+// (the plane y = 0) with such a cap under the plane z = 0.5.
+static void TestTrimFlatCap()
+{
+  printf("Test: the trim flips a flat cap at the rim before its snap can fold it\n");
+  Surface s;
+  const double xz[14][2] = {
+    {0.000, 0.450},   // 0 A
+    {0.065, 0.498},   // 1 B: 0.002 inside the plane, within the snap band
+    {0.0325, 0.4745}, // 2 C: the apex, 0.0005 over the edge A-B; 0.0005 under it once B is on the plane
+    {0.040, 0.410},   // 3 D: beyond the edge
+    {0.000, 0.520},   // 4 E: past the plane
+    {0.065, 0.560},   // 5 F
+    {-0.030, 0.400},  // 6 G
+    {0.110, 0.420},   // 7 H
+    {0.130, 0.470},   // 8 I
+    {-0.065, 0.470},  // 9 J
+    {0.130, 0.530},   // 10 K
+    {-0.065, 0.530},  // 11 L
+    {0.200, 0.450},   // 12 M
+    {-0.130, 0.420}   // 13 N
+  };
+  for (int i = 0; i < 14; i++) { s.points.push_back(xz[i][0]); s.points.push_back(0.0); s.points.push_back(xz[i][1]); }
+  const ll tri[][3] = {{0,1,2}, {1,0,3}, {0,2,4}, {2,1,5}, {2,5,4}, {0,4,9}, {0,9,6}, {0,6,3}, {1,3,7}, {1,7,8}, {1,8,5}, {8,10,5}, {4,11,9}, {8,12,10}, {7,12,8}, {9,11,13}, {9,13,6}};
+  const int numTri = (int)(sizeof(tri)/sizeof(tri[0]));
+  for (int i = 0; i < numTri; i++) for (int j = 0; j < 3; j++) s.triangles.push_back(tri[i][j]);
+  s.pointRim.assign(14, 0);
+  // every triangle faces -y (counterclockwise in x, z) before anything is done
+  auto ny = [&](const ll *q) { double u[3], v[3], n[3]; for (int k = 0; k < 3; k++) { u[k] = s.points[3*q[1]+k]-s.points[3*q[0]+k]; v[k] = s.points[3*q[2]+k]-s.points[3*q[0]+k]; } n[1] = u[2]*v[0]-u[0]*v[2]; return n[1]; };
+  int miswound = 0; double capArea = 0.0;
+  for (int i = 0; i < numTri; i++) { const double y = ny(&s.triangles[3*i]); if (y >= 0.0) miswound++; if (i == 0) capArea = 0.5*std::fabs(y); }
+  printf("  the patch: %zu points, %d triangles, %d wound against the rest; the cap's area %.2e\n", s.points.size()/3, numTri, miswound, capArea);
+  Check(miswound == 0, "the patch is wound consistently before the trim");
+  // the fold without the fix, for the record: B moved onto the plane turns the cap over
+  {
+    double q[3] = {s.points[3*1], 0.0, 0.5};
+    double u[3], v[3]; for (int k = 0; k < 3; k++) { u[k] = q[k]-s.points[3*0+k]; v[k] = s.points[3*2+k]-s.points[3*0+k]; }
+    const double y = u[2]*v[0]-u[0]*v[2];
+    printf("  with B on the plane the cap's normal turns: %s\n", y >= 0.0 ? "yes" : "no");
+    Check(y >= 0.0, "the case folds the cap when B is snapped as it stands (the defect)");
+  }
+  std::vector<svoffset::CapPlane> planes(1);
+  planes[0].origin[0] = 0.0; planes[0].origin[1] = 0.0; planes[0].origin[2] = 0.5;
+  planes[0].outward[0] = 0.0; planes[0].outward[1] = 0.0; planes[0].outward[2] = 1.0;
+  planes[0].rim = 0;
+  svoffset::TrimReport trim; std::string err;
+  const int rc = svoffset::TrimSurfaceAtCaps(s, planes, 0.1, trim, err);
+  Check(rc == 0, rc == 0 ? "the patch was trimmed" : err.c_str());
+  if (rc != 0) return;
+  int turned = 0, flat = 0; double smallestArea = 1.0;
+  for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+  {
+    const double y = ny(&s.triangles[i]);
+    if (y >= 0.0) turned++;
+    smallestArea = std::min(smallestArea, 0.5*std::fabs(y));
+    if (0.5*std::fabs(y) < 1.0e-7) flat++;
+  }
+  std::vector<unsigned char> crossing; double at[3];
+  const ll numCrossing = svenvelope::CountCrossingTriangles(s.points, s.triangles, crossing, at);
+  printf("  trimmed: %lld caps flipped, %lld snaps refused, %lld points snapped, %lld cut, %lld -> %lld triangles; turned %d, flat %d, the smallest area %.2e, crossing %lld\n",
+      trim.numCapsFlipped, trim.numSnapsRefused, trim.numSnapped[0], trim.numCut[0], trim.numTrianglesBefore, trim.numTrianglesAfter, turned, flat, smallestArea, numCrossing);
+  Check(trim.numCapsFlipped == 1, "the flat cap's long edge was flipped before the cut");
+  Check(trim.numSnapped[0] >= 1, "the point within the snap band was still snapped onto the plane");
+  Check(turned == 0 && flat == 0, "no triangle of the trimmed patch is turned over or flat");
+  Check(numCrossing == 0, "the trimmed patch does not cross itself");
+}
+
 static void TestLayers()
 {
   printf("test 5: three layer surfaces of a tube of radius 1 with a wall of 0.3\n");
@@ -955,6 +1026,7 @@ int main()
   TestThinTube();
   TestSeptum();
   TestNeighbouringEnds();
+  TestTrimFlatCap();
   TestLayers();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;

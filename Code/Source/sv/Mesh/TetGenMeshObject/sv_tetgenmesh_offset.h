@@ -450,6 +450,9 @@ struct TrimReport
   long long numSplit = 0;             // triangles the plane passed through
   long long numRimEdges = 0;
   long long numRimEdgesMerged = 0;   // rim edges shorter than a quarter of the mean edge, collapsed so the rim has no teeth the annulus stitching would fold on
+  long long numMergesRefused = 0;    // such collapses refused because a triangle moving with the collapsed end would fold or lose its area
+  long long numCapsFlipped = 0;      // flat caps (apex over the longest edge within 0.12 of its length) whose long edge was flipped before any snap, so that no snap folds one (2026-10-22)
+  long long numSnapsRefused = 0;     // snaps refused because a triangle at the point would fold or lose its area; the point is cut like any other
   double shortestRimEdgeRatio = 0.0;  // shortest rim edge over the mean edge at its ends
   double smallestRimAngleDegrees = 0.0;  // smallest angle between a triangle on a rim and the cap plane, on the annulus side
 };
@@ -466,6 +469,12 @@ struct TrimReport
  * the plane there, which TetGen merged into degenerate facets and then
  * refused as facets folded onto the annulus). Points that belong to no
  * plane, or to another, are kept whatever side of the plane they lie on.
+ * Before any plane, every flat cap of the surface (a triangle whose apex
+ * lies over its longest edge within 0.12 of that edge's length) has its long
+ * edge flipped with the nearly coplanar triangle beyond it, since the snap
+ * folds such a cap over when it moves one end of that edge (the user's
+ * model, 2026-10-22); a snap or a rim-edge collapse that would still fold a
+ * triangle, or take its area to a tenth, is refused.
  * Points are compacted afterwards; pointRim is carried (-1 for a cut point).
  * The rims of the result are the boundary loops of its triangles.
  * @return 0 on success, 1 with error set otherwise.
