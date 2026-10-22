@@ -1,21 +1,21 @@
+[  0%] Built target dcmodify-copy
 [  1%] Copying dicom2 to /work/build/SimVascular-build/bin/dicom2
 [  1%] Built target dcmdump-copy
-[  1%] Built target dcmodify-copy
 [  1%] Built target _simvascular_thirdparty_tetgen
 [  3%] Built target _simvascular_thirdparty_zlib
-[  3%] Built target _simvascular_utils
 [  3%] Built target _simvascular_vtksvio
+[  3%] Built target _simvascular_utils
 [  3%] Built target _simvascular_vtksvcommon
 [  7%] Built target _simvascular_thirdparty_vmtk
 [  8%] Built target _simvascular_module_imageprocessing
 [  9%] Built target _simvascular_module_multiphysics
-[  9%] Built target _simvascular_module_ml
 [  9%] Built target dicom2-copy
 [  9%] Built target _simvascular_thirdparty_solverio
+[  9%] Built target _simvascular_module_ml
 [ 10%] Built target _simvascular_repository
-[ 11%] Built target _simvascular_vtksvboolean
-[ 13%] Built target _simvascular_vtksvgeometry
-[ 15%] Built target _simvascular_vtksvmisc
+[ 12%] Built target _simvascular_vtksvgeometry
+[ 14%] Built target _simvascular_vtksvmisc
+[ 15%] Built target _simvascular_vtksvboolean
 Consolidate compiler generated dependencies of target _simvascular_vmtk_utils
 [ 15%] Built target _simvascular_solid
 [ 16%] Built target _simvascular_post
@@ -23,13 +23,13 @@ Consolidate compiler generated dependencies of target _simvascular_vmtk_utils
 [ 18%] Building CXX object Source/sv/Mesh/VMTKUtils/CMakeFiles/_simvascular_vmtk_utils.dir/sv_vmtk_utils.cxx.o
 [ 19%] Built target _simvascular_itk_lset
 [ 19%] Built target _simvascular_mesh
-[ 20%] Built target _simvascular_vtksvparameterization
 [ 21%] Built target _simvascular_geom
-[ 22%] Built target _simvascular_adaptor
-[ 22%] Built target _simvascular_image
-[ 22%] Built target _simvascular_common
+[ 21%] Built target _simvascular_vtksvparameterization
+[ 21%] Built target _simvascular_adaptor
+[ 21%] Built target _simvascular_common
+[ 21%] Built target _simvascular_image
+[ 21%] Built target _simvascular_opencascade_solid
 [ 22%] Built target _simvascular_vtksvsegmentation
-[ 22%] Built target _simvascular_opencascade_solid
 [ 23%] Built target _simvascular_path
 [ 24%] Built target _simvascular_module_common
 [ 25%] Built target _simvascular_segmentation
@@ -43,8 +43,8 @@ Consolidate compiler generated dependencies of target _simvascular_vmtk_utils
 [ 29%] Linking CXX shared library ../../../../lib/lib_simvascular_mmg_mesh.so
 [ 29%] Built target _simvascular_mmg_mesh
 Consolidate compiler generated dependencies of target _simvascular_tetgen_mesh
-[ 29%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshObject.cxx.o
 [ 29%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_utils.cxx.o
+[ 29%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_TetGenMeshObject.cxx.o
 [ 29%] Building CXX object Source/sv/Mesh/TetGenMeshObject/CMakeFiles/_simvascular_tetgen_mesh.dir/sv_tetgenmesh_offset.cxx.o
 [ 29%] Linking CXX shared library ../../../../../lib/lib_simvascular_module_model.so
 Appending zipped resources to _simvascular_module_model
@@ -77,8 +77,8 @@ Consolidate compiler generated dependencies of target _simvascular_tetgen_adapto
 [ 46%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_multiphysics.so
 [ 46%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_simulation.so
 [ 46%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_mitksegmentation.so
-[ 46%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_segmentation.so
 [ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_application.so
+[ 47%] Linking CXX shared library ../../../../lib/plugins/liborg_sv_gui_qt_segmentation.so
 [ 50%] Built target org_sv_gui_qt_meshing
 [ 57%] Built target org_sv_gui_qt_simulation
 [ 62%] Built target org_sv_gui_qt_segmentation
