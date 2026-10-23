@@ -477,7 +477,10 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   {
     pm = PrismMesh(); shell = JunctionShell();
     if (BuildPrismLayers(iface, structured, numLayers, pm, err) != 0) { printf("  FAIL prisms: %s\n", err.c_str()); numFailed++; return; }
-    const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err, innerLevels, relaxation) == 0;
+    // with SV_HYBRID_SLOT_SIZES set: the slot smoothing's reach, for a run without it (0) or with another
+    BandRelaxation relaxUsed = relaxation;
+    if (getenv("SV_HYBRID_SLOT_SIZES") != nullptr) relaxUsed.slotSizes = atof(getenv("SV_HYBRID_SLOT_SIZES"));
+    const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err, innerLevels, relaxUsed) == 0;
     // as the glue does: a built shell with triangles passing through one another or folded onto each other widens the junction zone at the prisms whose layer
     // surface passes through a piece (a ring) and around the loops whose strips are at fault (two rings: a strip hops between the sides of a piece too narrow for it);
     // a loop without a chain widens its region; a piece with a chain no loop takes (a hole) gives the prisms owning or passing through it to the junction zone
@@ -574,7 +577,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   { ll thin = 0, total = 0; for (size_t z = 0; z < shell.zips.size(); z++) { thin += shell.zips[z].trianglesUnder15; total += shell.zips[z].stripTriangles; }
     printf("  zipper strips: %lld triangles, %lld with an angle under 15 degrees (%.1f%%)\n", total, thin, total > 0 ? 100.0*thin/total : 0.0); }
   printf("  band relaxed: %lld flips, %lld moves; under 10 degrees %lld -> %lld of %lld, smallest %.2f -> %.2f; relaxed shell had %lld crossing, %lld folded; %lld triangles undone locally%s\n", shell.numBandFlips, shell.numBandPointsMoved, shell.numBandUnder10Before, shell.numBandUnder10After, shell.numBandTriangles, shell.bandSmallestAngleBefore, shell.bandSmallestAngleAfter, shell.relaxationCrossingsAfter, shell.relaxationFoldsAfter, shell.numRelaxationUndone, shell.relaxationReverted ? " (reverted whole)" : "");
-  printf("  creases: %lld band points held on crease edges; band triangles chording off the level %lld -> %lld\n", shell.numBandCreasePoints, shell.numBandChordsBefore, shell.numBandChordsAfter);
+  printf("  creases: %lld band points held on crease edges; band triangles chording off the level %lld -> %lld; %lld slot points smoothed off the level\n", shell.numBandCreasePoints, shell.numBandChordsBefore, shell.numBandChordsAfter, shell.numBandSlotPoints);
   printf("  band edges collapsed %lld, free points on three triangles removed %lld (%lld triangles gone)%s\n", shell.numBandCollapses, shell.numBandVerticesRemoved, shell.numBandTrianglesRemoved, shell.collapseReverted ? " (undone: the shell crossed or folded)" : "");
   {
     // the band triangles still under 10 degrees, by how many of their corners are prism points (fixed by the relaxation): 0 piece interior, 1-2 strip or on the loop, 3 all fixed

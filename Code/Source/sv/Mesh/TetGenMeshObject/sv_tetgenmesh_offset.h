@@ -184,10 +184,14 @@ struct Options
   // is moved there (the edge flipped to the two apexes when that corner
   // is an apex: the marching leaves many a corner just off the valley, a
   // tent over it with the chord for its base), otherwise the edge is
-  // split there. A valley farther from the chord's middle than 0.6 of the
-  // edge is not under it (two walls closing on each other run on side by
-  // side below their cusp) and the chord stays, as does every chord between
-  // sheets turned more than 120 degrees from each other (two walls closing
+  // split there; a split whose half would turn over has its point raised
+  // toward the chord's middle, a quarter at a time, until none does
+  // (2026-10-23). A valley farther from the chord's middle than a crease of
+  // the sheets' own angle would put it - half the edge times the tangent of
+  // half the angle, a quarter more and a fifth of an edge, never under 0.6
+  // of the edge - is not under it (two walls closing on each other run on
+  // side by side below their cusp) and the chord stays, as does every
+  // chord between sheets turned more than 120 degrees from each other (two walls closing
   // on each other): the levels are nested as marched, and a valley cut
   // into one level under a chord left in the next crosses it (the user's
   // model, 2026-10-20: 42 crossings between the outer two levels at the
@@ -251,6 +255,7 @@ struct Report
   long long numCreasePointsInserted = 0; // of them, split at the valley
   long long numCreasePointsSnapped = 0;  // of them, an end moved onto the valley instead
   long long numCreaseCutsRefused = 0;    // of them, left as they were: the valley not found under the chord
+  long long numCreasePointsPartial = 0;  // of the split, the point raised toward the chord so that no half turned over (2026-10-23)
   long long numLevelPointsPulledIn = 0;  // on the last level's report: point moves of the lower levels pulling their triangles from under a valley cut into the level over them (NestLevels)
   long long numUnfolded = 0;             // edges whose two triangles lay on each other within a degree, flipped, collapsed or taken out with the spike point they stand on by the decimation's last pass
   long long numFoldedEdges = 0;          // of the result: edges whose two triangles still lie on each other within foldDegrees, which the volume mesher refuses
@@ -739,6 +744,7 @@ struct JunctionShell
   long long numBandFlips = 0;
   long long numBandPointsMoved = 0;
   long long numBandCreasePoints = 0;     // band points held still for lying on a crease edge (BandRelaxation::creaseDegrees)
+  long long numBandSlotPoints = 0;       // band points in a slot between two walls, smoothed without the step back onto the level (BandRelaxation::slotSizes)
   long long numBandChordsBefore = 0;     // band triangles whose centre stands off the level by more than a tenth of their mean edge (a chord over a valley), before the relaxation
   long long numBandChordsAfter = 0;      // and after it
   long long numBandTriangles = 0;
@@ -791,6 +797,7 @@ struct BandRelaxation
   bool removeDegree3 = true;      // a free point on three triangles, one of them under 10 degrees, is taken out
   bool freeThinCaps = true;       // a triangle under 5 degrees keeps neither its normal nor its creases when its point moves
   double creaseDegrees = 35.0;    // the points on a band edge whose two triangles turn more than this, both lying on the level, stay where they are and the edge is not flipped: a valley cut into the level surface (Options::creaseDegrees) would otherwise be smoothed back into a zigzag; zero or less holds nothing
+  double slotSizes = 1.0;         // a band point with the level of a facing wall within this many local sizes of it is in a slot between two walls: it is smoothed toward its neighbours without being put back onto the level, so that the band roofs the groove over evenly instead of dipping into it here and there (2026-10-23); zero or less treats no point so
 };
 
 /**
@@ -966,7 +973,9 @@ struct SliverReport
  * shortest edge at that corner over all the passes, as far as that makes
  * the sliver better without turning any tetrahedron at the corner inside
  * out, pushing one under the threshold or, if one is under already, making
- * it worse. Returns the number of moves.
+ * it worse; a sliver under one degree is moved whenever the worst
+ * tetrahedron at the corner gets better, whatever it costs the others.
+ * Returns the number of moves.
  */
 long long ExudeSlivers(std::vector<double> &points, const std::vector<long long> &tetrahedra,
     const std::vector<unsigned char> &fixed, double thresholdDegrees, int passes, double maxMoveFraction,
@@ -994,7 +1003,8 @@ long long FlipSlivers(const std::vector<double> &points, std::vector<long long> 
 
 /**
  * @brief FlipSlivers, ExudeSlivers, then FlipSlivers again for what the
- * moves left; the report sums the three up. Returns flips plus moves.
+ * moves left, twice over (the first round's flips open room for the
+ * second's moves); the report sums them up. Returns flips plus moves.
  */
 long long ImproveSlivers(std::vector<double> &points, std::vector<long long> &tetrahedra,
     const std::vector<unsigned char> &fixed, const std::vector<long long> &facets, double thresholdDegrees,

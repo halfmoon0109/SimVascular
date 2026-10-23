@@ -1951,11 +1951,23 @@ long long OffsetField::NumEvaluations() const { return data_->numEvaluations; }
 struct CreaseCut
 {
   ll numEdges = 0, numInserted = 0, numSnapped = 0, numFlipped = 0, numRefused = 0;
+  ll numPartial = 0;   // of the inserted, raised toward the chord so that no half turned over
   ll refusedBy[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};   // why: 0 no sheet in a cone, 1 the ends not each on its sheet, 2 facing sheets, 3 the chord under the level, 4 no level under the chord, 5 a corner or a half would turn over, 6 the flip would, 7 the valley not under the chord, 8 a triangle would pass through another
 };
 static void CutCreases(const OffsetField &field, double fraction, const Options &options,
     std::vector<double> &pts, std::vector<ll> &tris, std::vector<unsigned char> &crease, CreaseCut &report)
 {
+  // with SV_CREASE_DUMP set: every refused edge to <path>_<fraction>.bin for a look (reason, a xyz, b xyz, x xyz)
+  std::vector<double> refusedDump;
+  auto dumpRefusal = [&](int reason, ll a, ll b, const double *x)
+  {
+    if (getenv("SV_CREASE_DUMP") == nullptr) return;
+    refusedDump.push_back((double)reason);
+    for (int k = 0; k < 3; k++) refusedDump.push_back(pts[(size_t)3*a + k]);
+    for (int k = 0; k < 3; k++) refusedDump.push_back(pts[(size_t)3*b + k]);
+    for (int k = 0; k < 3; k++) refusedDump.push_back(x != nullptr ? x[k] : 0.5*(pts[(size_t)3*a + k] + pts[(size_t)3*b + k]));
+  };
+  struct DumpWriter { std::vector<double> &d; double fraction; ~DumpWriter() { if (getenv("SV_CREASE_DUMP") == nullptr || d.empty()) return; char name[1024]; snprintf(name, sizeof(name), "%s_%.3f.bin", getenv("SV_CREASE_DUMP"), fraction); FILE *f = fopen(name, "wb"); if (f) { ll n = (ll)d.size(); fwrite(&n, 8, 1, f); fwrite(d.data(), 8, d.size(), f); fclose(f); } } } dumpWriter{refusedDump, fraction};
   crease.assign(pts.size()/3, 0);
   if (!(options.creaseDegrees > 0.0) || tris.size() < 3) return;
   const double cosCrease = std::cos(options.creaseDegrees*M_PI/180.0);
@@ -2039,12 +2051,12 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
       double termA, termB, ga[3], gb[3], x[3];
       double lo = 0.0, hi = 1.0, gLo, gHi;
       along(lo, x);
-      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; continue; }
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; dumpRefusal(0, a, b, x); continue; }
       gLo = termA - termB;
       along(hi, x);
-      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; continue; }
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; dumpRefusal(0, a, b, x); continue; }
       gHi = termA - termB;
-      if (!(gLo < 0.0 && gHi > 0.0)) { report.numRefused++; report.refusedBy[1]++; continue; }   // the ends are not on their own sheets after all
+      if (!(gLo < 0.0 && gHi > 0.0)) { report.numRefused++; report.refusedBy[1]++; dumpRefusal(1, a, b, nullptr); continue; }   // the ends are not on their own sheets after all
       for (int it = 0; it < 24; it++)
       {
         const double u = 0.5*(lo + hi);
@@ -2054,15 +2066,15 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
       }
       const double s = 0.5*(lo + hi);
       along(s, x);
-      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; continue; }
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; dumpRefusal(0, a, b, x); continue; }
       // straight down between the sheets to the level: the field is the
       // smaller term and the point is equidistant, so both vanish together
       double d[3] = {-(ga[0] + gb[0]), -(ga[1] + gb[1]), -(ga[2] + gb[2])};
       const double ld = Norm(d);
-      if (!(ld > 0.1)) { report.numRefused++; report.refusedBy[2]++; continue; }   // the sheets face each other: no valley between them
+      if (!(ld > 0.1)) { report.numRefused++; report.refusedBy[2]++; dumpRefusal(2, a, b, x); continue; }   // the sheets face each other: no valley between them
       for (int k = 0; k < 3; k++) d[k] /= ld;
       const double f0 = field.Evaluate(x, fraction);
-      if (!(f0 > 0.0)) { report.numRefused++; report.refusedBy[3]++; continue; }
+      if (!(f0 > 0.0)) { report.numRefused++; report.refusedBy[3]++; dumpRefusal(3, a, b, x); continue; }
       // the level lies under the chord within a few edges even in a sharp valley (the drop is the chord's height over the valley)
       double below = std::min(2.0*f0, 0.25*length), fBelow = 0.0;
       bool bracketed = false;
@@ -2074,7 +2086,7 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
         if (fBelow <= 0.0) { bracketed = true; break; }
         below *= 2.0;
       }
-      if (!bracketed) { report.numRefused++; report.refusedBy[4]++; continue; }
+      if (!bracketed) { report.numRefused++; report.refusedBy[4]++; dumpRefusal(4, a, b, x); continue; }
       double above = 0.0;
       for (int it = 0; it < 24; it++)
       {
@@ -2107,11 +2119,24 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
         const double alpha = (-termA + c*termB)/(1.0 - c*c), beta = (-termB + c*termA)/(1.0 - c*c);
         for (int k = 0; k < 3; k++) x[k] += alpha*ga[k] + beta*gb[k];
       }
-      // a valley farther from the chord's middle than the edge is long is not
-      // under it: the chord closes over a slot between two sheets that run
-      // on side by side below their cusp (two walls closing on each other,
-      // test 3 of test_offset), which no cut at the cusp can resolve
-      if (Distance(x, mid) > 0.6*length) { report.numRefused++; report.refusedBy[7]++; continue; }
+      // A valley farther from the chord's middle than a crease of the two
+      // sheets' own angle would put it is not under the chord: the chord
+      // closes over a slot between two sheets that run on side by side
+      // below their cusp (two walls closing on each other, test 3 of
+      // test_offset), which no cut at the cusp can resolve. Under a chord
+      // across a crease of angle theta (between the sheets' normals), the
+      // valley lies half the edge times tan(theta/2) below - 0.5 of the
+      // edge at 90 degrees, 0.87 at 120 - and a quarter more with a fifth
+      // of an edge is allowed for a chord off centre; a fixed 0.6 refused
+      // the sharper branch roots (the user's model, 2026-10-23: 398 of the
+      // outer level's 2,448 band triangles still off the level stood next
+      // to such a refusal, the valleys 0.6 to 0.9 of an edge down).
+      {
+        const double cosTheta = std::max(-1.0, std::min(1.0, Dot(na, nb)));
+        const double halfTheta = 0.5*std::acos(cosTheta);
+        const double allowed = std::max(0.6, 1.25*0.5*std::tan(halfTheta) + 0.2)*length;
+        if (Distance(x, mid) > allowed) { report.numRefused++; report.refusedBy[7]++; dumpRefusal(7, a, b, x); continue; }
+      }
       Cut cut;
       cut.a = a; cut.b = b; cut.s = s;
       for (int k = 0; k < 3; k++) { cut.x[k] = x[k]; cut.out[k] = na[k] + nb[k]; }
@@ -2274,29 +2299,54 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
       }
     }
     // the split: both halves of each triangle on the edge have to face as it did
-    bool sound = true;
-    for (size_t q = 0; q < on.size() && sound; q++)
+    auto soundAt = [&](const double *xx) -> bool
     {
-      const ll *T = &tris[(size_t)3*on[q]];
-      int j = -1;
-      for (int jj = 0; jj < 3; jj++) if ((T[jj] == a && T[(jj + 1)%3] == b) || (T[jj] == b && T[(jj + 1)%3] == a)) j = jj;
-      if (j < 0) { sound = false; break; }
-      const double *p0 = &pts[(size_t)3*T[j]], *p1 = &pts[(size_t)3*T[(j + 1)%3]], *p2 = &pts[(size_t)3*T[(j + 2)%3]];
-      double n0[3], n1[3], n2[3];
-      triangleNormal(p0, p1, p2, n0);
-      triangleNormal(p0, cut.x, p2, n1);
-      triangleNormal(cut.x, p1, p2, n2);
-      double r1[3], r2[3];
-      for (int k = 0; k < 3; k++)
+      for (size_t q = 0; q < on.size(); q++)
       {
-        r1[k] = ref[(size_t)3*T[j] + k] + ref[(size_t)3*T[(j + 2)%3] + k] + cut.out[k];
-        r2[k] = ref[(size_t)3*T[(j + 1)%3] + k] + ref[(size_t)3*T[(j + 2)%3] + k] + cut.out[k];
+        const ll *T = &tris[(size_t)3*on[q]];
+        int j = -1;
+        for (int jj = 0; jj < 3; jj++) if ((T[jj] == a && T[(jj + 1)%3] == b) || (T[jj] == b && T[(jj + 1)%3] == a)) j = jj;
+        if (j < 0) return false;
+        const double *p0 = &pts[(size_t)3*T[j]], *p1 = &pts[(size_t)3*T[(j + 1)%3]], *p2 = &pts[(size_t)3*T[(j + 2)%3]];
+        double n0[3], n1[3], n2[3];
+        triangleNormal(p0, p1, p2, n0);
+        triangleNormal(p0, xx, p2, n1);
+        triangleNormal(xx, p1, p2, n2);
+        double r1[3], r2[3];
+        for (int k = 0; k < 3; k++)
+        {
+          r1[k] = ref[(size_t)3*T[j] + k] + ref[(size_t)3*T[(j + 2)%3] + k] + cut.out[k];
+          r2[k] = ref[(size_t)3*T[(j + 1)%3] + k] + ref[(size_t)3*T[(j + 2)%3] + k] + cut.out[k];
+        }
+        if (!(Norm(n1) > 0.0) || !(Norm(n2) > 0.0) || Dot(n1, r1) <= 1.0e-3*Norm(n1)*Norm(r1) || Dot(n2, r2) <= 1.0e-3*Norm(n2)*Norm(r2)) return false;
       }
-      if (!(Norm(n1) > 0.0) || !(Norm(n2) > 0.0) || Dot(n1, r1) <= 1.0e-3*Norm(n1)*Norm(r1) || Dot(n2, r2) <= 1.0e-3*Norm(n2)*Norm(r2)) sound = false;
+      return true;
+    };
+    double xUse[3] = {cut.x[0], cut.x[1], cut.x[2]};
+    bool sound = soundAt(xUse);
+    if (!sound)
+    {
+      // A half that would turn over: the marched triangle on the edge is a
+      // sliver whose apex lies near the chord, and a point dropped the
+      // whole valley's depth below passes the apex's side. The point is
+      // raised toward the chord's middle, a quarter at a time, as far as
+      // the halves keep facing: the chord comes down part of the way and
+      // the relaxation of the bands takes the point the rest (the user's
+      // model, 2026-10-23: 177 such refusals at the outer level, 145 of
+      // them next to band triangles still off the level after the shell).
+      double midNow[3];
+      for (int k = 0; k < 3; k++) midNow[k] = 0.5*(pts[(size_t)3*a + k] + pts[(size_t)3*b + k]);
+      for (int step = 1; step <= 3 && !sound; step++)
+      {
+        const double t = 1.0 - 0.25*step;
+        for (int k = 0; k < 3; k++) xUse[k] = midNow[k] + t*(cut.x[k] - midNow[k]);
+        sound = soundAt(xUse);
+      }
+      if (sound) report.numPartial++;
     }
-    if (!sound) { report.numRefused++; report.refusedBy[5]++; continue; }
+    if (!sound) { report.numRefused++; report.refusedBy[5]++; dumpRefusal(5, a, b, cut.x); continue; }
     const ll p = (ll)(pts.size()/3);
-    pts.insert(pts.end(), cut.x, cut.x + 3);
+    pts.insert(pts.end(), xUse, xUse + 3);
     {
       guard.BeginOperation();
       for (size_t q = 0; q < on.size(); q++) guard.Leave(on[q]);
@@ -2352,9 +2402,19 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
 // left in the one under it (a cut refused there, or a chord between
 // sheets turned too far): the lower level's crossing triangles have their
 // points pulled in, along the field's gradient, a quarter of their edge
-// at a time until the pair is apart. The levels are compared from the
-// outside in, so a level pulled in is compared with the one under it
-// afterwards. Measured on the user's model, 2026-10-20: 29 crossing
+// at a time until the pair is apart - never beyond halfway to the level
+// under it (the interface, for the first), which a point pulled for
+// several pairs in turn passed, down into the lumen, once the cuts went
+// deeper (the user's model, 2026-10-23: 16 points of the first level more
+// than a layer under it at a contact between two vessels, and the
+// junction shell's first level through the interface there); where that
+// is not enough, the upper level's crossing triangle has its points raised
+// out instead, a quarter of an edge at a time up to halfway to the level
+// over it, so that its valley is cut a little less deep. The levels are
+// compared from the outside in, so a level pulled in is compared with the
+// one under it afterwards, and the sweep is repeated while anything
+// moved, since a level raised against the one under it may cross the one
+// over it again. Measured on the user's model, 2026-10-20: 29 crossing
 // triangles between the outer two levels at three branch roots, which the
 // junction shell's census would otherwise count at every attempt.
 static ll NestLevels(const OffsetField &field, const std::vector<double> &fractions, std::vector<Surface> &surfaces)
@@ -2367,76 +2427,57 @@ static ll NestLevels(const OffsetField &field, const std::vector<double> &fracti
     Plane plane;
     if (field.RimPlane(r, plane.origin, plane.outward, plane.radius, plane.collar)) planes.push_back(plane);
   }
-  for (size_t k = surfaces.size(); k >= 2; k--)
+  const double spacing = 1.0/(double)std::max<size_t>(1, fractions.size());   // of the thickness, between levels
+  for (int sweep = 0; sweep < 3; sweep++)
   {
-    Surface &lower = surfaces[k - 2];
-    const Surface &upper = surfaces[k - 1];
-    const double fraction = fractions[k - 2];
-    for (int pass = 0; pass < 3; pass++)
+    ll movedThisSweep = 0;
+    for (size_t k = surfaces.size(); k >= 2; k--)
     {
-      std::vector<double> pts(lower.points);
-      std::vector<ll> tris(lower.triangles);
-      const ll base = (ll)(pts.size()/3), ntLower = (ll)(tris.size()/3);
-      pts.insert(pts.end(), upper.points.begin(), upper.points.end());
-      for (size_t i = 0; i < upper.triangles.size(); i++) tris.push_back(upper.triangles[i] + base);
-      std::vector<svenvelope::CrossingPair> pairs;
-      if (svenvelope::ListCrossingPairs(pts, tris, (size_t)1 << 20, pairs) == 0) break;
-      // no move may put a triangle of the lower level through another of
-      // it (the first pull-in on the user's model: nine crossings on the
-      // first level): the decimation's guard over the lower level, with the
-      // triangles at each of its points
-      std::vector<unsigned char> deadLower((size_t)ntLower, 0);
-      CrossingGuard guard(lower.points, lower.triangles, deadLower);
-      std::vector<std::vector<ll> > incident((size_t)base);
+      Surface &lower = surfaces[k - 2];
+      Surface &upper = surfaces[k - 1];
+      const double fractionLower = fractions[k - 2], fractionUpper = fractions[k - 1];
+      for (int pass = 0; pass < 3; pass++)
       {
-        double sum = 0.0;
-        ll n = 0;
-        for (ll t = 0; t < ntLower; t++)
+        std::vector<double> pts(lower.points);
+        std::vector<ll> tris(lower.triangles);
+        const ll base = (ll)(pts.size()/3), ntLower = (ll)(tris.size()/3), ntUpper = (ll)(upper.triangles.size()/3);
+        pts.insert(pts.end(), upper.points.begin(), upper.points.end());
+        for (size_t i = 0; i < upper.triangles.size(); i++) tris.push_back(upper.triangles[i] + base);
+        std::vector<svenvelope::CrossingPair> pairs;
+        if (svenvelope::ListCrossingPairs(pts, tris, (size_t)1 << 20, pairs) == 0) break;
+        // no move may put a triangle of a level through another of it (the
+        // first pull-in on the user's model: nine crossings on the first
+        // level): the decimation's guard over each level, with the
+        // triangles at each of its points
+        std::vector<unsigned char> deadLower((size_t)ntLower, 0), deadUpper((size_t)ntUpper, 0);
+        CrossingGuard guardLower(lower.points, lower.triangles, deadLower), guardUpper(upper.points, upper.triangles, deadUpper);
+        std::vector<std::vector<ll> > incidentLower((size_t)base), incidentUpper(upper.points.size()/3);
+        auto buildGuard = [&](const Surface &surf, CrossingGuard &guard, std::vector<std::vector<ll> > &incident)
         {
-          const ll *T = &lower.triangles[(size_t)3*t];
-          for (int j = 0; j < 3; j++) { incident[(size_t)T[j]].push_back(t); if (t%64 == 0) { sum += Distance(&lower.points[(size_t)3*T[j]], &lower.points[(size_t)3*T[(j + 1)%3]]); n++; } }
-        }
-        guard.Build(n > 0 ? 2.0*sum/(double)n : 1.0);
-      }
-      ll moved = 0;
-      for (size_t q = 0; q < pairs.size(); q++)
-      {
-        ll lo = pairs[q].a, up = pairs[q].b;
-        if (lo >= ntLower) std::swap(lo, up);
-        if (lo >= ntLower || up < ntLower) continue;   // both in one level: not this step's
-        const ll *T = &tris[(size_t)3*lo], *U = &tris[(size_t)3*up];
-        // not at a vessel end: the domes over the collars cross between
-        // the levels and come off with the trim, and a point pulled in
-        // there ended on a cap plane, where the trim left a loop of four
-        // points for a fifteenth rim (the user's run of 2026-10-21). A
-        // triangle within a collar's length of a cap plane, on either
-        // side, and within the rim's radius and a collar of its axis, is
-        // left alone.
-        {
-          double c[3] = {0.0, 0.0, 0.0};
-          for (int j = 0; j < 3; j++) for (int k = 0; k < 3; k++) c[k] += pts[(size_t)3*T[j] + k]/3.0;
-          bool atEnd = false;
-          for (size_t r = 0; r < planes.size() && !atEnd; r++)
+          double sum = 0.0;
+          ll n = 0;
+          const ll nt = (ll)(surf.triangles.size()/3);
+          for (ll t = 0; t < nt; t++)
           {
-            double d[3];
-            Sub(c, &planes[r].origin[0], d);
-            const double along = Dot(d, &planes[r].outward[0]);
-            if (along <= -planes[r].collar) continue;
-            double across[3];
-            for (int k = 0; k < 3; k++) across[k] = d[k] - along*planes[r].outward[k];
-            if (Norm(across) <= planes[r].radius + planes[r].collar) atEnd = true;
+            const ll *T = &surf.triangles[(size_t)3*t];
+            for (int j = 0; j < 3; j++) { incident[(size_t)T[j]].push_back(t); if (t%64 == 0) { sum += Distance(&surf.points[(size_t)3*T[j]], &surf.points[(size_t)3*T[(j + 1)%3]]); n++; } }
           }
-          if (atEnd) continue;
-        }
-        double edge = 0.0;
-        for (int j = 0; j < 3; j++) edge += Distance(&pts[(size_t)3*T[j]], &pts[(size_t)3*T[(j + 1)%3]])/3.0;
-        for (int step = 0; step < 4 && svenvelope::TrianglesCross(pts, T, U); step++)
+          guard.Build(n > 0 ? 2.0*sum/(double)n : 1.0);
+        };
+        buildGuard(lower, guardLower, incidentLower);
+        buildGuard(upper, guardUpper, incidentUpper);
+        // the points of a triangle moved along the field's gradient (by
+        // differences: the way out of the wall), in or out, a quarter of
+        // the triangle's edge, each as far as its level's guard and the
+        // bound on its field value allow
+        auto movePoints = [&](Surface &surf, ll offset, const ll *T, double fraction, double direction, double bound,
+            CrossingGuard &guard, std::vector<std::vector<ll> > &incident, double edge) -> ll
         {
+          ll moved = 0;
           for (int j = 0; j < 3; j++)
           {
-            const ll v = T[j];
-            double *p = &pts[(size_t)3*v];
-            // the field's gradient by differences: the way out of the wall
+            const ll v = T[j] - offset;
+            double *p = &pts[(size_t)3*T[j]];
             double g[3];
             const double h = 0.05*edge;
             for (int c = 0; c < 3; c++)
@@ -2447,26 +2488,85 @@ static ll NestLevels(const OffsetField &field, const std::vector<double> &fracti
             }
             const double lg = Norm(g);
             if (!(lg > 0.0)) continue;
+            double to[3];
+            for (int c = 0; c < 3; c++) to[c] = p[c] + direction*0.25*edge*g[c]/lg;
+            // within the bound: not beyond halfway to the next level in or out
+            const double f = field.Evaluate(to, fraction);
+            if ((direction < 0.0 && f < -bound) || (direction > 0.0 && f > bound)) continue;
             double was[3] = {p[0], p[1], p[2]};
-            for (int c = 0; c < 3; c++) lower.points[(size_t)3*v + c] = p[c] - 0.25*edge*g[c]/lg;
+            for (int c = 0; c < 3; c++) surf.points[(size_t)3*v + c] = to[c];
             guard.BeginOperation();
             for (size_t m = 0; m < incident[(size_t)v].size(); m++) guard.Leave(incident[(size_t)v][m]);
             bool crosses = false;
-            for (size_t m = 0; m < incident[(size_t)v].size() && !crosses; m++) crosses = guard.Crosses(&lower.triangles[(size_t)3*incident[(size_t)v][m]]);
+            for (size_t m = 0; m < incident[(size_t)v].size() && !crosses; m++) crosses = guard.Crosses(&surf.triangles[(size_t)3*incident[(size_t)v][m]]);
             if (crosses)
             {
-              for (int c = 0; c < 3; c++) lower.points[(size_t)3*v + c] = was[c];
+              for (int c = 0; c < 3; c++) surf.points[(size_t)3*v + c] = was[c];
               continue;
             }
-            for (int c = 0; c < 3; c++) p[c] = lower.points[(size_t)3*v + c];
+            for (int c = 0; c < 3; c++) p[c] = to[c];
             for (size_t m = 0; m < incident[(size_t)v].size(); m++) { guard.Remove(incident[(size_t)v][m]); guard.Add(incident[(size_t)v][m]); }
             moved++;
           }
+          return moved;
+        };
+        ll moved = 0;
+        for (size_t q = 0; q < pairs.size(); q++)
+        {
+          ll lo = pairs[q].a, up = pairs[q].b;
+          if (lo >= ntLower) std::swap(lo, up);
+          if (lo >= ntLower || up < ntLower) continue;   // both in one level: not this step's
+          const ll *T = &tris[(size_t)3*lo], *U = &tris[(size_t)3*up];
+          // not at a vessel end: the domes over the collars cross between
+          // the levels and come off with the trim, and a point pulled in
+          // there ended on a cap plane, where the trim left a loop of four
+          // points for a fifteenth rim (the user's run of 2026-10-21). A
+          // triangle within a collar's length of a cap plane, on either
+          // side, and within the rim's radius and a collar of its axis, is
+          // left alone.
+          {
+            double c[3] = {0.0, 0.0, 0.0};
+            for (int j = 0; j < 3; j++) for (int k2 = 0; k2 < 3; k2++) c[k2] += pts[(size_t)3*T[j] + k2]/3.0;
+            bool atEnd = false;
+            for (size_t r = 0; r < planes.size() && !atEnd; r++)
+            {
+              double d[3];
+              Sub(c, &planes[r].origin[0], d);
+              const double along = Dot(d, &planes[r].outward[0]);
+              if (along <= -planes[r].collar) continue;
+              double across[3];
+              for (int k2 = 0; k2 < 3; k2++) across[k2] = d[k2] - along*planes[r].outward[k2];
+              if (Norm(across) <= planes[r].radius + planes[r].collar) atEnd = true;
+            }
+            if (atEnd) continue;
+          }
+          double edgeT = 0.0, edgeU = 0.0, size, thickness;
+          ll rim;
+          for (int j = 0; j < 3; j++) { edgeT += Distance(&pts[(size_t)3*T[j]], &pts[(size_t)3*T[(j + 1)%3]])/3.0; edgeU += Distance(&pts[(size_t)3*U[j]], &pts[(size_t)3*U[(j + 1)%3]])/3.0; }
+          {
+            double c[3] = {0.0, 0.0, 0.0};
+            for (int j = 0; j < 3; j++) for (int k2 = 0; k2 < 3; k2++) c[k2] += pts[(size_t)3*T[j] + k2]/3.0;
+            field.Local(c, size, thickness, rim);
+          }
+          const double bound = 0.5*spacing*thickness;
+          // the lower level's triangle pulled in first, then the upper's raised out
+          for (int step = 0; step < 4 && svenvelope::TrianglesCross(pts, T, U); step++)
+          {
+            if (movePoints(lower, 0, T, fractionLower, -1.0, bound, guardLower, incidentLower, edgeT) == 0) break;
+            moved++;
+          }
+          for (int step = 0; step < 4 && svenvelope::TrianglesCross(pts, T, U); step++)
+          {
+            if (movePoints(upper, base, U, fractionUpper, 1.0, bound, guardUpper, incidentUpper, edgeU) == 0) break;
+            moved++;
+          }
         }
+        numMoved += moved;
+        movedThisSweep += moved;
+        if (moved == 0) break;
       }
-      numMoved += moved;
-      if (moved == 0) break;
     }
+    if (movedThisSweep == 0) break;
   }
   return numMoved;
 }
@@ -3011,7 +3111,8 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     report.numCreasePointsInserted = cut.numInserted;
     report.numCreasePointsSnapped = cut.numSnapped;
     report.numCreaseCutsRefused = cut.numRefused;
-    if (getenv("SV_CREASE_DEBUG") != nullptr) fprintf(stderr, "crease cut at %.3g: %lld edges, %lld split, %lld snapped (%lld flipped), %lld refused (no sheet %lld, ends %lld, facing %lld, under %lld, no level %lld, turns %lld, flip turns %lld, not under the chord %lld, through another %lld)\n", fraction, cut.numEdges, cut.numInserted, cut.numSnapped, cut.numFlipped, cut.numRefused, cut.refusedBy[0], cut.refusedBy[1], cut.refusedBy[2], cut.refusedBy[3], cut.refusedBy[4], cut.refusedBy[5], cut.refusedBy[6], cut.refusedBy[7], cut.refusedBy[8]);
+    report.numCreasePointsPartial = cut.numPartial;
+    if (getenv("SV_CREASE_DEBUG") != nullptr) fprintf(stderr, "crease cut at %.3g: %lld edges, %lld split (%lld part of the way), %lld snapped (%lld flipped), %lld refused (no sheet %lld, ends %lld, facing %lld, under %lld, no level %lld, turns %lld, flip turns %lld, not under the chord %lld, through another %lld)\n", fraction, cut.numEdges, cut.numInserted, cut.numPartial, cut.numSnapped, cut.numFlipped, cut.numRefused, cut.refusedBy[0], cut.refusedBy[1], cut.refusedBy[2], cut.refusedBy[3], cut.refusedBy[4], cut.refusedBy[5], cut.refusedBy[6], cut.refusedBy[7], cut.refusedBy[8]);
   }
   if (options.collapseRatio > 0.0)
   {
@@ -6694,6 +6795,32 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
       out.numBandFlips++;
     }
   };
+  // A point in a slot: the level of a wall facing this one lies within a
+  // local size of it (two vessels against each other, or the two sides of
+  // a narrow crotch). The marched level runs down into the groove between
+  // the two walls here and there and chords over it elsewhere, and no cut
+  // mends that (the valley cut leaves facing sheets alone: §5); put back
+  // onto the level, the points keep the teeth (the user's model, 2026-10-23:
+  // 3,678 of the 5,233 band triangles off the level were over such slots,
+  // the pair of ACA first). Such a point is smoothed toward its neighbours
+  // without the step back onto the level, so that the band roofs the
+  // groove over evenly.
+  std::map<ll, unsigned char> slotCache;
+  const double slotCos = std::cos(55.0*M_PI/180.0);
+  auto inSlot = [&](ll v, const double n[3], double fraction, double size) -> bool
+  {
+    if (!(options.slotSizes > 0.0)) return false;
+    std::map<ll, unsigned char>::const_iterator it = slotCache.find(v);
+    if (it != slotCache.end()) return it->second != 0;
+    const double minus[3] = {-n[0], -n[1], -n[2]};
+    double q[3];
+    ll owner = -1;
+    const double term = field.SheetTerm(&out.points[(size_t)3*v], fraction, minus, slotCos, q, owner);
+    const bool slot = owner >= 0 && std::fabs(term) < options.slotSizes*size;
+    slotCache[v] = slot ? 1 : 0;
+    if (slot) out.numBandSlotPoints++;
+    return slot;
+  };
   // 2. the smoothing of a band's free points onto the level
   auto movesPass = [&](int k, double fraction, const std::vector<ll> &band)
   {
@@ -6756,7 +6883,8 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
       ll rim;
       field.Local(x, size, thickness, rim);
       const double delta = 0.05*thickness;
-      for (int step = 0; step < 3; step++)
+      const bool slot = inSlot(v, n, fraction, size);
+      for (int step = 0; step < 3 && !slot; step++)
       {
         const double f0 = field.Evaluate(x, fraction);
         if (std::fabs(f0) < 1e-3*thickness) break;
@@ -7166,6 +7294,7 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
     if (band.empty()) continue;
     out.numBandTriangles += (ll)band.size();
     bandStats(band, out.bandSmallestAngleBefore, out.numBandUnder10Before);
+    slotCache.clear();
     for (int round = 0; round < rounds; round++)
     {
       flipsPass(band);
@@ -7416,9 +7545,16 @@ long long ExudeSlivers(std::vector<double> &points, const std::vector<long long>
           {
             for (int k = 0; k < 3; k++) points[(size_t)3*v + k] = was[k] + dir*step*n[k];
             // every tetrahedron at the point keeps its orientation, this one
-            // gets better, and no other falls under the threshold or, if it
-            // was under already, gets worse
+            // gets better, no other falls under the threshold or, if it was
+            // under already, gets worse - unless this one is all but flat
+            // (under a degree): then the move is taken whenever the worst of
+            // the tetrahedra at the point gets better, whatever it costs the
+            // others, since a flat tetrahedron is what the solver refuses
+            // (the user's model, 2026-10-23: two zone tetrahedra of no volume
+            // on a Steiner point, which no move within the rule could mend)
             bool refused = false;
+            const bool flat = angle[(size_t)t] < 1.0;
+            double worstBefore = angle[(size_t)t], worstAfter = 180.0;
             std::vector<double> after(incident[(size_t)v].size());
             for (size_t i = 0; i < incident[(size_t)v].size() && !refused; i++)
             {
@@ -7426,9 +7562,13 @@ long long ExudeSlivers(std::vector<double> &points, const std::vector<long long>
               const double vol = TetrahedronVolume6(points, &tetrahedra[(size_t)4*u2]);
               if ((vol >= 0.0 ? 1 : -1) != sign[(size_t)u2] || vol == 0.0) { refused = true; break; }
               after[i] = TetrahedronMinDihedral(points, &tetrahedra[(size_t)4*u2]);
+              worstBefore = std::min(worstBefore, angle[(size_t)u2]);
+              worstAfter = std::min(worstAfter, after[i]);
+              if (flat) continue;
               if (u2 == t) { if (!(after[i] > angle[(size_t)t] + 1.0e-3)) refused = true; }
               else if (after[i] < std::min(thresholdDegrees, angle[(size_t)u2]) - 1.0e-9) refused = true;
             }
+            if (flat && !refused && !(worstAfter > worstBefore + 1.0e-3)) refused = true;
             if (refused)
             {
               for (int k = 0; k < 3; k++) points[(size_t)3*v + k] = was[k];
@@ -7758,23 +7898,34 @@ long long ImproveSlivers(std::vector<double> &points, std::vector<long long> &te
     const std::vector<unsigned char> &fixed, const std::vector<long long> &facets, double thresholdDegrees,
     int passes, double maxMoveFraction, SliverReport &report)
 {
-  SliverReport first, moves, last;
-  FlipSlivers(points, tetrahedra, facets, thresholdDegrees, passes, first);
-  ExudeSlivers(points, tetrahedra, fixed, thresholdDegrees, passes, maxMoveFraction, moves);
-  FlipSlivers(points, tetrahedra, facets, thresholdDegrees, passes, last);
+  // Two rounds of flips, moves and flips: the flips of the first round
+  // open room the moves of the second can use (the user's model,
+  // 2026-10-23: a second round took the zones' tetrahedra under 10 degrees
+  // from 1,268 to 364).
   report = SliverReport();
-  report.numTetrahedra = first.numTetrahedra;
-  report.numTetrahedraAfter = last.numTetrahedraAfter;
-  report.numUnderBefore = first.numUnderBefore;
-  report.numUnder1Before = first.numUnder1Before;
-  report.smallestBefore = first.smallestBefore;
-  report.numUnderAfter = last.numUnderAfter;
-  report.numUnder1After = last.numUnder1After;
-  report.smallestAfter = last.smallestAfter;
-  report.numFlips23 = first.numFlips23 + last.numFlips23;
-  report.numFlips32 = first.numFlips32 + last.numFlips32;
-  report.numPointsMoved = moves.numPointsMoved;
-  report.numMoves = moves.numMoves;
+  for (int round = 0; round < 2; round++)
+  {
+    SliverReport first, moves, last;
+    FlipSlivers(points, tetrahedra, facets, thresholdDegrees, passes, first);
+    ExudeSlivers(points, tetrahedra, fixed, thresholdDegrees, passes, maxMoveFraction, moves);
+    FlipSlivers(points, tetrahedra, facets, thresholdDegrees, passes, last);
+    if (round == 0)
+    {
+      report.numTetrahedra = first.numTetrahedra;
+      report.numUnderBefore = first.numUnderBefore;
+      report.numUnder1Before = first.numUnder1Before;
+      report.smallestBefore = first.smallestBefore;
+    }
+    report.numTetrahedraAfter = last.numTetrahedraAfter;
+    report.numUnderAfter = last.numUnderAfter;
+    report.numUnder1After = last.numUnder1After;
+    report.smallestAfter = last.smallestAfter;
+    report.numFlips23 += first.numFlips23 + last.numFlips23;
+    report.numFlips32 += first.numFlips32 + last.numFlips32;
+    report.numPointsMoved += moves.numPointsMoved;
+    report.numMoves += moves.numMoves;
+    if (first.numFlips23 + first.numFlips32 + moves.numMoves + last.numFlips23 + last.numFlips32 == 0) break;
+  }
   return report.numFlips23 + report.numFlips32 + report.numMoves;
 }
 
