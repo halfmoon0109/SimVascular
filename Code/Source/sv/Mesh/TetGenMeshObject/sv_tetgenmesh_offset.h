@@ -797,7 +797,7 @@ struct BandRelaxation
   bool removeDegree3 = true;      // a free point on three triangles, one of them under 10 degrees, is taken out
   bool freeThinCaps = true;       // a triangle under 5 degrees keeps neither its normal nor its creases when its point moves
   double creaseDegrees = 35.0;    // the points on a band edge whose two triangles turn more than this, both lying on the level, stay where they are and the edge is not flipped: a valley cut into the level surface (Options::creaseDegrees) would otherwise be smoothed back into a zigzag; zero or less holds nothing
-  double slotSizes = 1.0;         // a band point with the level of a facing wall within this many local sizes of it is in a slot between two walls: it is smoothed toward its neighbours without being put back onto the level, so that the band roofs the groove over evenly instead of dipping into it here and there (2026-10-23); zero or less treats no point so
+  double slotSizes = 1.0;         // a band point with the level of a facing wall within this many local sizes of it is in a slot between two walls: it is smoothed toward its neighbours without being put back onto the level, so that the band roofs the groove over evenly instead of dipping into it here and there (2026-10-23); zero or less treats no point so; the roof keeps within a third of the layer spacing of its level, so that the roofs of neighbouring levels stay apart
 };
 
 /**

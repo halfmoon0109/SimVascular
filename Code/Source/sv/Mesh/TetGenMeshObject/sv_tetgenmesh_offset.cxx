@@ -6884,6 +6884,25 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
       field.Local(x, size, thickness, rim);
       const double delta = 0.05*thickness;
       const bool slot = inSlot(v, n, fraction, size);
+      if (slot)
+      {
+        // A roof may not rise or sink past a third of the way to the levels
+        // next to this one: two roofs over one slot, on neighbouring
+        // levels, would otherwise come within a hair of each other and the
+        // mesher would fill the slab between them with flat tetrahedra
+        // (the user's run of 2026-10-23, 10:37: the five flattest
+        // tetrahedra of the wall, 0.02 degrees, in one spot with all
+        // their corners on the junction shell). The move is halved toward
+        // where the point was until it keeps within the bound, or dropped.
+        const double bound = 0.35*thickness/(double)numLayers;
+        bool within = false;
+        for (int halving = 0; halving < 3 && !within; halving++)
+        {
+          if (std::fabs(field.Evaluate(x, fraction)) <= bound) { within = true; break; }
+          for (int j = 0; j < 3; j++) x[j] = 0.5*(x[j] + x0[j]);
+        }
+        if (!within) continue;
+      }
       for (int step = 0; step < 3 && !slot; step++)
       {
         const double f0 = field.Evaluate(x, fraction);
