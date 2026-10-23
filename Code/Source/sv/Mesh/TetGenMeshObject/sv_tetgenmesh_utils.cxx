@@ -5659,6 +5659,83 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
       shared.smallestThickness, shared.largestThickness, shared.numRims, shared.numCollarTriangles);
   fprintf(stdout,"  the field was sampled on %lld points (the interface and its offsets at %.2g, %.2g and %.2g of the thickness, the last no nearer than %.2g edges, each offset point %.2g of its distance off its ray); %.1f s for the field\n",
       shared.numCloudPoints, options.innerLayer, options.outerLayer, options.farLayer, options.farSpacing, options.layerJitter, shared.secondsField);
+  // The thickness table against the model, by face: the gap from each
+  // point to the wall facing it, against this wall and the facing one
+  // together. Where the gap is under the two, the offsets overlap and the
+  // solid merges the walls (the contact regions the wrap handles); under
+  // twice the two, the junction zone grows. A table from the literature
+  // need not fit the model it is put on: the user's model of 2026-10-24
+  // merged at nine places, two ACA 0.165 apart with 0.1 of wall each
+  // first.
+  if (shared.facingGap.size() == (size_t)surface->GetNumberOfPoints() && shared.facingTriangle.size() == shared.facingGap.size())
+  {
+    auto faceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
+    const vtkIdType numCells = surface->GetNumberOfCells();
+    std::vector<int> faceOfPoint((size_t)surface->GetNumberOfPoints(), -1);
+    std::vector<double> thicknessOfPoint((size_t)surface->GetNumberOfPoints(), 0.0);
+    for (vtkIdType ptId = 0; ptId < surface->GetNumberOfPoints(); ptId++)
+    {
+      thicknessOfPoint[(size_t)ptId] = (ptId < array->GetNumberOfTuples()) ? array->GetValue(ptId) : 0.0;
+    }
+    if (faceIds != nullptr && faceIds->GetNumberOfTuples() == numCells)
+    {
+      // a point on two faces counts for the thinner one, as the ramp sees it
+      std::vector<double> faceThickness;
+      for (vtkIdType cellId = 0; cellId < numCells; cellId++)
+      {
+        vtkIdType npts;
+        const vtkIdType *pts;
+        surface->GetCellPoints(cellId, npts, pts);
+        const int face = faceIds->GetValue(cellId);
+        for (vtkIdType j = 0; j < npts; j++)
+        {
+          if (faceOfPoint[(size_t)pts[j]] < 0 || face < faceOfPoint[(size_t)pts[j]]) faceOfPoint[(size_t)pts[j]] = face;
+        }
+      }
+    }
+    struct FaceGap { long long n = 0, found = 0, merging = 0, tight = 0; std::vector<double> gaps; double minGap = 1.0e30, at[3] = {0.0, 0.0, 0.0}; int facing = -1; double facingT = 0.0, t = 0.0; };
+    std::map<int, FaceGap> byFace;
+    for (vtkIdType ptId = 0; ptId < surface->GetNumberOfPoints(); ptId++)
+    {
+      FaceGap &fg = byFace[faceOfPoint[(size_t)ptId]];
+      fg.n++;
+      fg.t += thicknessOfPoint[(size_t)ptId];
+      const double gap = shared.facingGap[(size_t)ptId];
+      const long long tri = shared.facingTriangle[(size_t)ptId];
+      if (!(gap >= 0.0) || tri < 0 || tri >= numCells) continue;
+      vtkIdType npts;
+      const vtkIdType *pts;
+      surface->GetCellPoints(tri, npts, pts);
+      double facingT = 0.0;
+      for (vtkIdType j = 0; j < npts; j++) facingT += thicknessOfPoint[(size_t)pts[j]]/(double)std::max<vtkIdType>(1, npts);
+      fg.found++;
+      fg.gaps.push_back(gap);
+      const double both = thicknessOfPoint[(size_t)ptId] + facingT;
+      if (gap < both) fg.merging++;
+      if (gap < 2.0*both) fg.tight++;
+      if (gap < fg.minGap)
+      {
+        fg.minGap = gap;
+        surface->GetPoint(ptId, fg.at);
+        fg.facing = (faceIds != nullptr && faceIds->GetNumberOfTuples() == numCells) ? faceIds->GetValue(tri) : -1;
+        fg.facingT = facingT;
+      }
+    }
+    fprintf(stdout,"Wall thickness against the gap to the wall facing it, by model face (the solid merges the two walls where the gap is under their thicknesses together; the junction zone grows where it is under twice that):\n");
+    for (std::map<int, FaceGap>::iterator it = byFace.begin(); it != byFace.end(); ++it)
+    {
+      FaceGap &fg = it->second;
+      std::sort(fg.gaps.begin(), fg.gaps.end());
+      if (fg.gaps.empty())
+      {
+        fprintf(stdout,"  face %d: thickness %.3g over %lld points; no wall faces it\n", it->first, fg.n > 0 ? fg.t/(double)fg.n : 0.0, fg.n);
+        continue;
+      }
+      fprintf(stdout,"  face %d: thickness %.3g over %lld points; gap to the facing wall %.3g at the least, %.3g at the tenth percentile; %lld points (%.1f%%) merge with the facing wall, %lld (%.1f%%) within twice; the narrowest at (%.4g, %.4g, %.4g) facing face %d (thickness %.3g)%s\n",
+          it->first, fg.t/(double)fg.n, fg.n, fg.minGap, fg.gaps[fg.gaps.size()/10], fg.merging, 100.0*(double)fg.merging/(double)fg.n, fg.tight, 100.0*(double)fg.tight/(double)fg.n,
+          fg.at[0], fg.at[1], fg.at[2], fg.facing, fg.facingT, fg.merging > 0 ? " - the thickness here is more than half the gap: the walls merge" : "");
+    }
+  }
   surfaces.resize(numLevels);
   numUnresolved.resize(numLevels, 0);
   for (size_t f = 0; f < numLevels; f++)

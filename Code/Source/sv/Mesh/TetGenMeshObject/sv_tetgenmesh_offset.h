@@ -257,6 +257,8 @@ struct Report
   long long numCreaseCutsRefused = 0;    // of them, left as they were: the valley not found under the chord
   long long numCreasePointsPartial = 0;  // of the split, the point raised toward the chord so that no half turned over (2026-10-23)
   long long numLevelPointsPulledIn = 0;  // on the last level's report: point moves of the lower levels pulling their triangles from under a valley cut into the level over them (NestLevels)
+  std::vector<double> facingGap;         // per interface point: the distance to the wall facing it (the nearest interface triangle whose normal is within 55 degrees of this point's normal reversed), -1 for none; where it is under the two walls' thicknesses together the solid merges them (2026-10-24)
+  std::vector<long long> facingTriangle; // per interface point: that triangle, -1 for none
   long long numUnfolded = 0;             // edges whose two triangles lay on each other within a degree, flipped, collapsed or taken out with the spike point they stand on by the decimation's last pass
   long long numFoldedEdges = 0;          // of the result: edges whose two triangles still lie on each other within foldDegrees, which the volume mesher refuses
   double smallestFoldDegrees = 180.0;    // of the result: the smallest angle between the two triangles on an edge (180 is flat, 0 is folded)

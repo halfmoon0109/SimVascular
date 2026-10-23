@@ -2621,6 +2621,32 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
   {
     return 1;
   }
+  // The gap from each interface point to the wall facing it (the nearest
+  // interface triangle whose normal lies within 55 degrees of the point's
+  // normal reversed): where it is under the two walls' thicknesses together
+  // the offsets overlap and the solid merges the two walls, so this is what
+  // a thickness table has to be checked against, face by face (the caller
+  // knows the faces). On the user's model, 2026-10-24: nine such places,
+  // the pair of ACA first.
+  say("the gap to the wall facing each interface point");
+  {
+    const ll np = (ll)(input.points.size()/3);
+    report.facingGap.assign((size_t)np, -1.0);
+    report.facingTriangle.assign((size_t)np, -1);
+    const double cone = std::cos(55.0*M_PI/180.0);
+    const ll numInterfaceTriangles = (ll)(input.triangles.size()/3);
+    for (ll i = 0; i < np; i++)
+    {
+      const double *n = &input.normals[(size_t)3*i];
+      const double minus[3] = {-n[0], -n[1], -n[2]};
+      double q[3];
+      ll owner = -1;
+      const double gap = field.SheetTerm(&input.points[(size_t)3*i], 0.0, minus, cone, q, owner);
+      if (owner < 0 || owner >= numInterfaceTriangles || !(gap < 1.0e29)) continue;
+      report.facingGap[(size_t)i] = gap;
+      report.facingTriangle[(size_t)i] = owner;
+    }
+  }
 
   // The cloud: every field-surface point, its inner, outer and far offsets
   // along its normal, and past each collar's end the outer and far offsets
