@@ -1,0 +1,162 @@
+Reading plugin paths SV_PLUGIN_PATH environment variable...
+
+
+[Fri Oct 23 10:11:53 2026 
+2.211] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
+[2.215] OpenCASCADE module loaded.
+sv4guiDataManagerPluginActivator::start()
+sv4guiMeshingPluginActivator::start()
+[2.685] BlueBerry Workbench ready
+Expand
+Expand
+Expand
+Expand
+!33.103! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.103! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.103! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.104! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.105! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.105! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.161! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.161! WARNING: QPainter::end: Painter ended with 2 saved states
+!34.161! WARNING: QPainter::end: Painter ended with 2 saved states
+Getting sizing function Surface
+Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 4218044
+  Min / Avg / Max: 1.000 / 1.157 / 46.986
+  Aspect ratio > 10: 1, > 30: 1, > 100: 0
+  aspect ratio 46.986 at (4.27209, -25.5107, 74.2352), edges 0.122389 0.160426 0.282619
+Remeshing surface with MMG...
+  -- MMGS, Release 5.3.8 (Apr. 10, 2017) 
+     Copyright (c) IMB-LJLL, 2004-
+     Jul  6 2026 02:09:01
+
+  -- MMGS: INPUT DATA
+  --  INPUT DATA COMPLETED.     0.000s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   MODULE MMGS: IMB-LJLL : 5.3.8 (Apr. 10, 2017)
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- PHASE 1 : ANALYSIS
+
+  -- MESH QUALITY   4218044
+     BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
+  -- PHASE 1 COMPLETED.     3.364s
+
+  -- PHASE 2 : ISOTROPIC MESHING
+         3479 splitted,  1857468 collapsed,    93845 swapped, 5 iter.
+
+  -- GRADATION : 1.300000
+          108 splitted,        4 collapsed,       52 swapped, 3 iter.
+        32866 splitted,   106774 collapsed,    25987 swapped,  4129506 moved, 2 iter. 
+  -- PHASE 2 COMPLETED.     13.050s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   END OF MODULE MMGS: IMB-LJLL 
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- MESH QUALITY   359700
+     BEST   1.000000  AVRG.   0.972476  WRST.   0.337035 (296378)
+
+  -- MESH PACKED UP
+     NUMBER OF VERTICES     179844   CORNERS       10
+     NUMBER OF TRIANGLES    359700
+     NUMBER OF EDGES          1658   RIDGES      1658
+
+   MMGSLIB: ELAPSED TIME  16.480s
+Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 356293
+  Min / Avg / Max: 1.000 / 1.209 / 5.750
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+Checking surface mesh
+Regions: 1
+Number of Free Edges on Surface: 481
+Number of Non-Manifold Edges on Surface: 0
+[GenerateBoundaryLayerMesh] 
+[GenerateBoundaryLayerMesh] ========== cvTetGenMeshObject::GenerateBoundaryLayerMesh ==========
+[GenerateBoundaryLayerMesh] markerListName: CellEntityIds
+Surface triangle quality (fluid/wall interface surface), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 356293
+  Min / Avg / Max: 1.000 / 1.209 / 5.750
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+[GenerateBoundaryLayerMesh] negateWarpVectors: 1
+[GenerateBoundaryLayerMesh] useConstantThickness: 0
+[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals.
+Fluid boundary layer options in effect: MaxEdgeSize 0.1953, BLThicknessFactor 0.8, constant thickness 0 (total layer thickness 0.15624), NumSubLayers 3, SubLayerRatio 0.5
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [fluid boundary layer, inward]:
+  concave points: 178318 of 178367; points with t/R >= 1 / 2 / 4: 0/0/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  no point requests a thickness above its concave radius of curvature
+0 tangle triangles found
+Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: 0/0/0 of 178367
+Wall faces refined to the wall thickness (ratio 1: a face's triangles are split in four until their mean edge is under 1 times its thickness, at most 2 times; only the fluid cells on the split edges, the first boundary layer sublayer, are cut):
+  the boundary layer mesh: 3206637 tetrahedra, 715472 triangles of which 356293 on the wall (178367 wall points)
+  face 3: 12099 triangles, mean edge 0.2885, thickness 0.1, edge/thickness 2.89 -> 1 to 2 level(s) by triangle
+  face 4: 27168 triangles, mean edge 0.6529, thickness 0.85, edge/thickness 0.768 -> 0 to 1 level(s) by triangle
+  face 5: 12386 triangles, mean edge 0.2884, thickness 0.1, edge/thickness 2.88 -> 1 to 2 level(s) by triangle
+  face 6: 15758 triangles, mean edge 0.5724, thickness 0.52, edge/thickness 1.1 -> 0 to 1 level(s) by triangle
+  face 7: 24217 triangles, mean edge 0.4483, thickness 0.44, edge/thickness 1.02 -> 0 to 1 level(s) by triangle
+  face 8: 11119 triangles, mean edge 1.77, thickness 1.7, edge/thickness 1.04 -> 0 to 1 level(s) by triangle
+  face 9: 28168 triangles, mean edge 0.4486, thickness 0.44, edge/thickness 1.02 -> 0 to 1 level(s) by triangle
+  face 10: 8512 triangles, mean edge 0.4077, thickness 0.6, edge/thickness 0.68 -> 0 to 0 level(s) by triangle
+  face 11: 17495 triangles, mean edge 0.1643, thickness 0.25, edge/thickness 0.657 -> 0 to 0 level(s) by triangle
+  face 13: 21417 triangles, mean edge 0.2502, thickness 0.2, edge/thickness 1.25 -> 0 to 1 level(s) by triangle
+  face 14: 22867 triangles, mean edge 0.1643, thickness 0.25, edge/thickness 0.657 -> 0 to 0 level(s) by triangle
+  face 15: 7109 triangles, mean edge 0.8936, thickness 1.2, edge/thickness 0.745 -> 0 to 1 level(s) by triangle
+  face 16: 7180 triangles, mean edge 0.7366, thickness 0.93, edge/thickness 0.792 -> 0 to 1 level(s) by triangle
+  face 17: 16329 triangles, mean edge 0.5742, thickness 0.52, edge/thickness 1.1 -> 0 to 1 level(s) by triangle
+  face 18: 43230 triangles, mean edge 0.1708, thickness 0.18, edge/thickness 0.949 -> 0 to 1 level(s) by triangle
+  face 19: 21477 triangles, mean edge 0.6546, thickness 0.85, edge/thickness 0.77 -> 0 to 1 level(s) by triangle
+  face 23: 7213 triangles, mean edge 0.4737, thickness 0.27, edge/thickness 1.75 -> 0 to 2 level(s) by triangle
+  face 25: 9727 triangles, mean edge 0.5718, thickness 0.25, edge/thickness 2.29 -> 1 to 2 level(s) by triangle
+  face 26: 14036 triangles, mean edge 0.4085, thickness 0.6, edge/thickness 0.681 -> 0 to 0 level(s) by triangle
+  face 28: 6222 triangles, mean edge 0.7368, thickness 0.93, edge/thickness 0.792 -> 0 to 1 level(s) by triangle
+  face 29: 4907 triangles, mean edge 0.1721, thickness 0.14, edge/thickness 1.23 -> 0 to 1 level(s) by triangle
+  face 30: 1922 triangles, mean edge 0.0975, thickness 0.065, edge/thickness 1.5 -> 0 to 2 level(s) by triangle
+  face 31: 10733 triangles, mean edge 0.5763, thickness 0.25, edge/thickness 2.31 -> 1 to 2 level(s) by triangle
+  face 32: 2219 triangles, mean edge 0.1732, thickness 0.11, edge/thickness 1.57 -> 1 to 2 level(s) by triangle
+  face 34: 1842 triangles, mean edge 0.102, thickness 0.065, edge/thickness 1.57 -> 1 to 2 level(s) by triangle
+  face 36: 941 triangles, mean edge 0.1721, thickness 0.12, edge/thickness 1.43 -> 1 to 1 level(s) by triangle
+  65 wall triangles raised so that no two on one edge differ by more than one level; 530505 edges bisected over 2 level(s) (264761, 265744 per level), 530505 points added; tetrahedra 3206637 -> 4532503, triangles 715472 -> 1776482
+  526072 wall midpoints moved onto the model's wall faces (mean 0.00608, the longest 0.11); 1 left where they were as farther off than a quarter of their edge, 4432 as the move would fold a boundary layer tetrahedron
+  the wall surface for the solid: 1416998 triangles on 708872 points (was 356293 on 178367)
+WallRefineRatio 1: the wall faces were split (above) and the solid wall is built on the split surface
+Surface triangle quality (refined fluid/wall interface surface), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 1416998
+  Min / Avg / Max: 1.000 / 1.807 / 8.538
+  Aspect ratio > 10: 0, > 30: 0, > 100: 0
+Wall mesh options in effect: WallThickness 0.5, CurvatureFactor 0, SmoothingIterations 0, NumberOfWallLayers 3
+  local wall thickness by model face (others 0.5): 1:1.7 2:1.7 3:0.1 4:0.85 5:0.1 6:0.52 7:0.44 8:1.7 9:0.44 10:0.6 11:0.25 12:0.25 13:0.2 14:0.25 15:1.2 16:0.93 17:0.52 18:0.18 19:0.85 20:0.93 21:0.93 22:0.6 23:0.27 24:0.6 25:0.25 26:0.6 27:0.25 28:0.93 29:0.14 30:0.065 31:0.25 32:0.11 33:0.1 34:0.065 35:0.1 36:0.12 37:0.2 38:0.065 39:0.2 40:0.065
+  CurvatureFactor and SmoothingIterations are wedge-extrusion options: the TetGen fill ignores them (its ramp toward thicker neighbours, slope 0.5, grades the thickness)
+  the wall is filled with TetGen tetrahedra in 3 layer(s) through the thickness: 2 offset surface(s) at fractions of the thickness go into the shell as facets the mesher keeps, so each layer is one tetrahedron thick; SmoothingIterations and CurvatureFactor act on the thickness field only
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [solid wall, outward]:
+  concave points: 307522 of 708872; points with t/R >= 1 / 2 / 4: 270/2/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  concave regions with t/R >= 1: 24 in total (separated by 8.012), worst 8 shown:
+    [1] t/R 2.2 (t 0.725, R_typical 0.32901, R_smallest 0.16183) at (-38.138, -27.592, -95.672), 29 points
+    [2] t/R 2.15 (t 0.25, R_typical 0.11606, R_smallest 0.074042) at (5.0457, -21.008, 21.53), 25 points
+    [3] t/R 1.84 (t 1.275, R_typical 0.69381, R_smallest 0.58796) at (12.01, -22.689, -172.04), 21 points
+    [4] t/R 1.81 (t 1.45, R_typical 0.80033, R_smallest 0.57404) at (-0.41384, -25.795, -177.07), 24 points
+    [5] t/R 1.77 (t 0.725, R_typical 0.41068, R_smallest 0.2588) at (22.347, -43.004, -90.698), 22 points
+    [6] t/R 1.76 (t 0.29, R_typical 0.16467, R_smallest 0.13166) at (8.2631, -37.48, 66.132), 7 points
+    [7] t/R 1.76 (t 0.31, R_typical 0.17626, R_smallest 0.063871) at (-9.3323, -35.009, 65.843), 12 points
+    [8] t/R 1.72 (t 1.025, R_typical 0.59485, R_smallest 0.37394) at (-31.535, -36.262, -149.84), 12 points
+    ... 118 further points with t/R >= 1 in the remaining 16 regions
+Wall thickness reduction (final vs requested): points below 90%/50%/25%: 0/0/0 of 708872
+  wrote wall_diagnostics.vtp in /work
+Thickness ramp toward thicker neighbours (fall of at most 0.5 per unit distance) [requested wall thickness]: raised 3991 of 708872 points; largest raise 0.42089 at (5.0853, -18.297, -171.61) (0.85 -> 1.2709)
+Wall outer surface and its 2 layer surface(s) as offsets of the interface at 0.333 0.667 1 of the thickness, contoured from one distance field so that they are nested:
+  708872 interface points and 1416998 triangles
+  offset surface: the distance field: the interface, its collars and their search grid
+  offset surface: the point cloud and the field on its outer layer
+  offset surface: the field on the cloud at this fraction of the thickness (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the Delaunay tetrahedralization of the cloud (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: marching tetrahedra over the cloud (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the decimation of the contour to the interface's size (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the field on the cloud at this fraction of the thickness (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: the Delaunay tetrahedralization of the cloud (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: marching tetrahedra over the cloud (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: the decimation of the contour to the interface's size (surface 2 of 3, at 0.667 of the thickness)
