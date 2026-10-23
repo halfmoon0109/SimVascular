@@ -678,15 +678,24 @@ void BoundaryChains(const std::vector<long long> &triangles, std::vector<std::ve
  * triangles: both run the same way, and the strip takes each of its edges
  * the way chain A gives them (a_i -> a_i+1) and the edges of chain B
  * backwards (b_j+1 -> b_j), so that a surface traversing A's edges backwards
- * and one traversing B's edges forwards are wound consistently with it. At
- * each step the shorter of the two possible diagonals is taken. Closed
- * chains are started at the nearest pair of points and go round once; open
- * chains go from their first points to their last.
+ * and one traversing B's edges forwards are wound consistently with it. The
+ * strip is the cheapest sequence of steps over all: a step's cost is first
+ * the faults of its triangle - it passes through one of the obstacle
+ * triangles (over the same point array), lies flat on one within a degree
+ * across a shared edge, or has no area - and then the length of its
+ * diagonal (2026-10-23; before, the shorter diagonal was taken at each step
+ * on its own, which fanned a jagged chain from one loop point through the
+ * piece beside it). Closed chains are started at the nearest pair of points
+ * and go round once; open chains go from their first points to their last.
+ * A pair whose grid of steps is over four million falls back to the greedy
+ * zip.
+ * @param numFaults The faults of the strip's triangles as judged above, if
+ * wanted.
  * @return 0 on success, 1 with error set otherwise.
  */
 int ZipChains(const std::vector<double> &points, const std::vector<long long> &chainA,
     const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error,
-    double *agreement = nullptr);
+    double *agreement = nullptr, const std::vector<long long> *obstacles = nullptr, long long *numFaults = nullptr);
 
 /**
  * @brief The closed surface around the junction zone's volume (section 8
@@ -708,6 +717,7 @@ struct ZipReport
   double farFraction = 0.0;             // of the loop's points, those farther than two loop edges from the chain: above a third, the chain is not this loop's but runs along part of it (two vessels against each other: the merged piece's chains run along the upper and the lower edges of both vessels' loops)
   double loopRadius = 0.0;              // the vessel's radius at the loop, as 1 over the median over the loop's points of the largest normal curvature of their edges; for the caller to wrap the region around the vessel (pi times it)
   double agreement = 0.0;               // of the two chains' directions (ZipChains), positive when they run the same way
+  long long faultsAtZip = 0;            // the zipper's own count of its strip triangles passing through, lying on or degenerate against the shell near the chain (before the relaxation)
   long long stripTriangles = 0;
   long long crossingTriangles = 0;      // of the strip's, passing through another shell triangle
   long long foldedEdges = 0;            // edges of the strip's triangles whose two triangles lie on each other

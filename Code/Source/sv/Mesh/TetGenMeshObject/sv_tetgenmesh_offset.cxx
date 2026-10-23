@@ -6216,11 +6216,22 @@ void BoundaryChains(const std::vector<long long> &triangles, std::vector<std::ve
 //-----------
 // ZipChains
 //-----------
+// See the header. The strip is the cheapest monotone path through the
+// grid of (i, j) pairs: each step takes a's edge forwards (a_i, a_i+1, b_j)
+// or b's edge backwards (a_i, b_j+1, b_j), the cost of a step being first
+// the faults of its triangle (it passes through an obstacle triangle, lies
+// flat on one across a shared edge, or has no area) and then the length of
+// its diagonal. The greedy zipper (the shorter diagonal at each step) was
+// the same path without the look-ahead: on a jagged chain it fanned four
+// chain points from one loop point and put a strip triangle through the
+// piece's own triangle beside the chain (the user's model, 2026-10-23, at
+// the aortic outlet).
 int ZipChains(const std::vector<double> &points, const std::vector<long long> &chainA,
     const std::vector<long long> &chainB, bool closed, std::vector<long long> &triangles, std::string &error,
-    double *agreementOut)
+    double *agreementOut, const std::vector<long long> *obstacles, long long *numFaultsOut)
 {
   if (agreementOut != nullptr) *agreementOut = 0.0;
+  if (numFaultsOut != nullptr) *numFaultsOut = 0;
   const size_t nA = chainA.size(), nB = chainB.size();
   if (nA < 2 || nB < 2)
   {
@@ -6241,7 +6252,6 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
     }
   }
   const size_t stepsA = closed ? nA : nA - 1, stepsB = closed ? nB : nB - 1;
-  size_t i = 0, j = 0;
   auto A = [&](size_t k) { return chainA[(startA + k)%nA]; };
   auto B = [&](size_t k) { return chainB[(startB + k)%nB]; };
   // Both chains must run the same way, or the strip twists: each step of A
@@ -6270,25 +6280,143 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
       return 1;
     }
   }
-  while (i < stepsA || j < stepsB)
+  // The obstacles on a grid of cells a few chain edges across, for the
+  // faults of a candidate triangle.
+  const bool withObstacles = obstacles != nullptr && obstacles->size() >= 3;
+  double cell = 0.0;
+  std::map<std::array<ll, 3>, std::vector<ll> > grid;
+  if (withObstacles)
   {
-    bool advanceA;
-    if (i >= stepsA) advanceA = false;
-    else if (j >= stepsB) advanceA = true;
-    else advanceA = dist(A(i + 1), B(j)) <= dist(A(i), B(j + 1));
-    if (advanceA)
+    double meanEdge = 0.0;
+    for (size_t k = 0; k < stepsA; k++) meanEdge += dist(A(k), A(k + 1))/(double)stepsA;
+    cell = std::max(2.0*meanEdge, 1.0e-9);
+    for (size_t o = 0; o + 2 < obstacles->size(); o += 3)
     {
-      // (a_i, a_i+1, b_j): A's edge forwards
-      triangles.push_back(A(i)); triangles.push_back(A(i + 1)); triangles.push_back(B(j));
-      i++;
-    }
-    else
-    {
-      // (a_i, b_j+1, b_j): B's edge backwards
-      triangles.push_back(A(i)); triangles.push_back(B(j + 1)); triangles.push_back(B(j));
-      j++;
+      double lo[3], hi[3];
+      for (int j = 0; j < 3; j++) { lo[j] = std::numeric_limits<double>::max(); hi[j] = -std::numeric_limits<double>::max(); }
+      for (int m = 0; m < 3; m++)
+      {
+        const double *x = at((*obstacles)[o + m]);
+        for (int j = 0; j < 3; j++) { lo[j] = std::min(lo[j], x[j]); hi[j] = std::max(hi[j], x[j]); }
+      }
+      std::array<ll, 3> c0 = {(ll)std::floor(lo[0]/cell), (ll)std::floor(lo[1]/cell), (ll)std::floor(lo[2]/cell)};
+      std::array<ll, 3> c1 = {(ll)std::floor(hi[0]/cell), (ll)std::floor(hi[1]/cell), (ll)std::floor(hi[2]/cell)};
+      for (ll x = c0[0]; x <= c1[0]; x++) for (ll y = c0[1]; y <= c1[1]; y++) for (ll z = c0[2]; z <= c1[2]; z++)
+      {
+        std::array<ll, 3> c = {x, y, z};
+        grid[c].push_back((ll)(o/3));
+      }
     }
   }
+  const double foldCos = std::cos(1.0*M_PI/180.0);
+  auto faults = [&](ll a, ll b, ll c) -> int
+  {
+    int bad = 0;
+    double u[3], v[3], n[3];
+    Sub(at(b), at(a), u);
+    Sub(at(c), at(a), v);
+    Cross(u, v, n);
+    const double area2 = Norm(n);
+    const double longest = std::max(dist(a, b), std::max(dist(b, c), dist(c, a)));
+    if (!(area2 > 1.0e-10*longest*longest)) bad++;   // no area
+    if (!withObstacles || !(area2 > 0.0)) return bad;
+    const ll tri[3] = {a, b, c};
+    double lo[3], hi[3];
+    for (int j = 0; j < 3; j++) { lo[j] = std::min(at(a)[j], std::min(at(b)[j], at(c)[j])); hi[j] = std::max(at(a)[j], std::max(at(b)[j], at(c)[j])); }
+    std::array<ll, 3> c0 = {(ll)std::floor(lo[0]/cell), (ll)std::floor(lo[1]/cell), (ll)std::floor(lo[2]/cell)};
+    std::array<ll, 3> c1 = {(ll)std::floor(hi[0]/cell), (ll)std::floor(hi[1]/cell), (ll)std::floor(hi[2]/cell)};
+    std::vector<ll> seen;
+    for (ll x = c0[0]; x <= c1[0]; x++) for (ll y = c0[1]; y <= c1[1]; y++) for (ll z = c0[2]; z <= c1[2]; z++)
+    {
+      std::array<ll, 3> key = {x, y, z};
+      std::map<std::array<ll, 3>, std::vector<ll> >::const_iterator it = grid.find(key);
+      if (it == grid.end()) continue;
+      for (size_t m = 0; m < it->second.size(); m++)
+      {
+        const ll o = it->second[m];
+        if (std::find(seen.begin(), seen.end(), o) != seen.end()) continue;
+        seen.push_back(o);
+        const ll *ob = &(*obstacles)[(size_t)3*o];
+        int shared = 0;
+        ll sp[2], far = -1;
+        for (int i = 0; i < 3; i++) { bool s2 = false; for (int j = 0; j < 3; j++) if (ob[i] == tri[j]) s2 = true; if (s2) { if (shared < 2) sp[shared] = ob[i]; shared++; } else far = ob[i]; }
+        if (shared == 3) { bad++; continue; }   // the same triangle twice
+        if (shared == 2)
+        {
+          // lying flat on the obstacle across the shared edge: the far corners
+          // on the same side of the edge and within a degree of one plane
+          ll myFar = -1;
+          for (int j = 0; j < 3; j++) if (tri[j] != sp[0] && tri[j] != sp[1]) myFar = tri[j];
+          if (myFar < 0 || far < 0) continue;
+          double e[3], pm[3], po[3], cm[3], co[3];
+          Sub(at(sp[1]), at(sp[0]), e);
+          Sub(at(myFar), at(sp[0]), pm);
+          Sub(at(far), at(sp[0]), po);
+          Cross(e, pm, cm);
+          Cross(e, po, co);
+          const double lm = Norm(cm), lo2 = Norm(co);
+          if (lm > 0.0 && lo2 > 0.0 && Dot(cm, co) > foldCos*lm*lo2) bad++;
+          continue;
+        }
+        if (svenvelope::TrianglesCross(points, tri, ob)) bad++;
+      }
+    }
+    return bad;
+  };
+  // the cheapest monotone path: faults first, then the diagonals' length
+  const size_t nI = stepsA + 1, nJ = stepsB + 1;
+  const size_t maxStates = (size_t)1 << 22;
+  if (nI*nJ > maxStates)
+  {
+    // too long a pair for the grid: the greedy zip
+    size_t i = 0, j = 0;
+    while (i < stepsA || j < stepsB)
+    {
+      bool advanceA;
+      if (i >= stepsA) advanceA = false;
+      else if (j >= stepsB) advanceA = true;
+      else advanceA = dist(A(i + 1), B(j)) <= dist(A(i), B(j + 1));
+      if (advanceA) { triangles.push_back(A(i)); triangles.push_back(A(i + 1)); triangles.push_back(B(j)); i++; }
+      else { triangles.push_back(A(i)); triangles.push_back(B(j + 1)); triangles.push_back(B(j)); j++; }
+    }
+    return 0;
+  }
+  std::vector<double> length(nI*nJ, std::numeric_limits<double>::max());
+  std::vector<int> bad(nI*nJ, std::numeric_limits<int>::max());
+  std::vector<unsigned char> from(nI*nJ, 0);   // 1: from (i-1, j) by a's edge; 2: from (i, j-1) by b's edge
+  length[0] = 0.0;
+  bad[0] = 0;
+  auto relax = [&](size_t fromIdx, size_t toIdx, int stepBad, double stepLength, unsigned char how)
+  {
+    const int b2 = bad[fromIdx] + stepBad;
+    const double l2 = length[fromIdx] + stepLength;
+    if (b2 < bad[toIdx] || (b2 == bad[toIdx] && l2 < length[toIdx])) { bad[toIdx] = b2; length[toIdx] = l2; from[toIdx] = how; }
+  };
+  for (size_t i = 0; i < nI; i++)
+  {
+    for (size_t j = 0; j < nJ; j++)
+    {
+      const size_t idx = i*nJ + j;
+      if (bad[idx] == std::numeric_limits<int>::max()) continue;
+      if (i + 1 < nI) relax(idx, (i + 1)*nJ + j, faults(A(i), A(i + 1), B(j)), dist(A(i + 1), B(j)), 1);
+      if (j + 1 < nJ) relax(idx, i*nJ + j + 1, faults(A(i), B(j + 1), B(j)), dist(A(i), B(j + 1)), 2);
+    }
+  }
+  // the path read back
+  std::vector<ll> back;
+  size_t i = stepsA, j = stepsB;
+  while (i > 0 || j > 0)
+  {
+    const unsigned char how = from[i*nJ + j];
+    if (how == 1) { i--; back.push_back(A(i)); back.push_back(A(i + 1)); back.push_back(B(j)); }
+    else if (how == 2) { j--; back.push_back(A(i)); back.push_back(B(j + 1)); back.push_back(B(j)); }
+    else { error = "the zip lost its way"; return 1; }
+  }
+  for (size_t m = back.size(); m >= 3; m -= 3)
+  {
+    triangles.push_back(back[m - 3]); triangles.push_back(back[m - 2]); triangles.push_back(back[m - 1]);
+  }
+  if (numFaultsOut != nullptr) *numFaultsOut = bad[stepsA*nJ + stepsB];
   return 0;
 }
 
@@ -8104,6 +8232,39 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
       out.failedTriangles.erase(std::unique(out.failedTriangles.begin(), out.failedTriangles.end()), out.failedTriangles.end());
       return 1;
     }
+    // the shell's triangles within two rings of the loops and chains of this
+    // level, which no strip triangle may pass through or lie on: the piece
+    // beside its chain, the prism walls at the loop, the strips below
+    std::vector<ll> obstacles;
+    {
+      std::vector<unsigned char> near(out.points.size()/3, 0);
+      for (size_t a = 0; a < loops.size(); a++)
+      {
+        for (size_t m = 0; m < lifted[a].size(); m++) near[(size_t)lifted[a][m]] = 1;
+        if (chainOfLoop[a] < 0) continue;
+        const std::vector<ll> &chain = chains[(size_t)chainOfLoop[a]];
+        for (size_t q = 0; q < chain.size(); q++) near[(size_t)(chain[q] + base)] = 1;
+      }
+      for (int ring = 0; ring < 2; ring++)
+      {
+        std::vector<unsigned char> wider(near);
+        for (size_t i = 0; i + 2 < out.triangles.size(); i += 3)
+        {
+          if (near[(size_t)out.triangles[i]] || near[(size_t)out.triangles[i + 1]] || near[(size_t)out.triangles[i + 2]])
+          {
+            for (int j = 0; j < 3; j++) wider[(size_t)out.triangles[i + j]] = 1;
+          }
+        }
+        near.swap(wider);
+      }
+      for (size_t i = 0; i + 2 < out.triangles.size(); i += 3)
+      {
+        if (near[(size_t)out.triangles[i]] || near[(size_t)out.triangles[i + 1]] || near[(size_t)out.triangles[i + 2]])
+        {
+          for (int j = 0; j < 3; j++) obstacles.push_back(out.triangles[i + j]);
+        }
+      }
+    }
     for (size_t a = 0; a < loops.size(); a++)
     {
       const std::vector<ll> &A = lifted[a];
@@ -8129,7 +8290,7 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
         zip.farFraction = A.empty() ? 0.0 : (double)far/(double)A.size();
       }
       for (size_t m = 0; m < A.size(); m++) for (int j = 0; j < 3; j++) zip.centre[j] += out.points[(size_t)3*A[m] + j]/(double)A.size();
-      if (ZipChains(out.points, A, B, true, strip, error, &zip.agreement) != 0)
+      if (ZipChains(out.points, A, B, true, strip, error, &zip.agreement, &obstacles, &zip.faultsAtZip) != 0)
       {
         double c[3] = {0.0, 0.0, 0.0};
         for (size_t m = 0; m < A.size(); m++) for (int j = 0; j < 3; j++) c[j] += out.points[(size_t)3*A[m] + j]/(double)A.size();

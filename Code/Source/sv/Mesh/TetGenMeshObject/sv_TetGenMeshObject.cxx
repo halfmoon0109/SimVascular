@@ -3273,9 +3273,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
               zips.size(), numStripsCrossing, (long long)junction.numCrossingTriangles, (long long)junction.numFoldedEdges, numStripTriangles, numThin);
           for (size_t z = 0; z < zips.size() && z < 5 && zips[z].crossingTriangles > 0; z++)
           {
-            fprintf(stdout,"      layer %d: a loop of %lld points around (%.4g, %.4g, %.4g) zipped to a chain of %lld (%.3g apart on average, direction agreement %.3g): %lld of its %lld strip triangles cross\n",
+            fprintf(stdout,"      layer %d: a loop of %lld points around (%.4g, %.4g, %.4g) zipped to a chain of %lld (%.3g apart on average, direction agreement %.3g): %lld of its %lld strip triangles cross (the zipper itself counted %lld faulty against the shell near the chain)\n",
                 zips[z].level, (long long)zips[z].loopPoints, zips[z].centre[0], zips[z].centre[1], zips[z].centre[2], (long long)zips[z].chainPoints,
-                zips[z].meanDistance, zips[z].agreement, (long long)zips[z].crossingTriangles, (long long)zips[z].stripTriangles);
+                zips[z].meanDistance, zips[z].agreement, (long long)zips[z].crossingTriangles, (long long)zips[z].stripTriangles, (long long)zips[z].faultsAtZip);
           }
         }
         // The shell as a whole, as the whole wall's shell is checked below:

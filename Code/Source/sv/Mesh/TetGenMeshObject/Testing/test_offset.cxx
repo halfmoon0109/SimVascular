@@ -863,6 +863,39 @@ static void TestBubbles()
 // the cap plane, the apex crossed the edge, and the trimmed surface had a
 // folded triangle the shell check counted as a crossing. A patch of a wall
 // (the plane y = 0) with such a cap under the plane z = 0.5.
+// The zipper keeps its strip off the shell near the chains: two chains a
+// unit apart, one point of the second lifted, and a small triangle lying
+// where the greedy zip's tilted strip triangle would pass through it.
+static void TestZipObstacle()
+{
+  printf("Test: the zipper takes the strip that passes through no obstacle\n");
+  std::vector<double> pts;
+  const double P[][3] = {{0,0,0}, {1,0,0}, {2,0,0}, {3,0,0}, {0,1,0}, {1,1,0}, {2,1,0.6}, {3,1,0}, {1.5,0.75,0.2}, {1.6,0.75,0.2}, {1.55,0.85,0.2}};
+  for (int i = 0; i < 11; i++) for (int k = 0; k < 3; k++) pts.push_back(P[i][k]);
+  std::vector<ll> A = {0, 1, 2, 3}, B = {4, 5, 6, 7}, obstacle = {8, 9, 10};
+  auto crossings = [&](const std::vector<ll> &strip) {
+    std::vector<ll> all(strip); all.insert(all.end(), obstacle.begin(), obstacle.end());
+    std::vector<unsigned char> cr; double at[3];
+    return svenvelope::CountCrossingTriangles(pts, all, cr, at); };
+  auto edgesOk = [&](const std::vector<ll> &strip) {
+    // every edge of A forwards and of B backwards exactly once
+    std::map<std::pair<ll, ll>, int> use;
+    for (size_t i = 0; i + 2 < strip.size(); i += 3) for (int j = 0; j < 3; j++) use[std::make_pair(strip[i + j], strip[i + (j + 1)%3])]++;
+    bool ok = true;
+    for (size_t k = 0; k + 1 < A.size(); k++) if (use[std::make_pair(A[k], A[k + 1])] != 1) ok = false;
+    for (size_t k = 0; k + 1 < B.size(); k++) if (use[std::make_pair(B[k + 1], B[k])] != 1) ok = false;
+    return ok; };
+  std::vector<ll> plain, avoiding; std::string err; double agreement = 0.0; ll faults = -1;
+  Check(svoffset::ZipChains(pts, A, B, false, plain, err) == 0, "the chains zip without obstacles");
+  Check(svoffset::ZipChains(pts, A, B, false, avoiding, err, &agreement, &obstacle, &faults) == 0, "the chains zip with the obstacle given");
+  const ll crossPlain = crossings(plain), crossAvoiding = crossings(avoiding);
+  printf("  without obstacles: %zu strip triangles, %lld crossing the obstacle; with it: %zu triangles, %lld crossing, %lld faults by the zipper's count\n",
+      plain.size()/3, crossPlain, avoiding.size()/3, crossAvoiding, faults);
+  Check(edgesOk(plain) && edgesOk(avoiding), "both strips take every chain edge once, A's forwards and B's backwards");
+  Check(crossPlain > 0, "the strip that minds no obstacle passes through it (the case tests something)");
+  Check(crossAvoiding == 0 && faults == 0, "the strip that minds the obstacle passes through nothing");
+}
+
 static void TestTrimFlatCap()
 {
   printf("Test: the trim flips a flat cap at the rim before its snap can fold it\n");
@@ -1026,6 +1059,7 @@ int main()
   TestThinTube();
   TestSeptum();
   TestNeighbouringEnds();
+  TestZipObstacle();
   TestTrimFlatCap();
   TestLayers();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
