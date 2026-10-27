@@ -523,3 +523,18 @@ Assessment: POOR (consider adjusting the mesh size options)
 !2760.345! WARNING: QPainter::end: Painter ended with 2 saved states
 !2760.345! WARNING: QPainter::end: Painter ended with 2 saved states
 !2760.345! WARNING: QPainter::end: Painter ended with 2 saved states
+!2810.459! WARNING: QPainter::end: Painter ended with 2 saved states
+!2810.460! WARNING: QPainter::end: Painter ended with 2 saved states
+!2810.460! WARNING: QPainter::end: Painter ended with 2 saved states
+!2810.599! WARNING: QPainter::end: Painter ended with 2 saved states
+!2810.599! WARNING: QPainter::end: Painter ended with 2 saved states
+!2810.599! WARNING: QPainter::end: Painter ended with 2 saved states
+!2811.835! WARNING: QPainter::end: Painter ended with 2 saved states
+!2811.835! WARNING: QPainter::end: Painter ended with 2 saved states
+!2811.835! WARNING: QPainter::end: Painter ended with 2 saved states
+!2820.059! WARNING: QPainter::end: Painter ended with 2 saved states
+!2820.060! WARNING: QPainter::end: Painter ended with 2 saved states
+!2820.060! WARNING: QPainter::end: Painter ended with 2 saved states
+[2850.889] Closing workbench...
+!2851.828! WARNING: Empty filename passed to function
+[2851.897] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
