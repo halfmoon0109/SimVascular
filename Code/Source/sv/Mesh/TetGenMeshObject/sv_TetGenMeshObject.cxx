@@ -3741,7 +3741,15 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       bandNames.push_back("the mesher's own");
       bandEnds.push_back(wallmesh_->GetNumberOfPoints());
       bandNames.push_back("the prism layers");
-      TGenUtils_ReportWallFillQuality(wallmesh_, bandEnds, bandNames, numZoneTets, "the junction zones", "the prism layers");
+      std::vector<double> worstCentroids, worstAngles;
+      TGenUtils_ReportWallFillQuality(wallmesh_, bandEnds, bandNames, numZoneTets, "the junction zones", "the prism layers", &worstCentroids, &worstAngles);
+      // The junction shell around the flattest tetrahedra, for a look at
+      // what the shell is there (the run of 2026-10-27: five tetrahedra
+      // under 0.04 degrees in two places, every corner on the shell).
+      if (!worstCentroids.empty() && hybridWall.shellPolyData != nullptr)
+      {
+        TGenUtils_WriteShellAroundPlaces(hybridWall.shellPolyData, worstCentroids, worstAngles, 3.0, "wall_fill_worst_shell.vtp");
+      }
     }
     else
     {

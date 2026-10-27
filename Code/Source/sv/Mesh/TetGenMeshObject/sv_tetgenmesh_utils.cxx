@@ -1772,8 +1772,10 @@ int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionId,double size)
  */
 int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector<vtkIdType> &bandEnds,
     const std::vector<std::string> &bandNames, vtkIdType numFirstCells, const char *firstName,
-    const char *secondName)
+    const char *secondName, std::vector<double> *worstCentroids, std::vector<double> *worstAngles)
 {
+  if (worstCentroids != nullptr) worstCentroids->clear();
+  if (worstAngles != nullptr) worstAngles->clear();
   if (wall == nullptr || wall->GetNumberOfCells() == 0)
   {
     fprintf(stderr,"Cannot compute the quality of an empty wall mesh\n");
@@ -1914,6 +1916,8 @@ int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector
     int low, high, numDistinct;
     std::string pattern = patternOf(worst[i].second, low, high, numDistinct);
     fprintf(stdout,"  dihedral angle %.3f degrees at (%.4g, %.4g, %.4g), corners on %s\n", worst[i].first, centroid[0], centroid[1], centroid[2], pattern.c_str());
+    if (worstCentroids != nullptr) worstCentroids->insert(worstCentroids->end(), centroid, centroid + 3);
+    if (worstAngles != nullptr) worstAngles->push_back(worst[i].first);
   }
   if (numUnder10 > 0)
   {
@@ -7417,6 +7421,136 @@ int TGenUtils_DescribeSurfaceCrossings(vtkPolyData *surface, vtkPolyData *interf
     fprintf(stdout,"  wrote %s: the %zu interface triangles within reach of the crossings, with their thickness and normals\n",
         name.c_str(), cells.size());
   }
+  return SV_OK;
+}
+
+// ---------------------------------
+// TGenUtils_WriteShellAroundPlaces
+// ---------------------------------
+int TGenUtils_WriteShellAroundPlaces(vtkPolyData *shell, const std::vector<double> &places,
+    const std::vector<double> &values, double reachEdges, const char *name)
+{
+  if (shell == nullptr || name == nullptr || places.size() < 3)
+  {
+    return SV_ERROR;
+  }
+  shell->BuildCells();
+  const vtkIdType numCells = shell->GetNumberOfCells();
+  if (numCells == 0)
+  {
+    return SV_ERROR;
+  }
+  // the triangles' centroids and mean edges
+  std::vector<double> centroids((size_t)3*numCells, 0.0), meanEdge((size_t)numCells, 0.0);
+  std::vector<std::vector<vtkIdType> > incident((size_t)shell->GetNumberOfPoints());
+  for (vtkIdType cellId = 0; cellId < numCells; cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    shell->GetCellPoints(cellId, npts, pts);
+    if (npts != 3) continue;
+    double p[3][3];
+    for (int j = 0; j < 3; j++)
+    {
+      shell->GetPoint(pts[j], p[j]);
+      incident[(size_t)pts[j]].push_back(cellId);
+      for (int k = 0; k < 3; k++) centroids[(size_t)3*cellId + k] += p[j][k]/3.0;
+    }
+    for (int j = 0; j < 3; j++) meanEdge[(size_t)cellId] += std::sqrt(vtkMath::Distance2BetweenPoints(p[j], p[(j + 1)%3]))/3.0;
+  }
+  // ring 0: the triangles within the reach of a place (in the local mean
+  // edge); then two rings around them
+  std::vector<int> ring((size_t)numCells, -1), placeOf((size_t)numCells, -1);
+  const size_t numPlaces = places.size()/3;
+  std::vector<vtkIdType> front;
+  for (size_t q = 0; q < numPlaces; q++)
+  {
+    const double *c = &places[3*q];
+    // the nearest triangle sets the scale
+    vtkIdType nearest = -1;
+    double nearestD2 = std::numeric_limits<double>::max();
+    for (vtkIdType cellId = 0; cellId < numCells; cellId++)
+    {
+      const double d2 = vtkMath::Distance2BetweenPoints(c, &centroids[(size_t)3*cellId]);
+      if (d2 < nearestD2) { nearestD2 = d2; nearest = cellId; }
+    }
+    if (nearest < 0) continue;
+    const double reach = reachEdges*std::max(meanEdge[(size_t)nearest], 1.0e-12);
+    for (vtkIdType cellId = 0; cellId < numCells; cellId++)
+    {
+      if (vtkMath::Distance2BetweenPoints(c, &centroids[(size_t)3*cellId]) <= reach*reach && ring[(size_t)cellId] < 0)
+      {
+        ring[(size_t)cellId] = 0;
+        placeOf[(size_t)cellId] = (int)q;
+        front.push_back(cellId);
+      }
+    }
+  }
+  for (int r = 1; r <= 2; r++)
+  {
+    std::vector<vtkIdType> next;
+    for (size_t f = 0; f < front.size(); f++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      shell->GetCellPoints(front[f], npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        const std::vector<vtkIdType> &list = incident[(size_t)pts[j]];
+        for (size_t m = 0; m < list.size(); m++)
+        {
+          if (ring[(size_t)list[m]] < 0)
+          {
+            ring[(size_t)list[m]] = r;
+            placeOf[(size_t)list[m]] = placeOf[(size_t)front[f]];
+            next.push_back(list[m]);
+          }
+        }
+      }
+    }
+    front.swap(next);
+  }
+  std::vector<vtkIdType> cells;
+  std::vector<int> cellRing, cellPlace;
+  std::vector<double> cellValue;
+  for (vtkIdType cellId = 0; cellId < numCells; cellId++)
+  {
+    if (ring[(size_t)cellId] < 0) continue;
+    cells.push_back(cellId);
+    cellRing.push_back(ring[(size_t)cellId]);
+    cellPlace.push_back(placeOf[(size_t)cellId]);
+    const int q = placeOf[(size_t)cellId];
+    cellValue.push_back((q >= 0 && (size_t)q < values.size()) ? values[(size_t)q] : 0.0);
+  }
+  if (cells.empty())
+  {
+    return SV_ERROR;
+  }
+  auto patch = vtkSmartPointer<vtkPolyData>::New();
+  std::vector<vtkIdType> sourcePoints;
+  ExtractTrianglePatch(shell, cells, patch, sourcePoints);
+  auto ringArray = vtkSmartPointer<vtkIntArray>::New();
+  ringArray->SetName("Ring");
+  ringArray->SetNumberOfValues((vtkIdType)cells.size());
+  auto placeArray = vtkSmartPointer<vtkIntArray>::New();
+  placeArray->SetName("Place");
+  placeArray->SetNumberOfValues((vtkIdType)cells.size());
+  auto valueArray = vtkSmartPointer<vtkDoubleArray>::New();
+  valueArray->SetName("PlaceValue");
+  valueArray->SetNumberOfValues((vtkIdType)cells.size());
+  for (size_t m = 0; m < cells.size(); m++)
+  {
+    ringArray->SetValue((vtkIdType)m, cellRing[m]);
+    placeArray->SetValue((vtkIdType)m, cellPlace[m]);
+    valueArray->SetValue((vtkIdType)m, cellValue[m]);
+  }
+  patch->GetCellData()->AddArray(ringArray);
+  patch->GetCellData()->AddArray(placeArray);
+  patch->GetCellData()->AddArray(valueArray);
+  std::string fileName(name);
+  TGenUtils_WriteVTP(&fileName[0], patch);
+  fprintf(stdout,"  wrote %s: the shell within %.3g edges of the %zu worst places and two rings around, %zu triangles in all (small; commit it with the log for a look)\n",
+      name, reachEdges, numPlaces, cells.size());
   return SV_OK;
 }
 

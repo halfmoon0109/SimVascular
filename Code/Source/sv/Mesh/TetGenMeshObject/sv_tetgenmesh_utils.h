@@ -132,7 +132,11 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_ReportMeshQuality(vtkUnstructuredGrid *mesh)
 /// The wall fill's own quality: the smallest dihedral angles, their places and the point bands (interface, layers, outer, the mesher's own) their corners lie in, the tetrahedra under 10 degrees to wall_fill_poor.vtu, then the aspect ratio report. With numFirstCells given, the cells before it and from it on are summed up separately under the two names (the hybrid wall's junction zones and prism layers).
 SV_EXPORT_TETGEN_MESH int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector<vtkIdType> &bandEnds,
     const std::vector<std::string> &bandNames, vtkIdType numFirstCells = -1, const char *firstName = nullptr,
-    const char *secondName = nullptr);
+    const char *secondName = nullptr, std::vector<double> *worstCentroids = nullptr, std::vector<double> *worstAngles = nullptr);
+
+/// The shell's triangles within reachEdges local edges of each given place (three coordinates per place) and two rings around them, written to the named .vtp with the cell arrays Ring (0 within reach, 1 and 2 around), Place (which place) and PlaceValue (the value given for it, such as the dihedral angle of the tetrahedron there): a small file to commit with the log, for a look at the shell where the fill's flattest tetrahedra lie (2026-10-27).
+SV_EXPORT_TETGEN_MESH int TGenUtils_WriteShellAroundPlaces(vtkPolyData *shell, const std::vector<double> &places,
+    const std::vector<double> &values, double reachEdges, const char *name);
 
 SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothPointArray(vtkPolyData *surface,
     vtkDoubleArray *array,
