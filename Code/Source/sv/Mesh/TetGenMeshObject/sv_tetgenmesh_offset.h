@@ -143,6 +143,7 @@ struct Options
   double snapTolerance = 1.0e-3;     // a contour point is on the level once |field| is within this fraction of the larger of its edge's end values (about the thickness)
   double collapseRatio = 0.8;   // edges shorter than this times the local interface size are collapsed; zero or less leaves the contour as marched
   double collapseTurnCosine = 0.7;   // a collapse may not turn a triangle's normal by more than this cosine (slivers, whose normal means little, excepted)
+  double microEdgeRatio = 0.02;      // an edge under this fraction of the local size is welded shut without the turn and crossing checks, whose normals it makes noise of (the marching leaves such edges around a cloud point lying all but on the level); 0 turns the weld off
   double collapseFieldTolerance = 0.1;   // no triangle a collapse makes may have its centre farther off the zero level than this fraction of the local thickness
   // The target edge of the offset surface is the interface's own edge, or
   // shorter where a chord of that length would stand off a surface of the
@@ -250,6 +251,7 @@ struct Report
   double largestBubbleAt[3] = {0.0, 0.0, 0.0};   // its centre
   long long numCollapsed = 0;            // edges collapsed by the decimation
   long long numRefusedForCrossing = 0;   // decimation operations refused because a triangle they would make passes through a live triangle near it
+  long long numMicroEdgesWelded = 0;     // of the collapses, those of an edge under microEdgeRatio of the local size, welded without the turn and crossing checks
   long long numWelded = 0;               // fins (a folded pair whose apexes lie on one spot) whose apexes were welded after the decimation (WeldFoldedApexes)
   long long numCreaseEdges = 0;          // edges chording a valley between two sheets (Options::creaseDegrees), after the decimation
   long long numCreasePointsInserted = 0; // of them, split at the valley

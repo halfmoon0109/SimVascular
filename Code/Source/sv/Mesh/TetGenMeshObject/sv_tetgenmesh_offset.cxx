@@ -3225,6 +3225,21 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       meanTarget = (nv > 0) ? meanTarget/(double)nv : 1.0;
       guard.Build(2.0*meanTarget);
     }
+    // The smallest angle of a triangle, as its sine.
+    auto smallestAngleSine = [&](ll a, ll b, ll c)
+    {
+      double la = Distance(&pts[(size_t)3*b], &pts[(size_t)3*c]), lb = Distance(&pts[(size_t)3*c], &pts[(size_t)3*a]), lc = Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]);
+      double n[3];
+      normalOf(a, b, c, n);
+      double twiceArea = Norm(n);
+      double longest = std::max(la, std::max(lb, lc));
+      double product = la*lb*lc;
+      if (!(product > 0.0)) return 0.0;
+      // sin(smallest angle) = 2A / (product of the two longer sides) = 2A * shortest / (la lb lc)
+      double shortest = std::min(la, std::min(lb, lc));
+      (void)longest;
+      return twiceArea*shortest/product;
+    };
     const int ringMax = 64;
     ll ringU[64], ringV[64], shared[2];
     auto tryCollapse = [&](ll u, ll v) -> bool
@@ -3232,6 +3247,24 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       // u goes onto v; a point on a valley line goes only onto another on it
       if ((size_t)u < creasePoint.size() && creasePoint[(size_t)u] && !((size_t)v < creasePoint.size() && creasePoint[(size_t)v])) return false;
       double moved = Distance(&pts[(size_t)3*u], &pts[(size_t)3*v]);
+      // A micro edge, under microEdgeRatio of the local size: the marching
+      // leaves a ring of them around a cloud point lying all but on the
+      // level (within a thousandth of the spacing: the user's model,
+      // 2026-10-27, a triangle of three points 0.0004 apart on the first
+      // layer surface where the edge is 0.37, with three needles on its
+      // sides). The collapses take such a ring down to a last triangle and
+      // stop there: a needle's normal is noise, so the turn check refuses
+      // each last collapse, and the crossing check reads a needle's hair of
+      // width poking through a neighbour at the shared corner as a
+      // crossing. The mesher then makes the needles' tetrahedra, 0.02
+      // degrees thin. Moving a point by a fiftieth of the local size can
+      // turn no sound triangle over, so a micro edge is welded shut on the
+      // link condition alone: a flat triangle's turn is not read, a sound
+      // one's is, a flat new triangle is not put to the crossing guard
+      // (the next weld takes it), and a new triangle that would face
+      // against the sound triangles around is still refused.
+      const bool micro = options.microEdgeRatio > 0.0 && moved < options.microEdgeRatio*std::min(target[(size_t)u], target[(size_t)v]);
+      const double flatSine = 0.05;   // sine of the smallest angle under this: no direction of its own
       int nu = 0, nvv = 0, ns = 0;
       for (size_t m = 0; m < incident[(size_t)u].size(); m++)
       {
@@ -3322,7 +3355,28 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
         normalOf(a, b, c, nOld);
         normalOf(a2, b2, c2, nNew);
         double lo = Norm(nOld), ln = Norm(nNew);
-        if (!(ln > 1.0e-12*lo) || Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) return false;
+        if (micro && smallestAngleSine(a, b, c) < flatSine)
+        {
+          // no old direction to keep; the new triangle, if it has one, faces
+          // with the sound triangles around v
+          if (ln > 0.0 && smallestAngleSine(a2, b2, c2) >= flatSine)
+          {
+            double ref[3] = {0.0, 0.0, 0.0};
+            for (size_t q = 0; q < incident[(size_t)v].size(); q++)
+            {
+              ll s2 = incident[(size_t)v][q];
+              if (dead[(size_t)s2] || s2 == shared[0] || s2 == shared[1]) continue;
+              const ll *T = &tris[(size_t)3*s2];
+              if (smallestAngleSine(T[0], T[1], T[2]) < flatSine) continue;
+              double tn[3];
+              normalOf(T[0], T[1], T[2], tn);
+              double l = Norm(tn);
+              if (l > 0.0) for (int k = 0; k < 3; k++) ref[k] += tn[k]/l;
+            }
+            if (Norm(ref) > 0.0 && Dot(nNew, ref) < 0.0) return false;
+          }
+        }
+        else if (!(ln > 1.0e-12*lo) || Dot(nOld, nNew) < options.collapseTurnCosine*lo*ln) return false;
         // The surface moves by no more than the collapsed edge, so a short
         // collapse cannot take a triangle off the zero level by more than
         // the tolerance and is not put to the field.
@@ -3354,6 +3408,7 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
         }
         for (int i = 0; i < numMoved; i++)
         {
+          if (micro && smallestAngleSine(moved[i][0], moved[i][1], moved[i][2]) < flatSine) continue;   // a needle's hair of width is no crossing; the next weld takes it
           if (guard.Crosses(moved[i])) { report.numRefusedForCrossing++; return false; }
           for (int j = i + 1; j < numMoved; j++) if (svenvelope::TrianglesCross(pts, moved[i], moved[j])) { report.numRefusedForCrossing++; return false; }
         }
@@ -3377,6 +3432,7 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       version[(size_t)u]++;
       version[(size_t)v]++;
       report.numCollapsed++;
+      if (micro) report.numMicroEdgesWelded++;
       return true;
     };
     auto runCollapses = [&]()
@@ -3391,21 +3447,6 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
         if (!done) done = tryCollapse(e.v, e.u);
         if (done) pushEdges(incident[(size_t)e.u].empty() ? e.v : e.u);
       }
-    };
-    // The smallest angle of a triangle, as its sine.
-    auto smallestAngleSine = [&](ll a, ll b, ll c)
-    {
-      double la = Distance(&pts[(size_t)3*b], &pts[(size_t)3*c]), lb = Distance(&pts[(size_t)3*c], &pts[(size_t)3*a]), lc = Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]);
-      double n[3];
-      normalOf(a, b, c, n);
-      double twiceArea = Norm(n);
-      double longest = std::max(la, std::max(lb, lc));
-      double product = la*lb*lc;
-      if (!(product > 0.0)) return 0.0;
-      // sin(smallest angle) = 2A / (product of the two longer sides) = 2A * shortest / (la lb lc)
-      double shortest = std::min(la, std::min(lb, lc));
-      (void)longest;
-      return twiceArea*shortest/product;
     };
     auto removeFromIncident = [&](ll v, ll t)
     {

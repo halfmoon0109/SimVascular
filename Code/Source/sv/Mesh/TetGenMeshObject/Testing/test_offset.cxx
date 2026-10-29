@@ -1048,6 +1048,56 @@ static void TestLayers()
   Check(numCrossing == 0, "no layer surface crosses another, the outer surface or the interface");
 }
 
+// 6. A level lying on one of the cloud's own offsets: the half-thickness
+// cloud points are within a hair of the level at half the thickness (exactly
+// on it where the jitter runs along the tube, a ten-thousandth off where it
+// runs around), and the marching leaves a ring of micro edges around each
+// of the latter. The decimation must weld every one; a last triangle of
+// three points a hair apart, with three needles on its sides, is what the
+// turn and crossing checks used to leave (the user's model, 2026-10-27).
+static void TestMicroEdges()
+{
+  printf("test 6: two layer surfaces of a tube, the first on the cloud's own half-thickness offset, so that the marching leaves micro edges around its points\n");
+  Interface iface;
+  AddTube(iface, 0.0, 0.0, 1.0, 0.0, 10.0, 32, 40, 0.3);
+  std::vector<double> fractions;
+  fractions.push_back(0.5);
+  fractions.push_back(1.0);
+  std::vector<Surface> built; std::vector<Report> reports; std::string buildError;
+  Options options;
+  int rc = svoffset::BuildOffsetSurfaces(iface, options, fractions, DelaunayWithTetGen, nullptr, built, reports, buildError);
+  Check(rc == 0 && built.size() == 2, "the two layer surfaces are built");
+  if (rc != 0 || built.size() != 2) { printf("  FAIL: %s\n", buildError.c_str()); return; }
+  for (size_t k = 0; k < built.size(); k++)
+  {
+    const Surface &s = built[k];
+    const Report &r = reports[k];
+    double meanEdge = 0.0, shortest = 1e300;
+    ll numEdges = 0, numNeedles = 0;
+    for (size_t i = 0; i + 2 < s.triangles.size(); i += 3)
+    {
+      const double *a = &s.points[3*(size_t)s.triangles[i]], *b = &s.points[3*(size_t)s.triangles[i+1]], *c = &s.points[3*(size_t)s.triangles[i+2]];
+      double e[3] = {Dist(b, c), Dist(c, a), Dist(a, b)};
+      for (int j = 0; j < 3; j++) { meanEdge += e[j]; numEdges++; shortest = std::min(shortest, e[j]); }
+      double u[3], v[3], n[3];
+      Sub(b, a, u); Sub(c, a, v); Cross(u, v, n);
+      // sin(smallest angle) = 2A * shortest side / (product of the sides)
+      double product = e[0]*e[1]*e[2];
+      double sine = product > 0.0 ? Norm(n)*std::min(e[0], std::min(e[1], e[2]))/product : 0.0;
+      if (sine < 0.0087) numNeedles++;   // under half a degree
+    }
+    meanEdge /= (double)std::max<ll>(numEdges, 1);
+    printf("  layer %zu (%.2g of the wall): %lld cloud points on the level itself, %lld micro edges welded of %lld collapses, %lld refused for crossing; %lld triangles, mean edge %.3f, shortest edge %.2g (%.2g of the mean), %lld triangles under half a degree, %lld folded edges\n",
+        k + 1, fractions[k], r.numZeroCloudPoints, r.numMicroEdgesWelded, r.numCollapsed, r.numRefusedForCrossing,
+        (ll)(s.triangles.size()/3), meanEdge, shortest, shortest/meanEdge, numNeedles, r.numFoldedEdges);
+    Check(shortest > 0.02*meanEdge, "no edge under a fiftieth of the mean is left");
+    Check(numNeedles == 0, "no triangle under half a degree is left");
+    Check(r.numNonManifoldEdges == 0 && r.numMiswoundEdges == 0, "the layer surface is a manifold");
+    Check(r.numFoldedEdges == 0, "no two triangles on an edge lie on each other");
+  }
+  Check(reports[0].numMicroEdgesWelded > 0, "the level on the offset met cloud points all but on it, whose micro edges were welded");
+}
+
 int main()
 {
   TestFoldCount();
@@ -1062,6 +1112,7 @@ int main()
   TestZipObstacle();
   TestTrimFlatCap();
   TestLayers();
+  TestMicroEdges();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }

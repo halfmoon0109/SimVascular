@@ -5759,11 +5759,11 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
     {
       fprintf(stdout,"  surface %zu of %zu, at %.3g of the thickness (%s):\n", f + 1, numLevels, fractions[f], name.c_str());
     }
-    fprintf(stdout,"  %lld tetrahedra over the cloud, %lld of them cut by the level (%.1f s); the contour had %lld points and %lld triangles (%.1f s; %lld cloud points on the level itself, %lld triangles of no area left out, %lld points still off the level after %d steps); %lld edges collapsed onto the level to the interface's own size, leaving %lld points and %lld triangles (%.1f s; %lld operations refused because a triangle they would make passes through a neighbour)\n",
+    fprintf(stdout,"  %lld tetrahedra over the cloud, %lld of them cut by the level (%.1f s); the contour had %lld points and %lld triangles (%.1f s; %lld cloud points on the level itself, %lld triangles of no area left out, %lld points still off the level after %d steps); %lld edges collapsed onto the level to the interface's own size, leaving %lld points and %lld triangles (%.1f s; %lld of the collapses welded a micro edge under %g of the local size, %lld operations refused because a triangle they would make passes through a neighbour)\n",
         report.numTetrahedra, report.numTetrahedraCut, report.secondsDelaunay,
         report.numContourPoints, report.numContourTriangles, report.secondsContour, report.numZeroCloudPoints,
         report.numDegenerateContourTriangles, report.numContourPointsOffLevel, options.snapIterations, report.numCollapsed,
-        report.numPoints, report.numTriangles, report.secondsDecimate, report.numRefusedForCrossing);
+        report.numPoints, report.numTriangles, report.secondsDecimate, report.numMicroEdgesWelded, options.microEdgeRatio, report.numRefusedForCrossing);
     fprintf(stdout,"  %lld boundary edges before the trim at the caps (the domes over the collar ends come off with it), %lld edges on more than two triangles, %lld traversed the same way twice, %lld triangles passing through another, %lld edges whose two triangles lie on each other within %.2g degree (%lld unfolded by the decimation, %lld fins welded after it; the smallest angle between two triangles on an edge is %.3g degrees)\n",
         report.numBoundaryEdges, report.numNonManifoldEdges, report.numMiswoundEdges, numCrossing,
         report.numFoldedEdges, svoffset::foldDegrees, report.numUnfolded, report.numWelded, report.smallestFoldDegrees);
