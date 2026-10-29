@@ -7095,20 +7095,17 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
         // keeps nothing either: it may turn over to face with them, and
         // keeping it facing the way it did was what held every tooth in
         // place through the rounds (the user's model, 2026-10-29).
-        // Where the neighbours give a direction (their unit normals sum to
-        // at least one), the triangle must face with it after the move,
-        // whether it did before or not: keeping only its own old facing
-        // let a triangle turn a little at every move, up to a right angle
-        // each, until it faced against its neighbours (the relaxation made
-        // 53 such teeth of sound shape on the user's model, 2026-10-29,
-        // in the contact slots of the second layer surface), and a thin
-        // cap let turn either way grew into one as well. Without a
-        // direction from the neighbours the old rule stands.
+        // A thin cap turned over must at least face with its neighbours
+        // where it has any: a cap let turn either way grew, over the
+        // rounds, into a sound triangle facing the wrong way, which the
+        // rule then held (the relaxation made 37 teeth of the pieces' 39
+        // on the user's model, 2026-10-29).
         const bool keptFacing = tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0;
-        const bool hasReference = Dot(rn, rn) >= 1.0;
-        const bool facesWithNeighbours = tn[0]*rn[0] + tn[1]*rn[1] + tn[2]*rn[2] > 0.0;
-        if (hasReference) { if (!facesWithNeighbours) ok = false; }
-        else if ((oldAngles[q] >= 5.0 || !options.freeThinCaps) && !keptFacing) ok = false;
+        const bool hasReference = Dot(rn, rn) > 0.0;
+        const bool facesWithNeighbours = hasReference && tn[0]*rn[0] + tn[1]*rn[1] + tn[2]*rn[2] > 0.0;
+        const bool wasTooth = hasReference && !(on[0]*rn[0] + on[1]*rn[1] + on[2]*rn[2] > 0.0);
+        if (oldAngles[q] < 5.0 && options.freeThinCaps) { if (hasReference && !facesWithNeighbours) ok = false; }
+        else if (!keptFacing && !(wasTooth && facesWithNeighbours)) ok = false;
         else if (smallestAngle(&out.triangles[(size_t)3*tris[q]]) < std::min(5.0, oldAngles[q])) ok = false;
         else if (guard.Crosses(&out.triangles[(size_t)3*tris[q]])) ok = false;
       }
@@ -7203,36 +7200,13 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
       std::vector<ll> survivors;
       for (size_t m = 0; m < Iu.size(); m++) if (Iu[m] != t1 && Iu[m] != t2) survivors.push_back(Iu[m]);
       for (size_t m = 0; m < Iv.size(); m++) if (Iv[m] != t1 && Iv[m] != t2 && std::find(survivors.begin(), survivors.end(), Iv[m]) == survivors.end()) survivors.push_back(Iv[m]);
-      std::vector<std::array<double, 3> > oldNormals(survivors.size()), refNormals(survivors.size());
+      std::vector<std::array<double, 3> > oldNormals(survivors.size());
       std::vector<double> oldAngles(survivors.size());
       for (size_t q = 0; q < survivors.size(); q++) { double tn[3]; normalOf(&out.triangles[(size_t)3*survivors[q]], tn); oldNormals[q] = {tn[0], tn[1], tn[2]}; oldAngles[q] = smallestAngle(&out.triangles[(size_t)3*survivors[q]]); }
       std::vector<EdgePair> pairs;
       {
         const ll dying[2] = {t1, t2};
         pairsOf(survivors, dying, 2, pairs);
-        // what each survivor's unmoving neighbours face (as for a move)
-        std::vector<ll> except(survivors.begin(), survivors.end());
-        except.push_back(t1);
-        except.push_back(t2);
-        std::vector<ll> others;
-        for (size_t q = 0; q < survivors.size(); q++)
-        {
-          refNormals[q] = {0.0, 0.0, 0.0};
-          const ll *T = &out.triangles[(size_t)3*survivors[q]];
-          for (int j = 0; j < 3; j++)
-          {
-            acrossEdge(T[j], T[(j + 1)%3], except.data(), (int)except.size(), others);
-            for (size_t m2 = 0; m2 < others.size(); m2++)
-            {
-              const ll o = others[m2];
-              if (dead[(size_t)o] || out.markers[(size_t)o] != out.markers[(size_t)survivors[q]]) continue;
-              double un[3];
-              normalOf(&out.triangles[(size_t)3*o], un);
-              const double l = Norm(un);
-              if (l > 0.0) for (int k = 0; k < 3; k++) refNormals[q][k] += un[k]/l;
-            }
-          }
-        }
       }
       // the change: v's triangles re-pointed to u, both points at the midpoint
       std::vector<std::pair<ll, int> > repointed;   // triangle, corner
@@ -7271,9 +7245,7 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
         double tn[3];
         normalOf(&out.triangles[(size_t)3*survivors[q]], tn);
         const double *on = oldNormals[q].data();
-        const double *rn = refNormals[q].data();
-        if (Dot(rn, rn) >= 1.0) { if (!(tn[0]*rn[0] + tn[1]*rn[1] + tn[2]*rn[2] > 0.0)) ok = false; }
-        else if (oldAngles[q] >= 5.0 && !(tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0)) ok = false;
+        if (oldAngles[q] >= 5.0 && !(tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0)) ok = false;
         else if (smallestAngle(&out.triangles[(size_t)3*survivors[q]]) < std::min(5.0, oldAngles[q])) ok = false;
         else if (guard.Crosses(&out.triangles[(size_t)3*survivors[q]])) ok = false;
       }
