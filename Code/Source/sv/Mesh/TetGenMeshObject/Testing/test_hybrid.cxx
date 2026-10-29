@@ -480,6 +480,7 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
     // with SV_HYBRID_SLOT_SIZES set: the slot smoothing's reach, for a run without it (0) or with another
     BandRelaxation relaxUsed = relaxation;
     if (getenv("SV_HYBRID_SLOT_SIZES") != nullptr) relaxUsed.slotSizes = atof(getenv("SV_HYBRID_SLOT_SIZES"));
+    if (getenv("SV_HYBRID_RELAX_ROUNDS") != nullptr) relaxUsed.rounds = atoi(getenv("SV_HYBRID_RELAX_ROUNDS"));   // 0: the bands as zipped, to tell the relaxation's faults from the zipper's
     const bool built = BuildJunctionShell(iface, field, structured, pm, surfs, fractions, 1, 2, shell, err, innerLevels, relaxUsed) == 0;
     // as the glue does: a built shell with triangles passing through one another or folded onto each other widens the junction zone at the prisms whose layer
     // surface passes through a piece (a ring) and around the loops whose strips are at fault (two rings: a strip hops between the sides of a piece too narrow for it);
