@@ -1192,6 +1192,66 @@ void CrossingGuard::Leave(ll t)
   leaving_[(size_t)t] = operation_;
 }
 
+// The closest point of the triangle abc to p (Ericson's cases), and the
+// distance to it.
+static double ClosestOnTriangle(const double p[3], const double a[3], const double b[3], const double c[3], double q[3])
+{
+  double ab[3], ac[3], ap[3];
+  Sub(b, a, ab);
+  Sub(c, a, ac);
+  Sub(p, a, ap);
+  const double d1 = Dot(ab, ap), d2 = Dot(ac, ap);
+  if (d1 <= 0.0 && d2 <= 0.0) { for (int k = 0; k < 3; k++) q[k] = a[k]; return Distance(p, q); }
+  double bp[3];
+  Sub(p, b, bp);
+  const double d3 = Dot(ab, bp), d4 = Dot(ac, bp);
+  if (d3 >= 0.0 && d4 <= d3) { for (int k = 0; k < 3; k++) q[k] = b[k]; return Distance(p, q); }
+  const double vc = d1*d4 - d3*d2;
+  if (vc <= 0.0 && d1 >= 0.0 && d3 <= 0.0) { const double v = d1/(d1 - d3); for (int k = 0; k < 3; k++) q[k] = a[k] + v*ab[k]; return Distance(p, q); }
+  double cp[3];
+  Sub(p, c, cp);
+  const double d5 = Dot(ab, cp), d6 = Dot(ac, cp);
+  if (d6 >= 0.0 && d5 <= d6) { for (int k = 0; k < 3; k++) q[k] = c[k]; return Distance(p, q); }
+  const double vb = d5*d2 - d1*d6;
+  if (vb <= 0.0 && d2 >= 0.0 && d6 <= 0.0) { const double w = d2/(d2 - d6); for (int k = 0; k < 3; k++) q[k] = a[k] + w*ac[k]; return Distance(p, q); }
+  const double va = d3*d6 - d5*d4;
+  if (va <= 0.0 && (d4 - d3) >= 0.0 && (d5 - d6) >= 0.0) { const double w = (d4 - d3)/((d4 - d3) + (d5 - d6)); for (int k = 0; k < 3; k++) q[k] = b[k] + w*(c[k] - b[k]); return Distance(p, q); }
+  const double denom = 1.0/(va + vb + vc), v = vb*denom, w = vc*denom;
+  for (int k = 0; k < 3; k++) q[k] = a[k] + ab[k]*v + ac[k]*w;
+  return Distance(p, q);
+}
+
+double CrossingGuard::Nearest(const double p[3], double within, const ll *except, int numExcept, ll &nearest, double closest[3])
+{
+  nearest = -1;
+  double best = std::numeric_limits<double>::infinity();
+  int lo[3], hi[3];
+  for (int k = 0; k < 3; k++)
+  {
+    lo[k] = std::min(std::max((int)std::floor((p[k] - within - origin_[k])/cell_), 0), n_[k] - 1);
+    hi[k] = std::min(std::max((int)std::floor((p[k] + within - origin_[k])/cell_), 0), n_[k] - 1);
+  }
+  for (int k = lo[2]; k <= hi[2]; k++) for (int j = lo[1]; j <= hi[1]; j++) for (int i = lo[0]; i <= hi[0]; i++)
+  {
+    std::unordered_map<ll, std::vector<ll> >::const_iterator it = cells_.find(Index(i, j, k));
+    if (it == cells_.end()) continue;
+    const std::vector<ll> &list = it->second;
+    for (size_t m = 0; m < list.size(); m++)
+    {
+      const ll c = list[m];
+      if (dead_[(size_t)c] || leaving_[(size_t)c] == operation_) continue;
+      const ll *T = &triangles_[(size_t)3*c];
+      bool skip = false;
+      for (int e = 0; e < numExcept && !skip; e++) if (T[0] == except[e] || T[1] == except[e] || T[2] == except[e]) skip = true;
+      if (skip) continue;
+      double q[3];
+      const double d = ClosestOnTriangle(p, &points_[(size_t)3*T[0]], &points_[(size_t)3*T[1]], &points_[(size_t)3*T[2]], q);
+      if (d < best) { best = d; nearest = c; for (int e = 0; e < 3; e++) closest[e] = q[e]; }
+    }
+  }
+  return best;
+}
+
 bool CrossingGuard::Crosses(const ll T[3])
 {
   test_++;
@@ -6936,6 +6996,127 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
     if (slot) out.numBandSlotPoints++;
     return slot;
   };
+  // a point with the corners of the triangles on it
+  auto ringOf = [&](ll v, std::vector<ll> &ring)
+  {
+    ring.clear();
+    ring.push_back(v);
+    for (size_t m = 0; m < incident[(size_t)v].size(); m++) for (int j = 0; j < 3; j++) { const ll w = out.triangles[(size_t)3*incident[(size_t)v][m] + j]; if (std::find(ring.begin(), ring.end(), w) == ring.end()) ring.push_back(w); }
+  };
+  // The moves applied one by one, each kept only if the triangles around
+  // the point pass the tests below (the smoothing's and the separation's
+  // moves alike).
+  auto applyMoves = [&](const std::vector<std::pair<ll, std::array<double, 3> > > &moves)
+  {
+    for (size_t m = 0; m < moves.size(); m++)
+    {
+      const ll v = moves[m].first;
+      double old[3] = {out.points[(size_t)3*v], out.points[(size_t)3*v + 1], out.points[(size_t)3*v + 2]};
+      // the triangles around must keep facing the way they did, and
+      // none may lie down on a neighbour across any of its edges
+      const std::vector<ll> &tris = incident[(size_t)v];
+      std::vector<std::array<double, 3> > oldNormals(tris.size()), refNormals(tris.size());
+      std::vector<double> oldAngles(tris.size());
+      for (size_t q = 0; q < tris.size(); q++) { double tn[3]; normalOf(&out.triangles[(size_t)3*tris[q]], tn); oldNormals[q] = {tn[0], tn[1], tn[2]}; oldAngles[q] = smallestAngle(&out.triangles[(size_t)3*tris[q]]); }
+      // what each triangle's neighbours face: the unit normals of the
+      // triangles across its edges that do not move with v (the same
+      // surface, alive), summed - the reference a tooth is turned back to
+      {
+        std::vector<ll> others;
+        for (size_t q = 0; q < tris.size(); q++)
+        {
+          refNormals[q] = {0.0, 0.0, 0.0};
+          const ll *T = &out.triangles[(size_t)3*tris[q]];
+          for (int j = 0; j < 3; j++)
+          {
+            acrossEdge(T[j], T[(j + 1)%3], tris.data(), (int)tris.size(), others);
+            for (size_t m2 = 0; m2 < others.size(); m2++)
+            {
+              const ll u = others[m2];
+              if (dead[(size_t)u] || out.markers[(size_t)u] != out.markers[(size_t)tris[q]]) continue;
+              double un[3];
+              normalOf(&out.triangles[(size_t)3*u], un);
+              const double l = Norm(un);
+              if (l > 0.0) for (int k = 0; k < 3; k++) refNormals[q][k] += un[k]/l;
+            }
+          }
+        }
+      }
+      std::vector<EdgePair> pairs;
+      pairsOf(tris, nullptr, 0, pairs);
+      // the triangles around leave the guard's cells before the point
+      // moves (their boxes change) and are tested and re-added after
+      guard.BeginOperation();
+      for (size_t q = 0; q < tris.size(); q++) { guard.Leave(tris[q]); guard.Remove(tris[q]); }
+      for (int j = 0; j < 3; j++) out.points[(size_t)3*v + j] = moves[m].second[j];
+      bool ok = true;
+      for (size_t q = 0; q < tris.size() && ok; q++)
+      {
+        double tn[3];
+        normalOf(&out.triangles[(size_t)3*tris[q]], tn);
+        const double *on = oldNormals[q].data();
+        const double *rn = refNormals[q].data();
+        // a triangle under 5 degrees has no normal to keep: the caps
+        // the zipper leaves stand off the surface with their apex on
+        // the neighbour's side of the long edge, and the move that
+        // pulls the apex back turns such a normal right over (2026-09-30,
+        // the user's model: 37 of the 42 band triangles left under 10
+        // degrees were caps whose every flip and move this refused).
+        // A tooth - a sound triangle facing against the neighbours
+        // across its edges, which the zipper or the level surface left -
+        // keeps nothing either: it may turn over to face with them, and
+        // keeping it facing the way it did was what held every tooth in
+        // place through the rounds (the user's model, 2026-10-29).
+        // A thin cap turned over must at least face with its neighbours
+        // where it has any: a cap let turn either way grew, over the
+        // rounds, into a sound triangle facing the wrong way, which the
+        // rule then held (the relaxation made 37 teeth of the pieces' 39
+        // on the user's model, 2026-10-29).
+        const bool keptFacing = tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0;
+        const bool hasReference = Dot(rn, rn) > 0.0;
+        const bool facesWithNeighbours = hasReference && tn[0]*rn[0] + tn[1]*rn[1] + tn[2]*rn[2] > 0.0;
+        const bool wasTooth = hasReference && !(on[0]*rn[0] + on[1]*rn[1] + on[2]*rn[2] > 0.0);
+        if (oldAngles[q] < 5.0 && options.freeThinCaps) { if (hasReference && !facesWithNeighbours) ok = false; }
+        else if (!keptFacing && !(wasTooth && facesWithNeighbours)) ok = false;
+        else if (smallestAngle(&out.triangles[(size_t)3*tris[q]]) < std::min(5.0, oldAngles[q])) ok = false;
+        else if (guard.Crosses(&out.triangles[(size_t)3*tris[q]])) ok = false;
+      }
+      for (size_t q = 0; q < pairs.size() && ok; q++)
+      {
+        // nor has such a cap a crease to keep: its apex comes back over
+        // the long edge through the neighbour's plane, which this test
+        // would refuse (the caps left after the first relaxation stood
+        // 3 to 5 degrees off their neighbours, 2026-09-30)
+        const size_t at = (size_t)(std::find(tris.begin(), tris.end(), pairs[q].t) - tris.begin());
+        if (options.freeThinCaps && at < tris.size() && oldAngles[at] < 5.0) continue;
+        const double after = intoAngle(&out.triangles[(size_t)3*pairs[q].t], &out.triangles[(size_t)3*pairs[q].u], pairs[q].p, pairs[q].q);
+        if (after < minEdgeAngle && after < pairs[q].before) ok = false;
+      }
+      // nor may the point come onto another sheet: within the separation
+      // of a triangle it is not joined to, and nearer than it was
+      if (ok && options.separation > 0.0)
+      {
+        double size, thickness;
+        ll rim;
+        field.Local(&out.points[(size_t)3*v], size, thickness, rim);
+        const double sep = options.separation*size;
+        std::vector<ll> ringPts;
+        ringOf(v, ringPts);
+        ll tNear;
+        double qNear[3];
+        const double after = guard.Nearest(&out.points[(size_t)3*v], sep, ringPts.data(), (int)ringPts.size(), tNear, qNear);
+        if (after < sep)
+        {
+          const double before = guard.Nearest(old, sep, ringPts.data(), (int)ringPts.size(), tNear, qNear);
+          if (after < before) ok = false;
+        }
+      }
+      if (!ok) for (int j = 0; j < 3; j++) out.points[(size_t)3*v + j] = old[j];
+      for (size_t q = 0; q < tris.size(); q++) guard.Add(tris[q]);
+      if (!ok) continue;
+      out.numBandPointsMoved++;
+    }
+  };
   // 2. the smoothing of a band's free points onto the level
   auto movesPass = [&](int k, double fraction, const std::vector<ll> &band)
   {
@@ -7036,94 +7217,73 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
       std::array<double, 3> xa = {x[0], x[1], x[2]};
       moves.push_back(std::make_pair(v, xa));
     }
-    for (size_t m = 0; m < moves.size(); m++)
+    applyMoves(moves);
+  };
+  // 2b. The sheets apart: a band point lying within the separation of a
+  // shell triangle it is not joined to (two sheets of one level touching
+  // at the end of a slot between two walls, where the two walls' offsets
+  // meet at a tangent; the slot smoothing brings a point onto the facing
+  // sheet, since nothing watched the distance) is pushed off along the
+  // way from the closest point of that triangle, to the separation. The
+  // mesher makes a flat tetrahedron of such a point and the triangle (the
+  // user's model, 2026-10-29: the wall's flattest, 0.018 degrees, on a
+  // second-layer point 0.0003 of its edge from a second-layer triangle).
+  // The push passes the tests a move passes; a fixed point stays, and
+  // the triangle's free corners are pushed off it instead.
+  auto separatePass = [&](const std::vector<ll> &band)
+  {
+    if (!(options.separation > 0.0)) return;
+    std::set<ll> bandPts;
+    for (size_t m = 0; m < band.size(); m++) for (int j = 0; j < 3; j++) bandPts.insert(out.triangles[(size_t)3*band[m] + j]);
+    std::vector<ll> ringPts;
+    auto push = [&](ll v, const double dir[3], double by) -> bool
     {
-      const ll v = moves[m].first;
-      double old[3] = {out.points[(size_t)3*v], out.points[(size_t)3*v + 1], out.points[(size_t)3*v + 2]};
-      // the triangles around must keep facing the way they did, and
-      // none may lie down on a neighbour across any of its edges
-      const std::vector<ll> &tris = incident[(size_t)v];
-      std::vector<std::array<double, 3> > oldNormals(tris.size()), refNormals(tris.size());
-      std::vector<double> oldAngles(tris.size());
-      for (size_t q = 0; q < tris.size(); q++) { double tn[3]; normalOf(&out.triangles[(size_t)3*tris[q]], tn); oldNormals[q] = {tn[0], tn[1], tn[2]}; oldAngles[q] = smallestAngle(&out.triangles[(size_t)3*tris[q]]); }
-      // what each triangle's neighbours face: the unit normals of the
-      // triangles across its edges that do not move with v (the same
-      // surface, alive), summed - the reference a tooth is turned back to
-      {
-        std::vector<ll> others;
-        for (size_t q = 0; q < tris.size(); q++)
-        {
-          refNormals[q] = {0.0, 0.0, 0.0};
-          const ll *T = &out.triangles[(size_t)3*tris[q]];
-          for (int j = 0; j < 3; j++)
-          {
-            acrossEdge(T[j], T[(j + 1)%3], tris.data(), (int)tris.size(), others);
-            for (size_t m2 = 0; m2 < others.size(); m2++)
-            {
-              const ll u = others[m2];
-              if (dead[(size_t)u] || out.markers[(size_t)u] != out.markers[(size_t)tris[q]]) continue;
-              double un[3];
-              normalOf(&out.triangles[(size_t)3*u], un);
-              const double l = Norm(un);
-              if (l > 0.0) for (int k = 0; k < 3; k++) refNormals[q][k] += un[k]/l;
-            }
-          }
-        }
-      }
-      std::vector<EdgePair> pairs;
-      pairsOf(tris, nullptr, 0, pairs);
-      // the triangles around leave the guard's cells before the point
-      // moves (their boxes change) and are tested and re-added after
+      if (fixed[(size_t)v] || !(by > 0.0)) return false;
+      double target[3];
+      for (int j = 0; j < 3; j++) target[j] = out.points[(size_t)3*v + j] + by*dir[j];
+      std::vector<std::pair<ll, std::array<double, 3> > > one;
+      one.push_back(std::make_pair(v, std::array<double, 3>{target[0], target[1], target[2]}));
+      const ll movedBefore = out.numBandPointsMoved;
+      applyMoves(one);
+      return out.numBandPointsMoved > movedBefore;
+    };
+    for (std::set<ll>::const_iterator it = bandPts.begin(); it != bandPts.end(); ++it)
+    {
+      const ll v = *it;
+      const double *x0 = &out.points[(size_t)3*v];
+      double size, thickness;
+      ll rim;
+      field.Local(x0, size, thickness, rim);
+      const double sep = options.separation*size;
+      ringOf(v, ringPts);
+      ll tNear;
+      double qNear[3];
       guard.BeginOperation();
-      for (size_t q = 0; q < tris.size(); q++) { guard.Leave(tris[q]); guard.Remove(tris[q]); }
-      for (int j = 0; j < 3; j++) out.points[(size_t)3*v + j] = moves[m].second[j];
-      bool ok = true;
-      for (size_t q = 0; q < tris.size() && ok; q++)
+      const double d = guard.Nearest(x0, sep, ringPts.data(), (int)ringPts.size(), tNear, qNear);
+      if (!(d < sep) || tNear < 0) continue;
+      out.numBandPointsTooClose++;
+      // the way off: from the closest point, or along the triangle's
+      // normal away from the point's own side when it lies in the plane
+      double dir[3];
+      Sub(x0, qNear, dir);
+      if (!(Norm(dir) > 1.0e-6*size))
       {
-        double tn[3];
-        normalOf(&out.triangles[(size_t)3*tris[q]], tn);
-        const double *on = oldNormals[q].data();
-        const double *rn = refNormals[q].data();
-        // a triangle under 5 degrees has no normal to keep: the caps
-        // the zipper leaves stand off the surface with their apex on
-        // the neighbour's side of the long edge, and the move that
-        // pulls the apex back turns such a normal right over (2026-09-30,
-        // the user's model: 37 of the 42 band triangles left under 10
-        // degrees were caps whose every flip and move this refused).
-        // A tooth - a sound triangle facing against the neighbours
-        // across its edges, which the zipper or the level surface left -
-        // keeps nothing either: it may turn over to face with them, and
-        // keeping it facing the way it did was what held every tooth in
-        // place through the rounds (the user's model, 2026-10-29).
-        // A thin cap turned over must at least face with its neighbours
-        // where it has any: a cap let turn either way grew, over the
-        // rounds, into a sound triangle facing the wrong way, which the
-        // rule then held (the relaxation made 37 teeth of the pieces' 39
-        // on the user's model, 2026-10-29).
-        const bool keptFacing = tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0;
-        const bool hasReference = Dot(rn, rn) > 0.0;
-        const bool facesWithNeighbours = hasReference && tn[0]*rn[0] + tn[1]*rn[1] + tn[2]*rn[2] > 0.0;
-        const bool wasTooth = hasReference && !(on[0]*rn[0] + on[1]*rn[1] + on[2]*rn[2] > 0.0);
-        if (oldAngles[q] < 5.0 && options.freeThinCaps) { if (hasReference && !facesWithNeighbours) ok = false; }
-        else if (!keptFacing && !(wasTooth && facesWithNeighbours)) ok = false;
-        else if (smallestAngle(&out.triangles[(size_t)3*tris[q]]) < std::min(5.0, oldAngles[q])) ok = false;
-        else if (guard.Crosses(&out.triangles[(size_t)3*tris[q]])) ok = false;
+        normalOf(&out.triangles[(size_t)3*tNear], dir);
+        double own[3] = {0.0, 0.0, 0.0};
+        for (size_t m = 0; m < incident[(size_t)v].size(); m++) { double tn[3]; normalOf(&out.triangles[(size_t)3*incident[(size_t)v][m]], tn); for (int j = 0; j < 3; j++) own[j] += tn[j]; }
+        if (Dot(dir, own) > 0.0) for (int j = 0; j < 3; j++) dir[j] = -dir[j];   // the sheets face each other: back into its own wall
       }
-      for (size_t q = 0; q < pairs.size() && ok; q++)
+      if (!Normalize(dir)) continue;
+      bool done = false;
+      if (!fixed[(size_t)v]) done = push(v, dir, sep - d);
+      if (!done)
       {
-        // nor has such a cap a crease to keep: its apex comes back over
-        // the long edge through the neighbour's plane, which this test
-        // would refuse (the caps left after the first relaxation stood
-        // 3 to 5 degrees off their neighbours, 2026-09-30)
-        const size_t at = (size_t)(std::find(tris.begin(), tris.end(), pairs[q].t) - tris.begin());
-        if (options.freeThinCaps && at < tris.size() && oldAngles[at] < 5.0) continue;
-        const double after = intoAngle(&out.triangles[(size_t)3*pairs[q].t], &out.triangles[(size_t)3*pairs[q].u], pairs[q].p, pairs[q].q);
-        if (after < minEdgeAngle && after < pairs[q].before) ok = false;
+        // the triangle's free corners off the point instead
+        const ll *T = &out.triangles[(size_t)3*tNear];
+        double back[3] = {-dir[0], -dir[1], -dir[2]};
+        for (int j = 0; j < 3; j++) if (push(T[j], back, sep - d)) done = true;
       }
-      if (!ok) for (int j = 0; j < 3; j++) out.points[(size_t)3*v + j] = old[j];
-      for (size_t q = 0; q < tris.size(); q++) guard.Add(tris[q]);
-      if (!ok) continue;
-      out.numBandPointsMoved++;
+      if (done) out.numBandPointsSeparated++;
     }
   };
   // 3. the collapse of a band's short edges: an edge between two free
@@ -7473,6 +7633,7 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
     {
       flipsPass(band);
       movesPass(k, fraction, band);
+      separatePass(band);
     }
   }
   // What the relaxation broke is undone where it broke: the triangles

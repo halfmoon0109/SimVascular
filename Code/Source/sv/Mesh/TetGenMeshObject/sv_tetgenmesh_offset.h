@@ -749,6 +749,8 @@ struct JunctionShell
   long long numBandPointsMoved = 0;
   long long numBandCreasePoints = 0;     // band points held still for lying on a crease edge (BandRelaxation::creaseDegrees)
   long long numBandSlotPoints = 0;       // band points in a slot between two walls, smoothed without the step back onto the level (BandRelaxation::slotSizes)
+  long long numBandPointsTooClose = 0;   // band points found within BandRelaxation::separation of a shell triangle they are not joined to (the sheets touching)
+  long long numBandPointsSeparated = 0;  // of them, pushed off to the separation
   long long numBandChordsBefore = 0;     // band triangles whose centre stands off the level by more than a tenth of their mean edge (a chord over a valley), before the relaxation
   long long numBandChordsAfter = 0;      // and after it
   long long numBandTriangles = 0;
@@ -802,6 +804,7 @@ struct BandRelaxation
   bool freeThinCaps = true;       // a triangle under 5 degrees keeps neither its normal nor its creases when its point moves
   double creaseDegrees = 35.0;    // the points on a band edge whose two triangles turn more than this, both lying on the level, stay where they are and the edge is not flipped: a valley cut into the level surface (Options::creaseDegrees) would otherwise be smoothed back into a zigzag; zero or less holds nothing
   double slotSizes = 1.0;         // a band point with the level of a facing wall within this many local sizes of it is in a slot between two walls: it is smoothed toward its neighbours without being put back onto the level, so that the band roofs the groove over evenly instead of dipping into it here and there (2026-10-23); zero or less treats no point so; the roof keeps within a third of the layer spacing of its level, so that the roofs of neighbouring levels stay apart
+  double separation = 0.2;        // a band point may not come within this fraction of the local size of a shell triangle it is not joined to (two sheets touching: the mesher fills the gap with flat tetrahedra); such a point is pushed off; 0 turns it off
 };
 
 /**
@@ -1179,6 +1182,12 @@ public:
   /// Whether the triangle T (point ids) passes through a live triangle near
   /// it that is not leaving.
   bool Crosses(const long long T[3]);
+
+  /// The distance from p to the nearest live triangle, not leaving, within
+  /// `within` of p (as the grid's cells allow) that has none of the `except`
+  /// points as a corner; infinity when there is none. The triangle found
+  /// goes to `nearest` and the closest point on it to `closest`.
+  double Nearest(const double p[3], double within, const long long *except, int numExcept, long long &nearest, double closest[3]);
 
 private:
   void Box(const long long *T, int lo[3], int hi[3]) const;
