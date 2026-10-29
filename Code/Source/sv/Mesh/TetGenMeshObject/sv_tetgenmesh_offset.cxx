@@ -6476,7 +6476,30 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
       }
     }
   }
-  const double foldCos = std::cos(1.0*M_PI/180.0);
+  // A fold-back sharper than this across a shared edge: the strip doubling
+  // back over the obstacle, or over its own last triangle (below). It was
+  // a degree, which let a strip triangle lie 1.8 degrees off its two
+  // neighbours in the strip, facing against them (the user's model,
+  // 2026-10-29: a tooth of three sound angles on the outer surface, which
+  // no relaxation could turn back since every move keeps a triangle facing
+  // the way it did). No strip bends back under thirty degrees for a
+  // reason: a valley line crossing the chain is the one place, and there
+  // the fault is on every path alike.
+  const double foldCos = std::cos(30.0*M_PI/180.0);
+  // whether two triangles on the edge p-q, with far corners x and y, fold
+  // back on each other: the far corners on the same side of the edge and
+  // their planes within the fold angle
+  auto foldsBack = [&](ll p, ll q, ll x, ll y) -> bool
+  {
+    double e[3], px[3], py[3], cx[3], cy[3];
+    Sub(at(q), at(p), e);
+    Sub(at(x), at(p), px);
+    Sub(at(y), at(p), py);
+    Cross(e, px, cx);
+    Cross(e, py, cy);
+    const double lx = Norm(cx), ly = Norm(cy);
+    return lx > 0.0 && ly > 0.0 && Dot(cx, cy) > foldCos*lx*ly;
+  };
   auto faults = [&](ll a, ll b, ll c) -> int
   {
     int bad = 0;
@@ -6516,14 +6539,7 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
           ll myFar = -1;
           for (int j = 0; j < 3; j++) if (tri[j] != sp[0] && tri[j] != sp[1]) myFar = tri[j];
           if (myFar < 0 || far < 0) continue;
-          double e[3], pm[3], po[3], cm[3], co[3];
-          Sub(at(sp[1]), at(sp[0]), e);
-          Sub(at(myFar), at(sp[0]), pm);
-          Sub(at(far), at(sp[0]), po);
-          Cross(e, pm, cm);
-          Cross(e, po, co);
-          const double lm = Norm(cm), lo2 = Norm(co);
-          if (lm > 0.0 && lo2 > 0.0 && Dot(cm, co) > foldCos*lm*lo2) bad++;
+          if (foldsBack(sp[0], sp[1], myFar, far)) bad++;
           continue;
         }
         if (svenvelope::TrianglesCross(points, tri, ob)) bad++;
@@ -6549,42 +6565,74 @@ int ZipChains(const std::vector<double> &points, const std::vector<long long> &c
     }
     return 0;
   }
-  std::vector<double> length(nI*nJ, std::numeric_limits<double>::max());
-  std::vector<int> bad(nI*nJ, std::numeric_limits<int>::max());
-  std::vector<unsigned char> from(nI*nJ, 0);   // 1: from (i-1, j) by a's edge; 2: from (i, j-1) by b's edge
-  length[0] = 0.0;
-  bad[0] = 0;
-  auto relax = [&](size_t fromIdx, size_t toIdx, int stepBad, double stepLength, unsigned char how)
+  // A state is the corner (i, j) with the step that reached it (1: from
+  // (i-1, j) along a, so the last triangle is (A(i-1), A(i), B(j)); 2: from
+  // (i, j-1) along b, the last triangle (A(i), B(j), B(j-1))); both last
+  // triangles share the diagonal A(i)-B(j) with whichever comes next, so
+  // the next triangle's fold back over the last one is a fault of the
+  // step, like a fold over an obstacle. The start has no last triangle.
+  const size_t numCells = nI*nJ;
+  std::vector<double> length(2*numCells, std::numeric_limits<double>::max());
+  std::vector<int> bad(2*numCells, std::numeric_limits<int>::max());
+  std::vector<unsigned char> from(2*numCells, 0);   // the step that reached the state before this one (0 at the start)
+  auto state = [&](size_t i, size_t j, int how) -> size_t { return (size_t)(how - 1)*numCells + i*nJ + j; };
+  auto relax = [&](int fromBad, double fromLength, unsigned char fromHow, size_t toIdx, int stepBad, double stepLength)
   {
-    const int b2 = bad[fromIdx] + stepBad;
-    const double l2 = length[fromIdx] + stepLength;
-    if (b2 < bad[toIdx] || (b2 == bad[toIdx] && l2 < length[toIdx])) { bad[toIdx] = b2; length[toIdx] = l2; from[toIdx] = how; }
+    const int b2 = fromBad + stepBad;
+    const double l2 = fromLength + stepLength;
+    if (b2 < bad[toIdx] || (b2 == bad[toIdx] && l2 < length[toIdx])) { bad[toIdx] = b2; length[toIdx] = l2; from[toIdx] = fromHow; }
   };
+  // the first step, from the start
+  if (stepsA > 0) relax(0, 0.0, 0, state(1, 0, 1), faults(A(0), A(1), B(0)), dist(A(1), B(0)));
+  if (stepsB > 0) relax(0, 0.0, 0, state(0, 1, 2), faults(A(0), B(1), B(0)), dist(A(0), B(1)));
   for (size_t i = 0; i < nI; i++)
   {
     for (size_t j = 0; j < nJ; j++)
     {
-      const size_t idx = i*nJ + j;
-      if (bad[idx] == std::numeric_limits<int>::max()) continue;
-      if (i + 1 < nI) relax(idx, (i + 1)*nJ + j, faults(A(i), A(i + 1), B(j)), dist(A(i + 1), B(j)), 1);
-      if (j + 1 < nJ) relax(idx, i*nJ + j + 1, faults(A(i), B(j + 1), B(j)), dist(A(i), B(j + 1)), 2);
+      for (int how = 1; how <= 2; how++)
+      {
+        if ((how == 1 && i == 0) || (how == 2 && j == 0)) continue;
+        const size_t idx = state(i, j, how);
+        if (bad[idx] == std::numeric_limits<int>::max()) continue;
+        const ll lastFar = (how == 1) ? A(i - 1) : B(j - 1);
+        if (i + 1 < nI)
+        {
+          const int stepBad = faults(A(i), A(i + 1), B(j)) + (foldsBack(A(i), B(j), lastFar, A(i + 1)) ? 1 : 0);
+          relax(bad[idx], length[idx], (unsigned char)how, state(i + 1, j, 1), stepBad, dist(A(i + 1), B(j)));
+        }
+        if (j + 1 < nJ)
+        {
+          const int stepBad = faults(A(i), B(j + 1), B(j)) + (foldsBack(A(i), B(j), lastFar, B(j + 1)) ? 1 : 0);
+          relax(bad[idx], length[idx], (unsigned char)how, state(i, j + 1, 2), stepBad, dist(A(i), B(j + 1)));
+        }
+      }
     }
   }
-  // the path read back
+  // the better of the two end states, and the path read back
+  int how = 0;
+  {
+    const size_t e1 = state(stepsA, stepsB, 1), e2 = state(stepsA, stepsB, 2);
+    const bool has1 = stepsA > 0 && bad[e1] != std::numeric_limits<int>::max();
+    const bool has2 = stepsB > 0 && bad[e2] != std::numeric_limits<int>::max();
+    if (has1 && (!has2 || bad[e1] < bad[e2] || (bad[e1] == bad[e2] && length[e1] <= length[e2]))) how = 1;
+    else if (has2) how = 2;
+  }
+  if (how == 0) { error = "the zip lost its way"; return 1; }
+  if (numFaultsOut != nullptr) *numFaultsOut = bad[state(stepsA, stepsB, how)];
   std::vector<ll> back;
   size_t i = stepsA, j = stepsB;
   while (i > 0 || j > 0)
   {
-    const unsigned char how = from[i*nJ + j];
+    const unsigned char before = from[state(i, j, how)];
     if (how == 1) { i--; back.push_back(A(i)); back.push_back(A(i + 1)); back.push_back(B(j)); }
     else if (how == 2) { j--; back.push_back(A(i)); back.push_back(B(j + 1)); back.push_back(B(j)); }
     else { error = "the zip lost its way"; return 1; }
+    how = before;
   }
   for (size_t m = back.size(); m >= 3; m -= 3)
   {
     triangles.push_back(back[m - 3]); triangles.push_back(back[m - 2]); triangles.push_back(back[m - 1]);
   }
-  if (numFaultsOut != nullptr) *numFaultsOut = bad[stepsA*nJ + stepsB];
   return 0;
 }
 
@@ -6995,9 +7043,33 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
       // the triangles around must keep facing the way they did, and
       // none may lie down on a neighbour across any of its edges
       const std::vector<ll> &tris = incident[(size_t)v];
-      std::vector<std::array<double, 3> > oldNormals(tris.size());
+      std::vector<std::array<double, 3> > oldNormals(tris.size()), refNormals(tris.size());
       std::vector<double> oldAngles(tris.size());
       for (size_t q = 0; q < tris.size(); q++) { double tn[3]; normalOf(&out.triangles[(size_t)3*tris[q]], tn); oldNormals[q] = {tn[0], tn[1], tn[2]}; oldAngles[q] = smallestAngle(&out.triangles[(size_t)3*tris[q]]); }
+      // what each triangle's neighbours face: the unit normals of the
+      // triangles across its edges that do not move with v (the same
+      // surface, alive), summed - the reference a tooth is turned back to
+      {
+        std::vector<ll> others;
+        for (size_t q = 0; q < tris.size(); q++)
+        {
+          refNormals[q] = {0.0, 0.0, 0.0};
+          const ll *T = &out.triangles[(size_t)3*tris[q]];
+          for (int j = 0; j < 3; j++)
+          {
+            acrossEdge(T[j], T[(j + 1)%3], tris.data(), (int)tris.size(), others);
+            for (size_t m2 = 0; m2 < others.size(); m2++)
+            {
+              const ll u = others[m2];
+              if (dead[(size_t)u] || out.markers[(size_t)u] != out.markers[(size_t)tris[q]]) continue;
+              double un[3];
+              normalOf(&out.triangles[(size_t)3*u], un);
+              const double l = Norm(un);
+              if (l > 0.0) for (int k = 0; k < 3; k++) refNormals[q][k] += un[k]/l;
+            }
+          }
+        }
+      }
       std::vector<EdgePair> pairs;
       pairsOf(tris, nullptr, 0, pairs);
       // the triangles around leave the guard's cells before the point
@@ -7011,13 +7083,29 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
         double tn[3];
         normalOf(&out.triangles[(size_t)3*tris[q]], tn);
         const double *on = oldNormals[q].data();
+        const double *rn = refNormals[q].data();
         // a triangle under 5 degrees has no normal to keep: the caps
         // the zipper leaves stand off the surface with their apex on
         // the neighbour's side of the long edge, and the move that
         // pulls the apex back turns such a normal right over (2026-09-30,
         // the user's model: 37 of the 42 band triangles left under 10
-        // degrees were caps whose every flip and move this refused)
-        if ((oldAngles[q] >= 5.0 || !options.freeThinCaps) && !(tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0)) ok = false;
+        // degrees were caps whose every flip and move this refused).
+        // A tooth - a sound triangle facing against the neighbours
+        // across its edges, which the zipper or the level surface left -
+        // keeps nothing either: it may turn over to face with them, and
+        // keeping it facing the way it did was what held every tooth in
+        // place through the rounds (the user's model, 2026-10-29).
+        // A thin cap turned over must at least face with its neighbours
+        // where it has any: a cap let turn either way grew, over the
+        // rounds, into a sound triangle facing the wrong way, which the
+        // rule then held (the relaxation made 37 teeth of the pieces' 39
+        // on the user's model, 2026-10-29).
+        const bool keptFacing = tn[0]*on[0] + tn[1]*on[1] + tn[2]*on[2] > 0.0;
+        const bool hasReference = Dot(rn, rn) > 0.0;
+        const bool facesWithNeighbours = hasReference && tn[0]*rn[0] + tn[1]*rn[1] + tn[2]*rn[2] > 0.0;
+        const bool wasTooth = hasReference && !(on[0]*rn[0] + on[1]*rn[1] + on[2]*rn[2] > 0.0);
+        if (oldAngles[q] < 5.0 && options.freeThinCaps) { if (hasReference && !facesWithNeighbours) ok = false; }
+        else if (!keptFacing && !(wasTooth && facesWithNeighbours)) ok = false;
         else if (smallestAngle(&out.triangles[(size_t)3*tris[q]]) < std::min(5.0, oldAngles[q])) ok = false;
         else if (guard.Crosses(&out.triangles[(size_t)3*tris[q]])) ok = false;
       }
