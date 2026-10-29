@@ -13,6 +13,9 @@
 # 직전에 메셔가 남김)도 복사한다: 웹 세션이 재빌드 없이 오프셋 면부터 혼합 벽까지
 # 재현하는 입력이다. 실행마다 같은 내용으로 다시 써지므로 모델이나 두께가 바뀔
 # 때만 커밋에 잡힌다(압축 바이너리, 수십 MB; GitHub 한도 100 MB).
+# 혼합 벽 채움에서 가장 납작한 사면체 다섯 자리 둘레의 접합 셸(wall_fill_worst_shell.vtp,
+# 수천 삼각형, 수십 KB)도 복사한다: 웹 세션이 그 자리 삼각형의 모양을 보고 띠 완화·
+# 지퍼의 처방을 정하는 데 쓴다. 실행마다 다시 써지므로 바뀔 때만 커밋에 잡힌다.
 
 $ErrorActionPreference = "Stop"
 
@@ -30,6 +33,7 @@ New-Item -ItemType Directory -Force -Path $DestLogs | Out-Null
 Copy-Item -Path (Join-Path $SourceLogs "*.log") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
 Copy-Item -Path (Join-Path $WorkRoot "wall_*_crossings*.vtp") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
 Copy-Item -Path (Join-Path $WorkRoot "wall_offset_diagnostics.vtp") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
+Copy-Item -Path (Join-Path $WorkRoot "wall_fill_worst_shell.vtp") -Destination $DestLogs -Force -ErrorAction SilentlyContinue
 
 Push-Location $RepoRoot
 try {

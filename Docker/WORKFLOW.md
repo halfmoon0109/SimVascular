@@ -143,7 +143,10 @@ effect: ...`, envelope/슬리버 정리 통계, 진단 vtp 절대 경로 등)은
 찍히므로, **메싱을 돌린 뒤 GUI를 닫고 호스트에서 `scripts\build.ps1`을 실행하면**
 빌드 로그와 메싱 로그가 함께 저장소 `logs/`에 커밋된다. 따로 `| tee` 하거나 터미널
 출력을 복사할 필요 없다. 트림 뒤 교차가 남아 메셔가 `/work`에 쓰는 교차 진단
-`wall_*_crossings*.vtp`도 같은 스크립트가 `logs/`로 복사해 함께 커밋한다.
+`wall_*_crossings*.vtp`, 오프셋 직전의 벽 인터페이스 `wall_offset_diagnostics.vtp`,
+혼합 벽 채움의 가장 납작한 자리 둘레 셸 `wall_fill_worst_shell.vtp`도 같은 스크립트가
+`logs/`로 복사해 함께 커밋한다(새 진단 파일을 추가하면 `scripts/build.ps1`의
+`Copy-Item` 목록에도 넣어야 한다 — 2026-10-29, 두 실행이 셸 파일 없이 올라온 뒤).
 
 ### 빌드 반영 검증(실행 전 확인용)
 ```bash
