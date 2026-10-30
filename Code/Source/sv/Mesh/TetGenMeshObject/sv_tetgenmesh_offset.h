@@ -967,6 +967,9 @@ struct SliverReport
   long long numFlips23 = 0, numFlips32 = 0;
   long long numPointsMoved = 0;
   long long numMoves = 0;
+  long long numSplits = 0;        // slivers split by a point added above them (SplitSlivers)
+  long long numPointsAdded = 0;   // the points added, at the end of the point list
+  long long numSplitsRefused = 0; // slivers with facet faces whose split found no place for the point
 };
 
 /**
@@ -1016,6 +1019,32 @@ long long FlipSlivers(const std::vector<double> &points, std::vector<long long> 
 long long ImproveSlivers(std::vector<double> &points, std::vector<long long> &tetrahedra,
     const std::vector<unsigned char> &fixed, const std::vector<long long> &facets, double thresholdDegrees,
     int passes, double maxMoveFraction, SliverReport &report);
+
+/**
+ * @brief Split the slivers that lie on the facets, which no flip or move can take.
+ *
+ * A tetrahedron under the threshold with a face on the facets, every corner
+ * of it fixed: the two facets meeting at a slight fold with the sliver
+ * between them is the usual case (the user's model, 2026-10-30: 210 of the
+ * 377 zone tetrahedra under 5 degrees, 31 of the 42 under 1, were two
+ * interface facets with a sliver across their fold; the mesher's own
+ * sliver splitting cannot put a point on a facet edge). The sliver and its
+ * neighbours across its non-facet faces make a cavity; a point is put
+ * inside it where the smallest dihedral angle of the tetrahedra joining it
+ * to the cavity's boundary faces is largest (a coordinate search from the
+ * cavity's centre), and those replace the cavity's tetrahedra when that
+ * angle beats the cavity's own smallest and reaches a degree. Failing that
+ * the cavity is grown by the neighbours' neighbours, up to three rings. The
+ * point goes to the end of the point list; the tetrahedra are compacted.
+ * @param points The points; grown by the points added.
+ * @param tetrahedra Four point ids per tetrahedron; rewritten.
+ * @param facets Three point ids per facet triangle.
+ * @param thresholdDegrees The dihedral angle under which a tetrahedron is a sliver.
+ * @param report numSplits, numPointsAdded, numSplitsRefused and the counts before and after.
+ * @return The number of splits made.
+ */
+long long SplitSlivers(std::vector<double> &points, std::vector<long long> &tetrahedra,
+    const std::vector<long long> &facets, double thresholdDegrees, SliverReport &report);
 
 /**
  * @brief The tetrahedra on each of the given triangles, up to two per

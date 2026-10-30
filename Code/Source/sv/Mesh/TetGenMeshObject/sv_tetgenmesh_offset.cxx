@@ -8224,6 +8224,225 @@ long long FlipSlivers(const std::vector<double> &points, std::vector<long long> 
   return report.numFlips23 + report.numFlips32;
 }
 
+//---------------
+// SplitSlivers
+//---------------
+// See the header.
+long long SplitSlivers(std::vector<double> &points, std::vector<long long> &tetrahedra,
+    const std::vector<long long> &facets, double thresholdDegrees, SliverReport &report)
+{
+  report = SliverReport();
+  report.numTetrahedra = (ll)(tetrahedra.size()/4);
+  report.numTetrahedraAfter = report.numTetrahedra;
+  if (points.empty() || report.numTetrahedra == 0) return 0;
+  std::vector<std::array<ll, 3> > facetSet;
+  facetSet.reserve(facets.size()/3);
+  for (size_t i = 0; i + 2 < facets.size(); i += 3)
+  {
+    std::array<ll, 3> key = {facets[i], facets[i + 1], facets[i + 2]};
+    std::sort(key.begin(), key.end());
+    facetSet.push_back(key);
+  }
+  std::sort(facetSet.begin(), facetSet.end());
+  auto isFacet = [&](ll a, ll b, ll c) -> bool
+  {
+    std::array<ll, 3> key = {a, b, c};
+    std::sort(key.begin(), key.end());
+    return std::binary_search(facetSet.begin(), facetSet.end(), key);
+  };
+  std::vector<std::vector<ll> > incident((size_t)(points.size()/3));
+  std::vector<double> angle;
+  std::vector<char> sign;
+  for (ll t = 0; t < report.numTetrahedra; t++)
+  {
+    const ll *q = &tetrahedra[(size_t)4*t];
+    for (int m = 0; m < 4; m++) incident[(size_t)q[m]].push_back(t);
+    angle.push_back(TetrahedronMinDihedral(points, q));
+    sign.push_back(TetrahedronVolume6(points, q) >= 0.0 ? 1 : -1);
+    if (angle.back() < thresholdDegrees) report.numUnderBefore++;
+    if (angle.back() < 1.0) report.numUnder1Before++;
+    report.smallestBefore = std::min(report.smallestBefore, angle.back());
+  }
+  auto alive = [&](ll t) { return tetrahedra[(size_t)4*t] >= 0; };
+  // the other tetrahedron on a face of t, or -1
+  auto acrossFace = [&](ll t, ll a, ll b, ll c) -> ll
+  {
+    const std::vector<ll> &list = incident[(size_t)a];
+    for (size_t m = 0; m < list.size(); m++)
+    {
+      const ll u = list[m];
+      if (u == t || !alive(u)) continue;
+      const ll *q = &tetrahedra[(size_t)4*u];
+      int hits = 0;
+      for (int k = 0; k < 4; k++) if (q[k] == b || q[k] == c) hits++;
+      if (hits == 2) return u;
+    }
+    return -1;
+  };
+  const int faces[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
+  const ll ntOriginal = report.numTetrahedra;
+  for (ll t = 0; t < ntOriginal; t++)
+  {
+    if (!alive(t) || angle[(size_t)t] >= thresholdDegrees) continue;
+    const ll q0[4] = {tetrahedra[(size_t)4*t], tetrahedra[(size_t)4*t + 1], tetrahedra[(size_t)4*t + 2], tetrahedra[(size_t)4*t + 3]};
+    int numFacetFaces = 0;
+    for (int f = 0; f < 4; f++) if (isFacet(q0[faces[f][0]], q0[faces[f][1]], q0[faces[f][2]])) numFacetFaces++;
+    if (numFacetFaces == 0) continue;   // the flips and the moves have those
+    const char s = sign[(size_t)t];
+    bool done = false;
+    // The cavity grown up to three rings: on the user's model (2026-10-30)
+    // the sliver with its neighbours alone split 288 of 600 (under one
+    // degree 42 -> 15), two rings 387 (-> 9), three 434 (-> 5); the floor
+    // of a degree on the new tetrahedra made no difference to the count.
+    const int maxGrow = 4;
+    const double floor = 1.0;
+    for (int grow = 0; grow < maxGrow && !done; grow++)
+    {
+      // the cavity: the sliver, its neighbours across its non-facet faces,
+      // and (grown) theirs
+      std::vector<ll> cavity;
+      cavity.push_back(t);
+      std::vector<ll> frontier;
+      frontier.push_back(t);
+      bool sound = true;
+      for (int ring = 0; ring <= grow && sound; ring++)
+      {
+        std::vector<ll> next;
+        for (size_t c = 0; c < frontier.size() && sound; c++)
+        {
+          const ll u = frontier[c];
+          const ll *qu = &tetrahedra[(size_t)4*u];
+          for (int f = 0; f < 4; f++)
+          {
+            const ll a = qu[faces[f][0]], b = qu[faces[f][1]], d = qu[faces[f][2]];
+            if (isFacet(a, b, d)) continue;
+            const ll v = acrossFace(u, a, b, d);
+            if (v < 0) { if (ring == 0) sound = false; continue; }   // the sliver's own face on the hull: nothing to do
+            if (sign[(size_t)v] != s) { sound = false; break; }
+            if (std::find(cavity.begin(), cavity.end(), v) != cavity.end()) continue;
+            cavity.push_back(v);
+            next.push_back(v);
+          }
+        }
+        frontier.swap(next);
+      }
+      if (!sound || cavity.size() < 2) break;
+      // the boundary faces of the cavity, as faces of a cavity tetrahedron
+      // (its fourth corner inside), with the point to come in that corner's
+      // place: (face, apex) keeps the mesh's orientation
+      std::vector<std::array<ll, 3> > boundary;
+      std::vector<char> inside;   // per boundary face: the sign of (face, a point inside the cavity)
+      double centre[3] = {0.0, 0.0, 0.0};
+      std::set<ll> cavityPoints;
+      for (size_t c = 0; c < cavity.size(); c++)
+      {
+        const ll *qc = &tetrahedra[(size_t)4*cavity[c]];
+        for (int m = 0; m < 4; m++) cavityPoints.insert(qc[m]);
+        for (int f = 0; f < 4; f++)
+        {
+          const ll a = qc[faces[f][0]], b = qc[faces[f][1]], d = qc[faces[f][2]];
+          const ll v = acrossFace(cavity[c], a, b, d);
+          if (v >= 0 && std::find(cavity.begin(), cavity.end(), v) != cavity.end()) continue;
+          std::array<ll, 3> face = {a, b, d};
+          boundary.push_back(face);
+          const ll withApex[4] = {a, b, d, qc[f]};
+          const double v6 = TetrahedronVolume6(points, withApex);
+          inside.push_back(v6 >= 0.0 ? 1 : -1);
+        }
+      }
+      for (std::set<ll>::const_iterator it = cavityPoints.begin(); it != cavityPoints.end(); ++it) for (int k = 0; k < 3; k++) centre[k] += points[(size_t)3*(*it) + k]/(double)cavityPoints.size();
+      double oldMin = 180.0, scale = 0.0;
+      for (size_t c = 0; c < cavity.size(); c++) oldMin = std::min(oldMin, angle[(size_t)cavity[c]]);
+      for (std::set<ll>::const_iterator it = cavityPoints.begin(); it != cavityPoints.end(); ++it) scale = std::max(scale, Distance(&points[(size_t)3*(*it)], centre));
+      if (!(scale > 0.0)) break;
+      // the smallest dihedral angle of the tetrahedra joining x to the
+      // boundary faces, negative when any is turned or flat
+      auto quality = [&](const double x[3]) -> double
+      {
+        const ll xId = (ll)(points.size()/3);
+        points.insert(points.end(), x, x + 3);
+        double worst = 180.0;
+        for (size_t b = 0; b < boundary.size() && worst > 0.0; b++)
+        {
+          const ll q[4] = {boundary[b][0], boundary[b][1], boundary[b][2], xId};
+          const double v = TetrahedronVolume6(points, q);
+          if (v == 0.0 || (v >= 0.0 ? 1 : -1) != inside[b]) worst = -1.0;
+          else worst = std::min(worst, TetrahedronMinDihedral(points, q));
+        }
+        points.resize(points.size() - 3);
+        return worst;
+      };
+      // the point sought from the cavity's centre by a coordinate search,
+      // the step a quarter of the cavity's reach halved down six times
+      double x[3] = {centre[0], centre[1], centre[2]};
+      double best = quality(x);
+      double step = 0.25*scale;
+      const double dirs[14][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1},{1,1,1},{1,1,-1},{1,-1,1},{1,-1,-1},{-1,1,1},{-1,1,-1},{-1,-1,1},{-1,-1,-1}};
+      for (int halving = 0; halving < 7; halving++)
+      {
+        bool improved = true;
+        for (int iter = 0; iter < 20 && improved; iter++)
+        {
+          improved = false;
+          for (int d = 0; d < 14; d++)
+          {
+            const double l = std::sqrt(dirs[d][0]*dirs[d][0] + dirs[d][1]*dirs[d][1] + dirs[d][2]*dirs[d][2]);
+            double y[3] = {x[0] + step*dirs[d][0]/l, x[1] + step*dirs[d][1]/l, x[2] + step*dirs[d][2]/l};
+            const double qy = quality(y);
+            if (qy > best + 1.0e-6) { best = qy; for (int k = 0; k < 3; k++) x[k] = y[k]; improved = true; }
+          }
+        }
+        step *= 0.5;
+      }
+      if (!(best > oldMin + 1.0e-3) || best < floor) continue;   // grown next, or given up
+      // the split: the cavity out, the point in, its tetrahedra on
+      const ll xId = (ll)(points.size()/3);
+      points.insert(points.end(), x, x + 3);
+      incident.push_back(std::vector<ll>());
+      for (size_t c = 0; c < cavity.size(); c++)
+      {
+        const ll u = cavity[c];
+        const ll *qu = &tetrahedra[(size_t)4*u];
+        for (int m = 0; m < 4; m++)
+        {
+          std::vector<ll> &list = incident[(size_t)qu[m]];
+          list.erase(std::remove(list.begin(), list.end(), u), list.end());
+        }
+        tetrahedra[(size_t)4*u] = -1;
+      }
+      for (size_t b = 0; b < boundary.size(); b++)
+      {
+        // written with the mesh's orientation: (face, x) has the inside
+        // sign, so the face is reversed where that is not the mesh's
+        ll q[4] = {boundary[b][0], boundary[b][1], boundary[b][2], xId};
+        if (inside[b] != s) std::swap(q[0], q[1]);
+        const ll id = (ll)(tetrahedra.size()/4);
+        tetrahedra.insert(tetrahedra.end(), q, q + 4);
+        for (int m = 0; m < 4; m++) incident[(size_t)q[m]].push_back(id);
+        angle.push_back(TetrahedronMinDihedral(points, q));
+        sign.push_back(s);
+      }
+      report.numSplits++;
+      report.numPointsAdded++;
+      done = true;
+    }
+    if (!done) report.numSplitsRefused++;
+  }
+  std::vector<ll> compact;
+  compact.reserve(tetrahedra.size());
+  for (size_t u = 0; u < tetrahedra.size()/4; u++)
+  {
+    if (tetrahedra[4*u] < 0) continue;
+    for (int m = 0; m < 4; m++) compact.push_back(tetrahedra[4*u + m]);
+    if (angle[u] < thresholdDegrees) report.numUnderAfter++;
+    if (angle[u] < 1.0) report.numUnder1After++;
+    report.smallestAfter = std::min(report.smallestAfter, angle[u]);
+  }
+  tetrahedra.swap(compact);
+  report.numTetrahedraAfter = (ll)(tetrahedra.size()/4);
+  return report.numSplits;
+}
+
 //-----------------
 // ImproveSlivers
 //-----------------
@@ -8261,7 +8480,37 @@ long long ImproveSlivers(std::vector<double> &points, std::vector<long long> &te
     report.numMoves += moves.numMoves;
     if (first.numFlips23 + first.numFlips32 + moves.numMoves + last.numFlips23 + last.numFlips32 == 0) break;
   }
-  return report.numFlips23 + report.numFlips32 + report.numMoves;
+  // The slivers on the facets, which the above cannot take, split by a
+  // point above them; the points added are free, so the moves and flips
+  // run once more over what the splits made.
+  {
+    SliverReport split;
+    SplitSlivers(points, tetrahedra, facets, thresholdDegrees, split);
+    report.numSplits = split.numSplits;
+    report.numPointsAdded = split.numPointsAdded;
+    report.numSplitsRefused = split.numSplitsRefused;
+    report.numTetrahedraAfter = split.numTetrahedraAfter;
+    report.numUnderAfter = split.numUnderAfter;
+    report.numUnder1After = split.numUnder1After;
+    report.smallestAfter = split.smallestAfter;
+    if (split.numSplits > 0)
+    {
+      std::vector<unsigned char> fixedNow(fixed);
+      fixedNow.resize(points.size()/3, 0);
+      SliverReport moves, last;
+      ExudeSlivers(points, tetrahedra, fixedNow, thresholdDegrees, passes, maxMoveFraction, moves);
+      FlipSlivers(points, tetrahedra, facets, thresholdDegrees, passes, last);
+      report.numTetrahedraAfter = last.numTetrahedraAfter;
+      report.numUnderAfter = last.numUnderAfter;
+      report.numUnder1After = last.numUnder1After;
+      report.smallestAfter = last.smallestAfter;
+      report.numFlips23 += last.numFlips23;
+      report.numFlips32 += last.numFlips32;
+      report.numPointsMoved += moves.numPointsMoved;
+      report.numMoves += moves.numMoves;
+    }
+  }
+  return report.numFlips23 + report.numFlips32 + report.numMoves + report.numSplits;
 }
 
 //------------------------

@@ -1098,6 +1098,62 @@ static void TestMicroEdges()
   Check(reports[0].numMicroEdgesWelded > 0, "the level on the offset met cloud points all but on it, whose micro edges were welded");
 }
 
+// 7. A sliver across the fold of two facets, every corner fixed: the split
+// puts a point above it and leaves sound tetrahedra, the volume and the
+// facets as they were.
+static void TestSplitSliver()
+{
+  printf("test 7: a sliver between two facets meeting at a slight fold, split by a point above it\n");
+  // the facets ABC and ABD in the plane z = 0 folded by 0.2 degrees at AB, the
+  // sliver ABCD, and the two tetrahedra above its inner faces with the apex Z
+  std::vector<double> pts;
+  auto add = [&](double x, double y, double z) { pts.push_back(x); pts.push_back(y); pts.push_back(z); return (ll)(pts.size()/3 - 1); };
+  const double tilt = std::tan(0.2*M_PI/180.0);
+  const ll A = add(0.0, -0.5, 0.0), B = add(0.0, 0.5, 0.0), C = add(-0.8, 0.0, 0.8*tilt), D = add(0.8, 0.0, 0.8*tilt);
+  const ll Z = add(0.0, 0.0, 1.2);
+  std::vector<ll> tets;
+  auto addTet = [&](ll a, ll b, ll c, ll d) { const ll q[4] = {a, b, c, d}; tets.insert(tets.end(), q, q + 4); };
+  addTet(A, B, C, D);
+  addTet(A, C, D, Z); addTet(B, D, C, Z);   // above the inner faces ACD and BCD
+  // the orientation made consistent: every tetrahedron positive
+  for (size_t t = 0; t + 3 < tets.size(); t += 4)
+  {
+    const ll *q = &tets[t];
+    double u[3], v[3], w[3], n[3];
+    Sub(&pts[3*q[1]], &pts[3*q[0]], u); Sub(&pts[3*q[2]], &pts[3*q[0]], v); Sub(&pts[3*q[3]], &pts[3*q[0]], w); Cross(u, v, n);
+    if (Dot(n, w) < 0.0) std::swap(tets[t + 2], tets[t + 3]);
+  }
+  std::vector<ll> facets;
+  facets.push_back(A); facets.push_back(B); facets.push_back(C);
+  facets.push_back(A); facets.push_back(B); facets.push_back(D);
+  auto volumeOf = [&](const std::vector<ll> &T) { double s = 0.0; for (size_t t = 0; t + 3 < T.size(); t += 4) { const ll *q = &T[t]; double u[3], v[3], w[3], n[3]; Sub(&pts[3*q[1]], &pts[3*q[0]], u); Sub(&pts[3*q[2]], &pts[3*q[0]], v); Sub(&pts[3*q[3]], &pts[3*q[0]], w); Cross(u, v, n); s += std::fabs(Dot(n, w))/6.0; } return s; };
+  auto minDihedral = [&](const ll *q) { const int faces[4][3] = {{1,2,3},{0,3,2},{0,1,3},{0,2,1}}; double N[4][3]; for (int f = 0; f < 4; f++) { double u[3], v[3]; Sub(&pts[3*q[faces[f][1]]], &pts[3*q[faces[f][0]]], u); Sub(&pts[3*q[faces[f][2]]], &pts[3*q[faces[f][0]]], v); Cross(u, v, N[f]); double l = Norm(N[f]); for (int k = 0; k < 3; k++) N[f][k] /= l > 0 ? l : 1; } double m = 180.0; for (int a = 0; a < 4; a++) for (int b = a + 1; b < 4; b++) { double c = -Dot(N[a], N[b]); c = std::max(-1.0, std::min(1.0, c)); m = std::min(m, std::acos(c)*180.0/M_PI); } return m; };
+  const double volumeBefore = volumeOf(tets);
+  double smallestBefore = 180.0; for (size_t t = 0; t + 3 < tets.size(); t += 4) smallestBefore = std::min(smallestBefore, minDihedral(&tets[t]));
+  const size_t numPointsBefore = pts.size()/3;
+  svoffset::SliverReport r;
+  svoffset::SplitSlivers(pts, tets, facets, 5.0, r);
+  double smallestAfter = 180.0; ll turned = 0;
+  for (size_t t = 0; t + 3 < tets.size(); t += 4)
+  {
+    const ll *q = &tets[t];
+    double u[3], v[3], w[3], n[3];
+    Sub(&pts[3*q[1]], &pts[3*q[0]], u); Sub(&pts[3*q[2]], &pts[3*q[0]], v); Sub(&pts[3*q[3]], &pts[3*q[0]], w); Cross(u, v, n);
+    if (Dot(n, w) <= 0.0) turned++;
+    smallestAfter = std::min(smallestAfter, minDihedral(q));
+  }
+  // the facets are still faces of exactly one tetrahedron each
+  int onABC = 0, onABD = 0;
+  for (size_t t = 0; t + 3 < tets.size(); t += 4) { int a = 0, b = 0, c = 0, d = 0; for (int m = 0; m < 4; m++) { if (tets[t + m] == A) a++; if (tets[t + m] == B) b++; if (tets[t + m] == C) c++; if (tets[t + m] == D) d++; } if (a && b && c) onABC++; if (a && b && d) onABD++; }
+  printf("  before: %zu tetrahedra, smallest dihedral %.3f; after: %zu tetrahedra on %zu points (%lld split, %lld added, %lld refused), smallest %.3f, turned %lld, volume %.6f -> %.6f\n",
+      (size_t)(r.numTetrahedra), smallestBefore, tets.size()/4, pts.size()/3, r.numSplits, r.numPointsAdded, r.numSplitsRefused, smallestAfter, turned, volumeBefore, volumeOf(tets));
+  Check(r.numSplits == 1 && pts.size()/3 == numPointsBefore + 1, "the sliver on the two facets is split by one point added");
+  Check(smallestBefore < 1.0 && smallestAfter > 5.0, "the fill's smallest dihedral angle goes from under a degree to over five");
+  Check(turned == 0, "no tetrahedron is turned");
+  Check(std::fabs(volumeOf(tets) - volumeBefore) < 1.0e-9, "the volume is as it was");
+  Check(onABC == 1 && onABD == 1, "each facet is still the face of one tetrahedron");
+}
+
 int main()
 {
   TestFoldCount();
@@ -1113,6 +1169,7 @@ int main()
   TestTrimFlatCap();
   TestLayers();
   TestMicroEdges();
+  TestSplitSliver();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }

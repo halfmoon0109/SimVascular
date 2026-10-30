@@ -3604,11 +3604,45 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       {
         svoffset::ExudeSlivers(fillPoints, fillTets, fillFixed, sliverDegrees, 5, 0.35, sliver);
       }
-      fprintf(stdout,"  the fill's slivers eased: tetrahedra under %.3g degrees %lld -> %lld, under 1 degree %lld -> %lld, the smallest dihedral angle %.3f -> %.3f; %lld flips across a face and %lld around an edge (%lld tetrahedra -> %lld), %lld moves of %lld points (%lld of the shell's points, on the outer surface alone, and the mesher's %lld were free)\n",
+      fprintf(stdout,"  the fill's slivers eased: tetrahedra under %.3g degrees %lld -> %lld, under 1 degree %lld -> %lld, the smallest dihedral angle %.3f -> %.3f; %lld flips across a face and %lld around an edge (%lld tetrahedra -> %lld), %lld moves of %lld points (%lld of the shell's points, on the outer surface alone, and the mesher's %lld were free); %lld slivers lying on the facets split by a point added above them (%lld found no place for one)\n",
           sliverDegrees, sliver.numUnderBefore, sliver.numUnderAfter, sliver.numUnder1Before, sliver.numUnder1After,
           sliver.smallestBefore, sliver.smallestAfter, sliver.numFlips23, sliver.numFlips32, sliver.numTetrahedra, sliver.numTetrahedraAfter,
-          sliver.numMoves, sliver.numPointsMoved, numShellFree, numOut - numIn);
-      if (sliver.numMoves > 0)
+          sliver.numMoves, sliver.numPointsMoved, numShellFree, numOut - numIn, sliver.numSplits, sliver.numSplitsRefused);
+      // The points the splits added go to the end of the mesher's point list,
+      // with no marker and zero attributes, like its own Steiner points.
+      const long long numNow = (long long)(fillPoints.size()/3);
+      if (numNow > numOut)
+      {
+        double *grown = new double[3*numNow];
+        for (long long i = 0; i < 3*numNow; i++) grown[i] = fillPoints[(size_t)i];
+        delete [] shellOutMesh->pointlist;
+        shellOutMesh->pointlist = grown;
+        if (shellOutMesh->pointmarkerlist != nullptr)
+        {
+          int *markers = new int[numNow];
+          for (long long i = 0; i < numNow; i++) markers[i] = i < numOut ? shellOutMesh->pointmarkerlist[i] : 0;
+          delete [] shellOutMesh->pointmarkerlist;
+          shellOutMesh->pointmarkerlist = markers;
+        }
+        if (shellOutMesh->pointattributelist != nullptr && shellOutMesh->numberofpointattributes > 0)
+        {
+          const long long na = shellOutMesh->numberofpointattributes;
+          double *attributes = new double[na*numNow];
+          for (long long i = 0; i < na*numNow; i++) attributes[i] = i < na*numOut ? shellOutMesh->pointattributelist[i] : 0.0;
+          delete [] shellOutMesh->pointattributelist;
+          shellOutMesh->pointattributelist = attributes;
+        }
+        if (shellOutMesh->pointmtrlist != nullptr && shellOutMesh->numberofpointmtrs > 0)
+        {
+          const long long nm = shellOutMesh->numberofpointmtrs;
+          double *mtr = new double[nm*numNow];
+          for (long long i = 0; i < nm*numNow; i++) mtr[i] = i < nm*numOut ? shellOutMesh->pointmtrlist[i] : 0.0;
+          delete [] shellOutMesh->pointmtrlist;
+          shellOutMesh->pointmtrlist = mtr;
+        }
+        shellOutMesh->numberofpoints = (int)numNow;
+      }
+      if (sliver.numMoves > 0 || numNow > numOut)
       {
         for (long long i = 0; i < 3*numOut; i++)
         {
@@ -3629,7 +3663,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
           }
         }
       }
-      if (sliver.numFlips23 + sliver.numFlips32 > 0)
+      if (sliver.numFlips23 + sliver.numFlips32 + sliver.numSplits > 0)
       {
         delete [] shellOutMesh->tetrahedronlist;
         shellOutMesh->numberoftetrahedra = (int)(fillTets.size()/4);
@@ -3646,7 +3680,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         {
           std::vector<long long> faces(shellOutMesh->trifacelist, shellOutMesh->trifacelist + 3*(long long)shellOutMesh->numberoftrifaces);
           std::vector<long long> adjacent;
-          svoffset::FindTetrahedraOnFaces(fillTets, numOut, faces, adjacent);
+          svoffset::FindTetrahedraOnFaces(fillTets, numNow, faces, adjacent);
           for (size_t i = 0; i < adjacent.size(); i++)
           {
             shellOutMesh->adjtetlist[i] = (int)adjacent[i];
