@@ -1,0 +1,25 @@
+Reading plugin paths SV_PLUGIN_PATH environment variable...
+
+
+[Thu Oct 29 13:18:29 2026 
+2.235] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
+[2.239] OpenCASCADE module loaded.
+sv4guiDataManagerPluginActivator::start()
+sv4guiMeshingPluginActivator::start()
+[2.719] BlueBerry Workbench ready
+Expand
+Expand
+Expand
+Expand
+!32.528! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.528! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.529! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.482! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.483! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.483! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.538! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.538! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.538! WARNING: QPainter::end: Painter ended with 2 saved states
+[35.849] Closing workbench...
+!35.895! WARNING: Empty filename passed to function
+[35.908] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
