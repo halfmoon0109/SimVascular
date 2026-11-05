@@ -31,6 +31,9 @@
 
 #include "sv4gui_MeshTetGen.h"
 
+#include <algorithm>
+#include <cstdio>
+
 #include "sv4gui_StringUtils.h"
 #include "sv4gui_ModelUtils.h"
 
@@ -233,6 +236,27 @@ bool sv4guiMeshTetGen::Execute(std::string flag, double values[20], std::string 
     }
     else if(flag=="generateMesh")
     {
+        // The model's faces by id, so that the mesher's log (which knows the
+        // faces by their ModelFaceID only) can be read against the names the
+        // user gave them: "ID: name (type)", in id order.
+        if(m_ModelElement!=nullptr)
+        {
+            std::vector<sv4guiModelElement::svFace*> faces=m_ModelElement->GetFaces();
+            std::vector<std::pair<int,std::string> > byId;
+            for(size_t i=0;i<faces.size();i++)
+            {
+                if(faces[i]==nullptr) continue;
+                byId.push_back(std::make_pair(faces[i]->id, faces[i]->name+(faces[i]->type.empty()?std::string(""):" ("+faces[i]->type+")")));
+            }
+            std::sort(byId.begin(), byId.end());
+            fprintf(stdout,"Model faces by ModelFaceID (ID: name (type)), %zu faces:", byId.size());
+            for(size_t i=0;i<byId.size();i++)
+            {
+                fprintf(stdout," %d: %s;", byId[i].first, byId[i].second.c_str());
+            }
+            fprintf(stdout,"\n");
+            fflush(stdout);
+        }
         if(m_cvTetGenMesh->GenerateMesh()!=SV_OK)
         {
             msg="Failed in generating mesh";
