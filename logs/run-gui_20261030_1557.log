@@ -544,3 +544,15 @@ Min / Avg / Max: 1.000 / 2.289 / 618.764
 Aspect Ratio > 3 (distorted): 2485608 (10.46%)
 Aspect Ratio > 10 (poor): 270830 (1.14%)
 Assessment: POOR (consider adjusting the mesh size options)
+!3380.871! WARNING: QPainter::end: Painter ended with 2 saved states
+!3380.872! WARNING: QPainter::end: Painter ended with 2 saved states
+!3380.873! WARNING: QPainter::end: Painter ended with 2 saved states
+!3383.030! WARNING: QPainter::end: Painter ended with 2 saved states
+!3383.030! WARNING: QPainter::end: Painter ended with 2 saved states
+!3383.030! WARNING: QPainter::end: Painter ended with 2 saved states
+!3393.585! WARNING: QPainter::end: Painter ended with 2 saved states
+!3393.586! WARNING: QPainter::end: Painter ended with 2 saved states
+!3393.586! WARNING: QPainter::end: Painter ended with 2 saved states
+!3394.682! WARNING: QPainter::end: Painter ended with 2 saved states
+!3394.682! WARNING: QPainter::end: Painter ended with 2 saved states
+!3394.682! WARNING: QPainter::end: Painter ended with 2 saved states
