@@ -1,0 +1,9 @@
+name,local_size
+wall_L_ACA,0.1
+wall_R_ACA,0.1
+wall_L_Vertebral_top,0.25
+wall_R_Vertebral_top,0.25
+wall_Basiliar,0.27
+wall_L_PMA,0.065
+wall_R_PMA,0.065
+wall_R_PCA_P1_f2,0.11
