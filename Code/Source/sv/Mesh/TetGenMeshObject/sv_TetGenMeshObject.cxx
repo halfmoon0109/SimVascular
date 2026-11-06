@@ -32,6 +32,7 @@
 #include "SimVascular.h"
 
 #include "sv_TetGenMeshObject.h"
+#include <string>
 #include "sv_SolidModel.h"
 #include "sv_misc_utils.h"
 #include "sv_polydatasolid_utils.h"
@@ -946,6 +947,10 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
     if (TGenUtils_SetLocalMeshSize(polydatasolid_,values[0],values[1]) != SV_OK)
       return SV_ERROR;
     meshoptions_.secondarrayfunction = 1;
+    // Echoed so that the log shows what reached the mesher for each face
+    // (the user's run of 2026-11-06: two faces set to 0.065 came out at
+    // edges of 0.37, and nothing in the log said what size they had).
+    fprintf(stdout,"  local edge size: face %d = %g\n", (int)values[0], values[1]);
   }
   else if(!strncmp(flags,"SurfaceMeshFlag",15)) {
 #ifdef SV_USE_VMTK
@@ -1960,6 +1965,35 @@ int cvTetGenMeshObject::GenerateSurfaceRemesh()
   // either the model surface or the remeshing itself.
   TGenUtils_ReportSurfaceTriangleQuality(polydatasolid_, "before surface remesh");
 
+  // The sizing the remesh will see, by model face: the mean over the face's
+  // points of the sizing function where it is set, and how many points of
+  // the face have none (those take the midpoint of the remesh's size range).
+  if (useSizingFunction && meshsizingfunction != nullptr && polydatasolid_->GetCellData()->GetArray("ModelFaceID") != nullptr)
+  {
+    auto faceIdsForSizes = vtkIntArray::SafeDownCast(polydatasolid_->GetCellData()->GetArray("ModelFaceID"));
+    std::map<int, std::set<vtkIdType> > pointsOfFace;
+    for (vtkIdType cellId = 0; cellId < polydatasolid_->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      polydatasolid_->GetCellPoints(cellId, npts, pts);
+      for (vtkIdType j = 0; j < npts; j++) pointsOfFace[faceIdsForSizes->GetValue(cellId)].insert(pts[j]);
+    }
+    fprintf(stdout,"Sizing function by model face before the surface remesh (mean of the points with a size; points without one):");
+    for (std::map<int, std::set<vtkIdType> >::const_iterator it = pointsOfFace.begin(); it != pointsOfFace.end(); ++it)
+    {
+      double sum = 0.0;
+      long long numSet = 0, numUnset = 0;
+      for (std::set<vtkIdType>::const_iterator q = it->second.begin(); q != it->second.end(); ++q)
+      {
+        const double v = meshsizingfunction->GetValue(*q);
+        if (v > 0.0) { sum += v; numSet++; } else numUnset++;
+      }
+      fprintf(stdout," %d: %s%s;", it->first, numSet > 0 ? std::to_string(sum/(double)numSet).substr(0, 6).c_str() : "-", numUnset > 0 ? (" (" + std::to_string(numUnset) + " unset)").c_str() : "");
+    }
+    fprintf(stdout,"\n");
+  }
+
 #ifdef SV_USE_MMG
   if (meshoptions_.usemmg)
   {
@@ -1972,6 +2006,8 @@ int cvTetGenMeshObject::GenerateSurfaceRemesh()
     double hausd = meshoptions_.hausd;
     double dumAng = 45.0;
     double hgrad = 1.01;
+    fprintf(stdout,"Surface remesh with MMG: point sizes 0.8 times the sizing function, %g where none is set; hmin %g, hmax %g, hausd %g are computed but not handed to MMG (its own defaults apply)\n",
+        0.8*0.5*(mmg_maxsize + mmg_minsize), mmg_minsize, mmg_maxsize, hausd);
 
     //Generate Surface Remeshing
     if(MMGUtils_SurfaceRemeshing(polydatasolid_, mmg_minsize,
