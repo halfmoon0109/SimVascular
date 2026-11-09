@@ -41,6 +41,8 @@
 #include "vtkThreshold.h"
 
 #include "sv_mmg_mesh_utils.h"
+#include <algorithm>
+#include <map>
 #include "sv_polydatasolid_utils.h"
 #include "sv_vtk_utils.h"
 
@@ -400,7 +402,68 @@ int MMGUtils_SurfaceRemeshing(vtkPolyData *surface, double hmin, double hmax, do
   }
   if (VtkUtils_PDCheckArrayName(surface,1,"WallID"))
   {
-    if (MMGUtils_PassCellArray(pd,surface,"WallID","WallID") != SV_OK)
+    // Which triangles are wall: by the face id MMG kept on each triangle
+    // (its parent's 'ModelFaceID' ref), looked up in the original surface's
+    // face id -> WallID table, and not by the nearest original cell. A
+    // triangle MMG makes in a cap's plane with all three corners on the
+    // cap's rim lies as near to the wall cells as to the cap's and was
+    // taken for wall, while its face id is the cap's: a flat ear on the
+    // wall surface in the cap plane, which the solid's offset field wrapped
+    // and whose cap annulus then lay on it (the user's L PMA cap,
+    // 2026-11-09). The nearest-cell pass stays for a surface without face
+    // ids.
+    auto origFaceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
+    auto origWallIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("WallID"));
+    auto newFaceIds = vtkIntArray::SafeDownCast(pd->GetCellData()->GetArray("ModelFaceID"));
+    if (origFaceIds != nullptr && origWallIds != nullptr && newFaceIds != nullptr)
+    {
+      std::map<int, int> wallOfFace;
+      for (vtkIdType c = 0; c < surface->GetNumberOfCells(); c++)
+      {
+        int &w = wallOfFace[origFaceIds->GetValue(c)];
+        w = std::max(w, origWallIds->GetValue(c));
+      }
+      // the nearest-cell answer alongside, to count where the two differ
+      vtkIdType numDiffer = 0, numCapEars = 0;
+      if (MMGUtils_PassCellArray(pd,surface,"WallID","WallID") == SV_OK)
+      {
+        auto passed = vtkIntArray::SafeDownCast(pd->GetCellData()->GetArray("WallID"));
+        auto byFace = vtkSmartPointer<vtkIntArray>::New();
+        byFace->SetName("WallID");
+        byFace->SetNumberOfComponents(1);
+        byFace->SetNumberOfTuples(pd->GetNumberOfCells());
+        vtkIdType numUnknown = 0;
+        for (vtkIdType c = 0; c < pd->GetNumberOfCells(); c++)
+        {
+          // a ref the original has no face for (a refinement region's, offset
+          // past the face ids) keeps the nearest cell's answer
+          std::map<int, int>::const_iterator it = wallOfFace.find(newFaceIds->GetValue(c));
+          const int w = it != wallOfFace.end() ? it->second : (passed != nullptr ? passed->GetValue(c) : 0);
+          if (it == wallOfFace.end()) numUnknown++;
+          byFace->SetValue(c, w);
+          if (passed != nullptr && passed->GetValue(c) != w) { numDiffer++; if (passed->GetValue(c) == 1 && w == 0) numCapEars++; }
+        }
+        if (numUnknown > 0) fprintf(stdout,"  %lld remeshed triangles carry a face id the original surface has not (refinement regions); the nearest original cell decides those\n", (long long)numUnknown);
+        pd->GetCellData()->RemoveArray("WallID");
+        pd->GetCellData()->AddArray(byFace);
+      }
+      else
+      {
+        auto byFace = vtkSmartPointer<vtkIntArray>::New();
+        byFace->SetName("WallID");
+        byFace->SetNumberOfComponents(1);
+        byFace->SetNumberOfTuples(pd->GetNumberOfCells());
+        for (vtkIdType c = 0; c < pd->GetNumberOfCells(); c++)
+        {
+          std::map<int, int>::const_iterator it = wallOfFace.find(newFaceIds->GetValue(c));
+          byFace->SetValue(c, it != wallOfFace.end() ? it->second : 0);
+        }
+        pd->GetCellData()->AddArray(byFace);
+      }
+      fprintf(stdout,"  wall triangles of the remeshed surface decided by their face id: %lld of %lld differ from the nearest original cell's answer (%lld of them cap triangles that the nearest cell called wall)\n",
+          (long long)numDiffer, (long long)pd->GetNumberOfCells(), (long long)numCapEars);
+    }
+    else if (MMGUtils_PassCellArray(pd,surface,"WallID","WallID") != SV_OK)
     {
       fprintf(stderr,"Error passing walls\n");
       MMGS_Free_all(MMG5_ARG_start,

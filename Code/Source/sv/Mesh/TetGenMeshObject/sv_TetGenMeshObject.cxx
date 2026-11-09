@@ -44,6 +44,7 @@
 #include "vtkGeometryFilter.h"
 #include "vtkCleanPolyData.h"
 #include "vtkSmartPointer.h"
+#include "vtkIdList.h"
 #include "vtkPoints.h"
 #include "vtkUnstructuredGrid.h"
 #include "vtkPolyData.h"
@@ -2036,6 +2037,38 @@ int cvTetGenMeshObject::GenerateSurfaceRemesh()
 #endif
 
   TGenUtils_ReportSurfaceTriangleQuality(polydatasolid_, "after surface remesh");
+  // Ears: a triangle with all three points on the open boundary (a cap rim)
+  // lies in the cap plane; the layers extrude nothing from it and the solid
+  // wall's offset wraps it as wall. None should be left after the remesh.
+  {
+    polydatasolid_->BuildLinks();
+    std::set<vtkIdType> rimPoints;
+    auto neighbours = vtkSmartPointer<vtkIdList>::New();
+    for (vtkIdType cellId = 0; cellId < polydatasolid_->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      polydatasolid_->GetCellPoints(cellId, npts, pts);
+      for (vtkIdType j = 0; j < npts; j++)
+      {
+        polydatasolid_->GetCellEdgeNeighbors(cellId, pts[j], pts[(j + 1) % npts], neighbours);
+        if (neighbours->GetNumberOfIds() == 0) { rimPoints.insert(pts[j]); rimPoints.insert(pts[(j + 1) % npts]); }
+      }
+    }
+    long long numEars = 0;
+    double firstAt[3] = {0.0, 0.0, 0.0};
+    for (vtkIdType cellId = 0; cellId < polydatasolid_->GetNumberOfCells(); cellId++)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      polydatasolid_->GetCellPoints(cellId, npts, pts);
+      if (npts != 3 || !rimPoints.count(pts[0]) || !rimPoints.count(pts[1]) || !rimPoints.count(pts[2])) continue;
+      if (numEars == 0) for (int k = 0; k < 3; k++) firstAt[k] = (polydatasolid_->GetPoint(pts[0])[k] + polydatasolid_->GetPoint(pts[1])[k] + polydatasolid_->GetPoint(pts[2])[k])/3.0;
+      numEars++;
+    }
+    fprintf(stdout,"  triangles of the remeshed surface with all three points on a cap rim (ears in the cap plane): %lld%s\n", numEars, numEars > 0 ? " - the first at" : "");
+    if (numEars > 0) fprintf(stdout,"    (%g, %g, %g)\n", firstAt[0], firstAt[1], firstAt[2]);
+  }
 
   int meshInfo[3];
   if (TGenUtils_CheckSurfaceMesh(polydatasolid_, meshInfo) != SV_OK)
