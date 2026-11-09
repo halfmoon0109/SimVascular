@@ -1,0 +1,142 @@
+Reading plugin paths SV_PLUGIN_PATH environment variable...
+
+
+[Mon Nov  9 18:11:11 2026 
+2.335] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
+[2.339] OpenCASCADE module loaded.
+sv4guiDataManagerPluginActivator::start()
+sv4guiMeshingPluginActivator::start()
+[2.804] BlueBerry Workbench ready
+Expand
+Expand
+Expand
+Expand
+!32.222! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.223! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.223! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.996! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.997! WARNING: QPainter::end: Painter ended with 2 saved states
+!32.997! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.030! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.030! WARNING: QPainter::end: Painter ended with 2 saved states
+!33.030! WARNING: QPainter::end: Painter ended with 2 saved states
+  local edge size: face 1 = 2.2
+  local edge size: face 2 = 2.2
+  local edge size: face 3 = 0.1
+  local edge size: face 4 = 0.8
+  local edge size: face 5 = 0.1
+  local edge size: face 6 = 0.7
+  local edge size: face 7 = 0.55
+  local edge size: face 8 = 2.2
+  local edge size: face 9 = 0.55
+  local edge size: face 10 = 0.5
+  local edge size: face 11 = 0.2
+  local edge size: face 12 = 0.2
+  local edge size: face 13 = 0.3
+  local edge size: face 14 = 0.2
+  local edge size: face 15 = 1.1
+  local edge size: face 16 = 0.9
+  local edge size: face 17 = 0.7
+  local edge size: face 18 = 0.22
+  local edge size: face 19 = 0.8
+  local edge size: face 20 = 0.9
+  local edge size: face 21 = 0.9
+  local edge size: face 22 = 0.5
+  local edge size: face 23 = 0.27
+  local edge size: face 24 = 0.5
+  local edge size: face 25 = 0.25
+  local edge size: face 26 = 0.5
+  local edge size: face 27 = 0.2
+  local edge size: face 28 = 0.9
+  local edge size: face 29 = 0.22
+  local edge size: face 30 = 0.065
+  local edge size: face 31 = 0.25
+  local edge size: face 32 = 0.11
+  local edge size: face 33 = 0.1
+  local edge size: face 34 = 0.065
+  local edge size: face 35 = 0.1
+  local edge size: face 36 = 0.22
+  local edge size: face 37 = 0.22
+  local edge size: face 38 = 0.065
+  local edge size: face 39 = 0.3
+  local edge size: face 40 = 0.065
+Model faces by ModelFaceID (ID: name (type)), 40 faces: 1: cap_Aorta_out (cap); 2: cap_Aorta (cap); 3: wall_L_ACA (wall); 4: wall_L_CCA (wall); 5: wall_R_ACA (wall); 6: wall_R_Vertebral_bottom (wall); 7: wall_L_ICA (wall); 8: wall_Aorta (wall); 9: wall_R_ICA (wall); 10: wall_L_ECA (wall); 11: wall_L_MCA (wall); 12: cap_R_MCA (cap); 13: wall_L_PCA (wall); 14: wall_R_MCA (wall); 15: wall_Brachiocephalic (wall); 16: wall_L_Subclavian (wall); 17: wall_L_Vertebral_bottom (wall); 18: wall_R_PCA_P2_PCoA_fetal2 (wall); 19: wall_R_CCA (wall); 20: cap_R_Subclavian (cap); 21: cap_L_Subclavian (cap); 22: cap_R_ECA (cap); 23: wall_Basiliar (wall); 24: cap_L_ECA (cap); 25: wall_L_Vertebral_top (wall); 26: wall_R_ECA (wall); 27: cap_L_MCA (cap); 28: wall_R_Subclavian (wall); 29: wall_L_PCoA (wall); 30: wall_L_PMA (wall); 31: wall_R_Vertebral_top (wall); 32: wall_R_PCA_P1_f2 (wall); 33: cap_R_ACA (cap); 34: wall_R_PMA (wall); 35: cap_L_ACA (cap); 36: wall_ACoA_small (wall); 37: cap_R_PCA_fetal_2 (cap); 38: cap_R_PMA (cap); 39: cap_L_PCA (cap); 40: cap_L_PMA (cap);
+Getting sizing function Surface
+Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 4218044
+  Min / Avg / Max: 1.000 / 1.157 / 46.986
+  Aspect ratio > 10: 1, > 30: 1, > 100: 0
+  aspect ratio 46.986 at (4.27209, -25.5107, 74.2352), edges 0.122389 0.160426 0.282619
+Sizing function by model face before the surface remesh (mean of the points with a size; points without one): 1: 2.2000; 2: 2.2000; 3: 0.1010; 4: 0.8010; 5: 0.1008; 6: 0.6997; 7: 0.5497; 8: 2.1990; 9: 0.5498; 10: 0.5000; 11: 0.2000; 12: 0.2000; 13: 0.2997; 14: 0.2000; 15: 1.0989; 16: 0.8996; 17: 0.6996; 18: 0.2197; 19: 0.7997; 20: 0.9000; 21: 0.9000; 22: 0.5000; 23: 0.2699; 24: 0.5000; 25: 0.2500; 26: 0.5000; 27: 0.2000; 28: 0.9000; 29: 0.2190; 30: 0.0650; 31: 0.2500; 32: 0.1100; 33: 0.1000; 34: 0.0650; 35: 0.1000; 36: 0.2200; 37: 0.2200; 38: 0.0650; 39: 0.3000; 40: 0.0650;
+Surface remesh with MMG: point sizes 0.8 times the sizing function, 0.124992 where none is set; hmin 0.07812, hmax 0.23436, hausd 1.5624 are computed but not handed to MMG (its own defaults apply)
+Remeshing surface with MMG...
+  -- MMGS, Release 5.3.8 (Apr. 10, 2017) 
+     Copyright (c) IMB-LJLL, 2004-
+     Jul  6 2026 02:09:01
+
+  -- MMGS: INPUT DATA
+  --  INPUT DATA COMPLETED.     0.000s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   MODULE MMGS: IMB-LJLL : 5.3.8 (Apr. 10, 2017)
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- PHASE 1 : ANALYSIS
+
+  -- MESH QUALITY   4218044
+     BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
+  -- PHASE 1 COMPLETED.     3.230s
+
+  -- PHASE 2 : ISOTROPIC MESHING
+        80486 splitted,  1712415 collapsed,    81563 swapped, 5 iter.
+
+  -- GRADATION : 1.300000
+         1181 splitted,       39 collapsed,       98 swapped, 3 iter.
+        79368 splitted,   172688 collapsed,    23142 swapped, 10342840 moved, 2 iter. 
+  -- PHASE 2 COMPLETED.     23.736s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   END OF MODULE MMGS: IMB-LJLL 
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- MESH QUALITY   822028
+     BEST   1.000000  AVRG.   0.977199  WRST.   0.133721 (233858)
+
+  -- MESH PACKED UP
+     NUMBER OF VERTICES     411008   CORNERS       10
+     NUMBER OF TRIANGLES    822028
+     NUMBER OF EDGES          2337   RIDGES      2337
+
+   MMGSLIB: ELAPSED TIME  27.060s
+Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 815634
+  Min / Avg / Max: 1.000 / 1.183 / 14.846
+  Aspect ratio > 10: 2, > 30: 0, > 100: 0
+  aspect ratio 14.846 at (-1.90658, -38.6918, 80.5627), edges 0.0932371 0.202807 0.110956
+  aspect ratio 10.204 at (1.796, -23.1709, 77.4991), edges 0.116265 0.207877 0.094618
+Checking surface mesh
+Regions: 1
+Number of Free Edges on Surface: 632
+Number of Non-Manifold Edges on Surface: 0
+[GenerateBoundaryLayerMesh] 
+[GenerateBoundaryLayerMesh] ========== cvTetGenMeshObject::GenerateBoundaryLayerMesh ==========
+[GenerateBoundaryLayerMesh] markerListName: CellEntityIds
+Surface triangle quality (fluid/wall interface surface), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 815634
+  Min / Avg / Max: 1.000 / 1.183 / 14.846
+  Aspect ratio > 10: 2, > 30: 0, > 100: 0
+  aspect ratio 14.846 at (-1.90658, -38.6918, 80.5627), edges 0.0932371 0.202807 0.110956
+  aspect ratio 10.204 at (1.796, -23.1709, 77.4991), edges 0.116265 0.207877 0.094618
+[GenerateBoundaryLayerMesh] negateWarpVectors: 1
+[GenerateBoundaryLayerMesh] useConstantThickness: 0
+[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals.
+Fluid boundary layer options in effect: MaxEdgeSize 0.1953, BLThicknessFactor 0.8, constant thickness 0 (total layer thickness 0.15624), NumSubLayers 3, SubLayerRatio 0.5
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [fluid boundary layer, inward]:
+  concave points: 407954 of 408113; points with t/R >= 1 / 2 / 4: 0/0/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  no point requests a thickness above its concave radius of curvature
+0 tangle triangles found
+Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: 0/0/0 of 408113
+No wall triangle of the boundary layer mesh has all its points among the first 408113 (the input surface's): the mesh is not laid out as the vmtk boundary layer generator lays it out, so the wall faces cannot be refined
+Problem refining the wall faces to the wall thickness
