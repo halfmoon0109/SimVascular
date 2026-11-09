@@ -3083,10 +3083,12 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
   if (blMesh == nullptr || refinedWall == nullptr) return SV_ERROR;
   auto faceIds = vtkIntArray::SafeDownCast(blMesh->GetCellData()->GetArray("ModelFaceID"));
   // The layer generator's cell entity ids: 9999 on the side walls closing the
-  // layers at a cap, 1 on the inner surface; a side-wall triangle can have
-  // all three points on the wall's rim (a flat one in the cap plane where the
-  // rim bends sharply), and then its points alone cannot tell it from a wall
-  // triangle.
+  // layers at a cap; the input surface's cells and the inner surface's both
+  // carry 1 (the glue sets the input to 1 so that the remeshing leaves it),
+  // so only the side walls can be told apart by it. A side-wall triangle can
+  // have all three points on the wall's rim (a flat one in the cap plane
+  // where the rim bends sharply), and then its points alone cannot tell it
+  // from a wall triangle.
   auto entityIds = blMesh->GetCellData()->GetArray("CellEntityIds");
   if (faceIds == nullptr)
   {
@@ -3135,8 +3137,7 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
       // it as if it were, the layer rims bulge into the lumen there and the
       // cap annulus comes to lie on it (the user's L PMA cap, 2026-11-09:
       // one such triangle, two folded edges, the shell refused).
-      const int entity = entityIds != nullptr ? (int)entityIds->GetTuple1(c) : 0;
-      const bool sidewall = entityIds != nullptr && (entity == 9999 || entity == 1);
+      const bool sidewall = entityIds != nullptr && (int)entityIds->GetTuple1(c) == 9999;
       const bool wall = onWallPoints && !sidewall;
       if (onWallPoints && sidewall) numSidewallOnRim++;
       mesh.triangleInts[wallFlag].push_back(wall ? 1 : 0);
