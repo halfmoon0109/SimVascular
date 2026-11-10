@@ -140,3 +140,6 @@ Concave curvature vs requested thickness (t/R, before any thickness reduction) [
 Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: 0/0/0 of 408113
 No wall triangle of the boundary layer mesh has all its points among the first 408113 (the input surface's): the mesh is not laid out as the vmtk boundary layer generator lays it out, so the wall faces cannot be refined
 Problem refining the wall faces to the wall thickness
+[123.126] Closing workbench...
+!123.178! WARNING: Empty filename passed to function
+[123.187] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)

@@ -1,0 +1,349 @@
+Reading plugin paths SV_PLUGIN_PATH environment variable...
+
+
+[Mon Nov  9 18:47:41 2026 
+2.188] Logfile: /home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log
+[2.193] OpenCASCADE module loaded.
+sv4guiDataManagerPluginActivator::start()
+sv4guiMeshingPluginActivator::start()
+[2.671] BlueBerry Workbench ready
+Expand
+Expand
+Expand
+Expand
+!30.341! WARNING: QPainter::end: Painter ended with 2 saved states
+!30.342! WARNING: QPainter::end: Painter ended with 2 saved states
+!30.342! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.116! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.116! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.116! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.148! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.148! WARNING: QPainter::end: Painter ended with 2 saved states
+!31.148! WARNING: QPainter::end: Painter ended with 2 saved states
+!38.777! WARNING: QPainter::end: Painter ended with 2 saved states
+!38.778! WARNING: QPainter::end: Painter ended with 2 saved states
+!38.778! WARNING: QPainter::end: Painter ended with 2 saved states
+!40.474! WARNING: QPainter::end: Painter ended with 2 saved states
+!40.474! WARNING: QPainter::end: Painter ended with 2 saved states
+!40.474! WARNING: QPainter::end: Painter ended with 2 saved states
+!42.664! WARNING: QPainter::end: Painter ended with 2 saved states
+!42.664! WARNING: QPainter::end: Painter ended with 2 saved states
+!42.665! WARNING: QPainter::end: Painter ended with 2 saved states
+!44.438! WARNING: QPainter::end: Painter ended with 2 saved states
+!44.438! WARNING: QPainter::end: Painter ended with 2 saved states
+!44.438! WARNING: QPainter::end: Painter ended with 2 saved states
+!44.568! WARNING: QPainter::end: Painter ended with 2 saved states
+!44.568! WARNING: QPainter::end: Painter ended with 2 saved states
+!44.568! WARNING: QPainter::end: Painter ended with 2 saved states
+!45.503! WARNING: QPainter::end: Painter ended with 2 saved states
+!45.503! WARNING: QPainter::end: Painter ended with 2 saved states
+!45.503! WARNING: QPainter::end: Painter ended with 2 saved states
+  local edge size: face 1 = 2.2
+  local edge size: face 2 = 2.2
+  local edge size: face 3 = 0.1
+  local edge size: face 4 = 0.8
+  local edge size: face 5 = 0.1
+  local edge size: face 6 = 0.7
+  local edge size: face 7 = 0.55
+  local edge size: face 8 = 2.2
+  local edge size: face 9 = 0.55
+  local edge size: face 10 = 0.5
+  local edge size: face 11 = 0.2
+  local edge size: face 12 = 0.2
+  local edge size: face 13 = 0.3
+  local edge size: face 14 = 0.2
+  local edge size: face 15 = 1.1
+  local edge size: face 16 = 0.9
+  local edge size: face 17 = 0.7
+  local edge size: face 18 = 0.22
+  local edge size: face 19 = 0.8
+  local edge size: face 20 = 0.9
+  local edge size: face 21 = 0.9
+  local edge size: face 22 = 0.5
+  local edge size: face 23 = 0.27
+  local edge size: face 24 = 0.5
+  local edge size: face 25 = 0.25
+  local edge size: face 26 = 0.5
+  local edge size: face 27 = 0.2
+  local edge size: face 28 = 0.9
+  local edge size: face 29 = 0.22
+  local edge size: face 30 = 0.065
+  local edge size: face 31 = 0.25
+  local edge size: face 32 = 0.11
+  local edge size: face 33 = 0.1
+  local edge size: face 34 = 0.065
+  local edge size: face 35 = 0.1
+  local edge size: face 36 = 0.22
+  local edge size: face 37 = 0.22
+  local edge size: face 38 = 0.065
+  local edge size: face 39 = 0.3
+  local edge size: face 40 = 0.065
+Model faces by ModelFaceID (ID: name (type)), 40 faces: 1: cap_Aorta_out (cap); 2: cap_Aorta (cap); 3: wall_L_ACA (wall); 4: wall_L_CCA (wall); 5: wall_R_ACA (wall); 6: wall_R_Vertebral_bottom (wall); 7: wall_L_ICA (wall); 8: wall_Aorta (wall); 9: wall_R_ICA (wall); 10: wall_L_ECA (wall); 11: wall_L_MCA (wall); 12: cap_R_MCA (cap); 13: wall_L_PCA (wall); 14: wall_R_MCA (wall); 15: wall_Brachiocephalic (wall); 16: wall_L_Subclavian (wall); 17: wall_L_Vertebral_bottom (wall); 18: wall_R_PCA_P2_PCoA_fetal2 (wall); 19: wall_R_CCA (wall); 20: cap_R_Subclavian (cap); 21: cap_L_Subclavian (cap); 22: cap_R_ECA (cap); 23: wall_Basiliar (wall); 24: cap_L_ECA (cap); 25: wall_L_Vertebral_top (wall); 26: wall_R_ECA (wall); 27: cap_L_MCA (cap); 28: wall_R_Subclavian (wall); 29: wall_L_PCoA (wall); 30: wall_L_PMA (wall); 31: wall_R_Vertebral_top (wall); 32: wall_R_PCA_P1_f2 (wall); 33: cap_R_ACA (cap); 34: wall_R_PMA (wall); 35: cap_L_ACA (cap); 36: wall_ACoA_small (wall); 37: cap_R_PCA_fetal_2 (cap); 38: cap_R_PMA (cap); 39: cap_L_PCA (cap); 40: cap_L_PMA (cap);
+Getting sizing function Surface
+Surface triangle quality (before surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 4218044
+  Min / Avg / Max: 1.000 / 1.157 / 46.986
+  Aspect ratio > 10: 1, > 30: 1, > 100: 0
+  aspect ratio 46.986 at (4.27209, -25.5107, 74.2352), edges 0.122389 0.160426 0.282619
+Sizing function by model face before the surface remesh (mean of the points with a size; points without one): 1: 2.2000; 2: 2.2000; 3: 0.1010; 4: 0.8010; 5: 0.1008; 6: 0.6997; 7: 0.5497; 8: 2.1990; 9: 0.5498; 10: 0.5000; 11: 0.2000; 12: 0.2000; 13: 0.2997; 14: 0.2000; 15: 1.0989; 16: 0.8996; 17: 0.6996; 18: 0.2197; 19: 0.7997; 20: 0.9000; 21: 0.9000; 22: 0.5000; 23: 0.2699; 24: 0.5000; 25: 0.2500; 26: 0.5000; 27: 0.2000; 28: 0.9000; 29: 0.2190; 30: 0.0650; 31: 0.2500; 32: 0.1100; 33: 0.1000; 34: 0.0650; 35: 0.1000; 36: 0.2200; 37: 0.2200; 38: 0.0650; 39: 0.3000; 40: 0.0650;
+Surface remesh with MMG: point sizes 0.8 times the sizing function, 0.124992 where none is set; hmin 0.07812, hmax 0.23436, hausd 1.5624 are computed but not handed to MMG (its own defaults apply)
+Remeshing surface with MMG...
+  -- MMGS, Release 5.3.8 (Apr. 10, 2017) 
+     Copyright (c) IMB-LJLL, 2004-
+     Jul  6 2026 02:09:01
+
+  -- MMGS: INPUT DATA
+  --  INPUT DATA COMPLETED.     0.000s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   MODULE MMGS: IMB-LJLL : 5.3.8 (Apr. 10, 2017)
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- PHASE 1 : ANALYSIS
+
+  -- MESH QUALITY   4218044
+     BEST   1.000000  AVRG.   0.980352  WRST.   0.042291 (2666216)
+  -- PHASE 1 COMPLETED.     3.122s
+
+  -- PHASE 2 : ISOTROPIC MESHING
+        80486 splitted,  1712415 collapsed,    81563 swapped, 5 iter.
+
+  -- GRADATION : 1.300000
+         1181 splitted,       39 collapsed,       98 swapped, 3 iter.
+        79368 splitted,   172688 collapsed,    23142 swapped, 10342840 moved, 2 iter. 
+  -- PHASE 2 COMPLETED.     23.588s
+
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+   END OF MODULE MMGS: IMB-LJLL 
+  &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&
+
+  -- MESH QUALITY   822028
+     BEST   1.000000  AVRG.   0.977199  WRST.   0.133721 (233858)
+
+  -- MESH PACKED UP
+     NUMBER OF VERTICES     411008   CORNERS       10
+     NUMBER OF TRIANGLES    822028
+     NUMBER OF EDGES          2337   RIDGES      2337
+
+   MMGSLIB: ELAPSED TIME  26.886s
+  wall triangles of the remeshed surface decided by their face id: 1 of 822028 differ from the nearest original cell's answer (1 of them cap triangles that the nearest cell called wall)
+Surface triangle quality (after surface remesh), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 815633
+  Min / Avg / Max: 1.000 / 1.183 / 14.846
+  Aspect ratio > 10: 2, > 30: 0, > 100: 0
+  aspect ratio 14.846 at (-1.90658, -38.6918, 80.5627), edges 0.0932371 0.202807 0.110956
+  aspect ratio 10.204 at (1.796, -23.1709, 77.4991), edges 0.116265 0.207877 0.094618
+  triangles of the remeshed surface with all three points on a cap rim (ears in the cap plane): 0
+Checking surface mesh
+Regions: 1
+Number of Free Edges on Surface: 631
+Number of Non-Manifold Edges on Surface: 0
+[GenerateBoundaryLayerMesh] 
+[GenerateBoundaryLayerMesh] ========== cvTetGenMeshObject::GenerateBoundaryLayerMesh ==========
+[GenerateBoundaryLayerMesh] markerListName: CellEntityIds
+Surface triangle quality (fluid/wall interface surface), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 815633
+  Min / Avg / Max: 1.000 / 1.183 / 14.846
+  Aspect ratio > 10: 2, > 30: 0, > 100: 0
+  aspect ratio 14.846 at (-1.90658, -38.6918, 80.5627), edges 0.0932371 0.202807 0.110956
+  aspect ratio 10.204 at (1.796, -23.1709, 77.4991), edges 0.116265 0.207877 0.094618
+[GenerateBoundaryLayerMesh] negateWarpVectors: 1
+[GenerateBoundaryLayerMesh] useConstantThickness: 0
+[GenerateBoundaryLayerMesh] boundarylayermesh_ has point normals.
+Fluid boundary layer options in effect: MaxEdgeSize 0.1953, BLThicknessFactor 0.8, constant thickness 0 (total layer thickness 0.15624), NumSubLayers 3, SubLayerRatio 0.5
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [fluid boundary layer, inward]:
+  concave points: 407954 of 408112; points with t/R >= 1 / 2 / 4: 0/0/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  no point requests a thickness above its concave radius of curvature
+0 tangle triangles found
+Wall extrusion depression (warp tilt from outward normal): points tilted >15/30/45 deg: 0/0/0 of 408112
+Wall faces refined to the wall thickness (ratio 1: a face's triangles are split in four until their mean edge is under 1 times its thickness, at most 2 times; only the fluid cells on the split edges, the first boundary layer sublayer, are cut):
+  the boundary layer mesh: 7340697 tetrahedra, 1635052 triangles of which 815633 on the wall (408112 wall points; 0 side-wall triangles with all three points on the wall's rim left out of the wall)
+  face 3: 143516 triangles, mean edge 0.08351, thickness 0.1, edge/thickness 0.835 -> 0 to 1 level(s) by triangle
+  face 4: 26942 triangles, mean edge 0.6554, thickness 0.85, edge/thickness 0.771 -> 0 to 1 level(s) by triangle
+  face 5: 147065 triangles, mean edge 0.08347, thickness 0.1, edge/thickness 0.835 -> 0 to 1 level(s) by triangle
+  face 6: 15878 triangles, mean edge 0.5691, thickness 0.52, edge/thickness 1.09 -> 0 to 1 level(s) by triangle
+  face 7: 24195 triangles, mean edge 0.4478, thickness 0.44, edge/thickness 1.02 -> 0 to 1 level(s) by triangle
+  face 8: 11190 triangles, mean edge 1.764, thickness 1.7, edge/thickness 1.04 -> 0 to 1 level(s) by triangle
+  face 9: 28237 triangles, mean edge 0.4473, thickness 0.44, edge/thickness 1.02 -> 0 to 1 level(s) by triangle
+  face 10: 8472 triangles, mean edge 0.4086, thickness 0.6, edge/thickness 0.681 -> 0 to 0 level(s) by triangle
+  face 11: 17538 triangles, mean edge 0.1641, thickness 0.25, edge/thickness 0.656 -> 0 to 0 level(s) by triangle
+  face 13: 21403 triangles, mean edge 0.2502, thickness 0.2, edge/thickness 1.25 -> 0 to 1 level(s) by triangle
+  face 14: 22898 triangles, mean edge 0.1642, thickness 0.25, edge/thickness 0.657 -> 0 to 0 level(s) by triangle
+  face 15: 7095 triangles, mean edge 0.8944, thickness 1.2, edge/thickness 0.745 -> 0 to 1 level(s) by triangle
+  face 16: 7182 triangles, mean edge 0.7364, thickness 0.93, edge/thickness 0.792 -> 0 to 1 level(s) by triangle
+  face 17: 16429 triangles, mean edge 0.5714, thickness 0.52, edge/thickness 1.1 -> 0 to 1 level(s) by triangle
+  face 18: 42900 triangles, mean edge 0.1714, thickness 0.18, edge/thickness 0.952 -> 0 to 1 level(s) by triangle
+  face 19: 21459 triangles, mean edge 0.6547, thickness 0.85, edge/thickness 0.77 -> 0 to 1 level(s) by triangle
+  face 23: 33814 triangles, mean edge 0.219, thickness 0.27, edge/thickness 0.811 -> 0 to 1 level(s) by triangle
+  face 25: 81372 triangles, mean edge 0.1977, thickness 0.25, edge/thickness 0.791 -> 0 to 1 level(s) by triangle
+  face 26: 13984 triangles, mean edge 0.4091, thickness 0.6, edge/thickness 0.682 -> 0 to 0 level(s) by triangle
+  face 28: 6198 triangles, mean edge 0.7384, thickness 0.93, edge/thickness 0.794 -> 0 to 1 level(s) by triangle
+  face 29: 4912 triangles, mean edge 0.1718, thickness 0.14, edge/thickness 1.23 -> 0 to 1 level(s) by triangle
+  face 30: 6042 triangles, mean edge 0.05524, thickness 0.065, edge/thickness 0.85 -> 0 to 1 level(s) by triangle
+  face 31: 91045 triangles, mean edge 0.1979, thickness 0.25, edge/thickness 0.792 -> 0 to 1 level(s) by triangle
+  face 32: 8839 triangles, mean edge 0.08688, thickness 0.11, edge/thickness 0.79 -> 0 to 1 level(s) by triangle
+  face 34: 6054 triangles, mean edge 0.05622, thickness 0.065, edge/thickness 0.865 -> 0 to 1 level(s) by triangle
+  face 36: 974 triangles, mean edge 0.1687, thickness 0.12, edge/thickness 1.41 -> 0 to 1 level(s) by triangle
+  0 wall triangles raised so that no two on one edge differ by more than one level; 197482 edges bisected over 1 level(s) (197482 per level), 197482 points added; tetrahedra 7340697 -> 7864977, triangles 1635052 -> 2030016
+  196766 wall midpoints moved onto the model's wall faces (mean 0.00565, the longest 0.105); 4 left where they were as farther off than a quarter of their edge, 712 as the move would fold a boundary layer tetrahedron
+  the wall surface for the solid: 1210500 triangles on 605594 points (was 815633 on 408112)
+WallRefineRatio 1: the wall faces were split (above) and the solid wall is built on the split surface
+Surface triangle quality (refined fluid/wall interface surface), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 1210500
+  Min / Avg / Max: 1.000 / 1.499 / 14.540
+  Aspect ratio > 10: 2, > 30: 0, > 100: 0
+  aspect ratio 14.540 at (-1.94728, -38.7216, 80.5762), edges 0.0466256 0.10138 0.0554764
+  aspect ratio 11.447 at (-1.8697, -38.6631, 80.5471), edges 0.0467211 0.101428 0.0558704
+Wall mesh options in effect: WallThickness 0.5, CurvatureFactor 0, SmoothingIterations 0, NumberOfWallLayers 3
+  local wall thickness by model face (others 0.5): 1:1.7 2:1.7 3:0.1 4:0.85 5:0.1 6:0.52 7:0.44 8:1.7 9:0.44 10:0.6 11:0.25 12:0.25 13:0.2 14:0.25 15:1.2 16:0.93 17:0.52 18:0.18 19:0.85 20:0.93 21:0.93 22:0.6 23:0.27 24:0.6 25:0.25 26:0.6 27:0.25 28:0.93 29:0.14 30:0.065 31:0.25 32:0.11 33:0.1 34:0.065 35:0.1 36:0.12 37:0.2 38:0.065 39:0.2 40:0.065
+  CurvatureFactor and SmoothingIterations are wedge-extrusion options: the TetGen fill ignores them (its ramp toward thicker neighbours, slope 0.5, grades the thickness)
+  the wall is filled with TetGen tetrahedra in 3 layer(s) through the thickness: 2 offset surface(s) at fractions of the thickness go into the shell as facets the mesher keeps, so each layer is one tetrahedron thick; SmoothingIterations and CurvatureFactor act on the thickness field only
+Concave curvature vs requested thickness (t/R, before any thickness reduction) [solid wall, outward]:
+  concave points: 227663 of 605594; points with t/R >= 1 / 2 / 4: 273/16/0
+  t/R > 1 means the extruded outer surface must self-intersect there whatever the extrusion does;
+  points using a near-degenerate triangle (altitude < 0.05 of the longest edge): 0
+  concave regions with t/R >= 1: 25 in total (separated by 8.012), worst 8 shown:
+    [1] t/R 2.71 (t 0.31, R_typical 0.1144, R_smallest 0.078959) at (-9.2633, -34.88, 65.851), 13 points
+    [2] t/R 2.64 (t 0.1225, R_typical 0.046368, R_smallest 0.030903) at (-3.971, -30.227, 71.45), 18 points
+    [3] t/R 2.43 (t 0.725, R_typical 0.29858, R_smallest 0.23087) at (-37.985, -27.927, -95.693), 28 points
+    [4] t/R 2.25 (t 0.29, R_typical 0.12906, R_smallest 0.11348) at (8.0452, -37.337, 66.235), 11 points
+    [5] t/R 2.09 (t 1.45, R_typical 0.69342, R_smallest 0.48716) at (-0.31698, -23.27, -176.05), 26 points
+    [6] t/R 1.87 (t 0.1025, R_typical 0.054711, R_smallest 0.034621) at (3.5994, -34.009, 74.191), 19 points
+    [7] t/R 1.79 (t 0.725, R_typical 0.40569, R_smallest 0.35205) at (21.428, -43.068, -90.5), 17 points
+    [8] t/R 1.78 (t 1.275, R_typical 0.71607, R_smallest 0.53557) at (10.813, -20.439, -170.97), 20 points
+    ... 121 further points with t/R >= 1 in the remaining 17 regions
+Wall thickness reduction (final vs requested): points below 90%/50%/25%: 0/0/0 of 605594
+  wrote wall_diagnostics.vtp in /work
+Thickness ramp toward thicker neighbours (fall of at most 0.5 per unit distance) [requested wall thickness]: raised 3588 of 605594 points; largest raise 0.34097 at (3.2715, -18.85, -172.56) (0.85 -> 1.191)
+Wall outer surface and its 2 layer surface(s) as offsets of the interface at 0.333 0.667 1 of the thickness, contoured from one distance field so that they are nested:
+  605594 interface points and 1210500 triangles
+  offset surface: the distance field: the interface, its collars and their search grid
+  offset surface: the gap to the wall facing each interface point
+  offset surface: the point cloud and the field on its outer layer
+  offset surface: the field on the cloud at this fraction of the thickness (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the Delaunay tetrahedralization of the cloud (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: marching tetrahedra over the cloud (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the decimation of the contour to the interface's size (surface 1 of 3, at 0.333 of the thickness)
+  offset surface: the field on the cloud at this fraction of the thickness (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: the Delaunay tetrahedralization of the cloud (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: marching tetrahedra over the cloud (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: the decimation of the contour to the interface's size (surface 2 of 3, at 0.667 of the thickness)
+  offset surface: the Delaunay tetrahedralization of the cloud (surface 3 of 3, at 1 of the thickness)
+  offset surface: marching tetrahedra over the cloud (surface 3 of 3, at 1 of the thickness)
+  offset surface: the decimation of the contour to the interface's size (surface 3 of 3, at 1 of the thickness)
+  thickness 0.065 to 1.7; 14 cap rims continued by collars of 1456 triangles
+  the field was sampled on 2426744 points (the interface and its offsets at 0.5, 1.5 and 3 of the thickness, the last no nearer than 1.5 edges, each offset point 0.1 of its distance off its ray); 67.4 s for the field
+Wall thickness against the gap to the wall facing it, by model face (the solid merges the two walls where the gap is under their thicknesses together; the junction zone grows where it is under twice that):
+  face 3: thickness 0.101 over 77621 points; gap to the facing wall 0.162 at the least, 1.05 at the tenth percentile; 169 points (0.2%) merge with the facing wall, 1758 (2.3%) within twice; the narrowest at (-2.177, -48.21, 95.39) facing face 5 (thickness 0.1) - the thickness here is more than half the gap: the walls merge
+  face 4: thickness 0.851 over 13701 points; gap to the facing wall 1.16 at the least, 3.66 at the tenth percentile; 30 points (0.2%) merge with the facing wall, 764 (5.6%) within twice; the narrowest at (26.28, -35.91, -76.67) facing face 10 (thickness 0.6) - the thickness here is more than half the gap: the walls merge
+  face 5: thickness 0.101 over 79667 points; gap to the facing wall 0.162 at the least, 1.4 at the tenth percentile; 142 points (0.2%) merge with the facing wall, 1493 (1.9%) within twice; the narrowest at (-2.207, -48.36, 95.34) facing face 3 (thickness 0.1) - the thickness here is more than half the gap: the walls merge
+  face 6: thickness 0.52 over 29277 points; gap to the facing wall 2.38 at the least, 3.09 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 21 (0.1%) within twice; the narrowest at (-33.66, -11.79, -59.51) facing face 6 (thickness 0.52)
+  face 7: thickness 0.44 over 38098 points; gap to the facing wall 0.39 at the least, 3.2 at the tenth percentile; 6 points (0.0%) merge with the facing wall, 103 (0.3%) within twice; the narrowest at (7.84, -37.25, 66.43) facing face 29 (thickness 0.14) - the thickness here is more than half the gap: the walls merge
+  face 8: thickness 1.7 over 18772 points; gap to the facing wall 3.17 at the least, 17.4 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 19 (0.1%) within twice; the narrowest at (-0.6345, -22.35, -176) facing face 4 (thickness 0.929)
+  face 9: thickness 0.44 over 44232 points; gap to the facing wall 0.262 at the least, 3.65 at the tenth percentile; 10 points (0.0%) merge with the facing wall, 187 (0.4%) within twice; the narrowest at (-9.116, -35, 65.87) facing face 18 (thickness 0.188) - the thickness here is more than half the gap: the walls merge
+  face 10: thickness 0.6 over 4226 points; gap to the facing wall 1.16 at the least, 2.66 at the tenth percentile; 60 points (1.4%) merge with the facing wall, 442 (10.5%) within twice; the narrowest at (25.92, -36.88, -76.14) facing face 4 (thickness 0.85) - the thickness here is more than half the gap: the walls merge
+  face 11: thickness 0.25 over 8715 points; gap to the facing wall 2.02 at the least, 2.31 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 0 (0.0%) within twice; the narrowest at (25.6, -42.83, 71.04) facing face 11 (thickness 0.25)
+  face 13: thickness 0.2 over 42594 points; gap to the facing wall 0.485 at the least, 1.85 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 98 (0.2%) within twice; the narrowest at (6.798, -31.23, 79.79) facing face 29 (thickness 0.14)
+  face 14: thickness 0.25 over 11395 points; gap to the facing wall 1.94 at the least, 2.06 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 0 (0.0%) within twice; the narrowest at (-26.15, -41.92, 70.14) facing face 14 (thickness 0.25)
+  face 15: thickness 1.19 over 3581 points; gap to the facing wall 0.657 at the least, 5.66 at the tenth percentile; 20 points (0.6%) merge with the facing wall, 214 (6.0%) within twice; the narrowest at (-31.76, -35.69, -149.9) facing face 19 (thickness 0.85) - the thickness here is more than half the gap: the walls merge
+  face 16: thickness 0.927 over 3724 points; gap to the facing wall 3.35 at the least, 5.76 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 0 (0.0%) within twice; the narrowest at (19.71, -14.67, -146.7) facing face 17 (thickness 0.52)
+  face 17: thickness 0.52 over 30425 points; gap to the facing wall 1.71 at the least, 2.92 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 26 (0.1%) within twice; the narrowest at (14.44, -14.86, -147.1) facing face 17 (thickness 0.52)
+  face 18: thickness 0.18 over 46609 points; gap to the facing wall 0.0976 at the least, 1.64 at the tenth percentile; 87 points (0.2%) merge with the facing wall, 826 (1.8%) within twice; the narrowest at (-4.13, -30.09, 71.54) facing face 34 (thickness 0.0877) - the thickness here is more than half the gap: the walls merge
+  face 19: thickness 0.849 over 10822 points; gap to the facing wall 0.274 at the least, 4.21 at the tenth percentile; 84 points (0.8%) merge with the facing wall, 522 (4.8%) within twice; the narrowest at (-37.77, -28.18, -95.47) facing face 26 (thickness 0.683) - the thickness here is more than half the gap: the walls merge
+  face 23: thickness 0.27 over 18391 points; gap to the facing wall 2.85 at the least, 3.72 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 0 (0.0%) within twice; the narrowest at (1.295, -23.43, 74.75) facing face 32 (thickness 0.11)
+  face 25: thickness 0.25 over 42329 points; gap to the facing wall 0.124 at the least, 2.59 at the tenth percentile; 29 points (0.1%) merge with the facing wall, 96 (0.2%) within twice; the narrowest at (5.36, -21.1, 21.39) facing face 31 (thickness 0.25) - the thickness here is more than half the gap: the walls merge
+  face 26: thickness 0.6 over 6977 points; gap to the facing wall 0.246 at the least, 2.3 at the tenth percentile; 124 points (1.8%) merge with the facing wall, 1089 (15.6%) within twice; the narrowest at (-38.22, -27.85, -95.45) facing face 19 (thickness 0.767) - the thickness here is more than half the gap: the walls merge
+  face 28: thickness 0.93 over 3130 points; gap to the facing wall 2.76 at the least, 5.13 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 5 (0.2%) within twice; the narrowest at (-26.97, -0.2896, -151.4) facing face 6 (thickness 0.52)
+  face 29: thickness 0.141 over 9644 points; gap to the facing wall 0.257 at the least, 0.814 at the tenth percentile; 33 points (0.3%) merge with the facing wall, 232 (2.4%) within twice; the narrowest at (3.47, -33.91, 74.42) facing face 30 (thickness 0.065) - the thickness here is more than half the gap: the walls merge
+  face 30: thickness 0.0654 over 3859 points; gap to the facing wall 0.237 at the least, 0.464 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 77 (2.0%) within twice; the narrowest at (3.65, -34.1, 74.3) facing face 29 (thickness 0.14)
+  face 31: thickness 0.25 over 47300 points; gap to the facing wall 0.0796 at the least, 2.83 at the tenth percentile; 32 points (0.1%) merge with the facing wall, 97 (0.2%) within twice; the narrowest at (5.312, -21.23, 21.37) facing face 25 (thickness 0.25) - the thickness here is more than half the gap: the walls merge
+  face 32: thickness 0.11 over 4466 points; gap to the facing wall 0.654 at the least, 0.84 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 0 (0.0%) within twice; the narrowest at (1.165, -23.87, 77.9) facing face 13 (thickness 0.2)
+  face 34: thickness 0.0668 over 4209 points; gap to the facing wall 0.105 at the least, 0.455 at the tenth percentile; 52 points (1.2%) merge with the facing wall, 172 (4.1%) within twice; the narrowest at (-4.183, -30.15, 71.61) facing face 18 (thickness 0.18) - the thickness here is more than half the gap: the walls merge
+  face 36: thickness 0.12 over 1830 points; gap to the facing wall 0.491 at the least, 0.814 at the tenth percentile; 0 points (0.0%) merge with the facing wall, 0 (0.0%) within twice; the narrowest at (-2.587, -39.09, 80.6) facing face 3 (thickness 0.1)
+  wrote wall_layer_1_of_3_offset.vtp in /work
+  surface 1 of 3, at 0.333 of the thickness (layer_1_of_3):
+  17159559 tetrahedra over the cloud, 4332115 of them cut by the level (14.2 s); the contour had 3114383 points and 6228778 triangles (29.1 s; 0 cloud points on the level itself, 0 triangles of no area left out, 17 points still off the level after 16 steps); 2333267 edges collapsed onto the level to the interface's own size, leaving 781854 points and 1563720 triangles (263.7 s; 473 of the collapses welded a micro edge under 0.02 of the local size, 24 operations refused because a triangle they would make passes through a neighbour)
+  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation, 0 fins welded after it; the smallest angle between two triangles on an edge is 6.13 degrees)
+  valleys where two sheets meet: 1844 edges chorded over one as marched; 738 split at the valley (94 of them part of the way down, so that no half turned over), 1068 corners moved onto it, 42 left (the valley not under the chord, or a move that would turn or pass through a triangle); 0 point moves pulling the levels under this one from under its valleys
+  wrote wall_layer_2_of_3_offset.vtp in /work
+  surface 2 of 3, at 0.667 of the thickness (layer_2_of_3):
+  17159559 tetrahedra over the cloud, 4174405 of them cut by the level (11.5 s); the contour had 2955361 points and 5910750 triangles (27.5 s; 0 cloud points on the level itself, 0 triangles of no area left out, 18 points still off the level after 16 steps); 2212356 edges collapsed onto the level to the interface's own size, leaving 744166 points and 1488360 triangles (251.9 s; 1111 of the collapses welded a micro edge under 0.02 of the local size, 22 operations refused because a triangle they would make passes through a neighbour)
+  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 0 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation, 1 fins welded after it; the smallest angle between two triangles on an edge is 1.8 degrees)
+  valleys where two sheets meet: 2840 edges chorded over one as marched; 1163 split at the valley (129 of them part of the way down, so that no half turned over), 1589 corners moved onto it, 96 left (the valley not under the chord, or a move that would turn or pass through a triangle); 0 point moves pulling the levels under this one from under its valleys
+  wrote wall_outer_offset.vtp in /work
+  surface 3 of 3, at 1 of the thickness (outer):
+  17159559 tetrahedra over the cloud, 4167117 of them cut by the level (11.4 s); the contour had 2950456 points and 5900944 triangles (28.7 s; 0 cloud points on the level itself, 0 triangles of no area left out, 49 points still off the level after 16 steps); 2027903 edges collapsed onto the level to the interface's own size, leaving 923778 points and 1847588 triangles (270.3 s; 1594 of the collapses welded a micro edge under 0.02 of the local size, 28 operations refused because a triangle they would make passes through a neighbour)
+  0 boundary edges before the trim at the caps (the domes over the collar ends come off with it), 0 edges on more than two triangles, 0 traversed the same way twice, 0 triangles passing through another, 1 edges whose two triangles lie on each other within 0.1 degree (0 unfolded by the decimation, 2 fins welded after it; the smallest angle between two triangles on an edge is 0.0198 degrees)
+  valleys where two sheets meet: 3178 edges chorded over one as marched; 1229 split at the valley (104 of them part of the way down, so that no half turned over), 1827 corners moved onto it, 133 left (the valley not under the chord, or a move that would turn or pass through a triangle); 3 point moves pulling the levels under this one from under its valleys
+  the first fault is two triangles of the offset surface lying on each other across an edge at (-10.019, -35.654, 65.567)
+  41031331 field evaluations in all; 1063.8 s for the 3 surface(s)
+  trimming at the caps by the ownership the offset surface carries
+    cap at (-7.3466, -29.88, 73.222): 194 points past its plane came off, 47 moved onto it, 0 interior points left on it moved just inside
+    cap at (6.8046, -35.185, 74.93): 203 points past its plane came off, 45 moved onto it, 0 interior points left on it moved just inside
+    cap at (-2.6686, -58.696, 106.68): 447 points past its plane came off, 100 moved onto it, 0 interior points left on it moved just inside
+    cap at (-5.6772, -15.672, -232.37): 589 points past its plane came off, 89 moved onto it, 0 interior points left on it moved just inside
+    cap at (38.754, 25.288, -258.66): 342 points past its plane came off, 64 moved onto it, 0 interior points left on it moved just inside
+    cap at (0.419, -54.434, 104.62): 465 points past its plane came off, 96 moved onto it, 0 interior points left on it moved just inside
+    cap at (-35.523, -36.568, -54.893): 118 points past its plane came off, 32 moved onto it, 0 interior points left on it moved just inside
+    cap at (-60.326, 0.90499, -157.24): 197 points past its plane came off, 38 moved onto it, 0 interior points left on it moved just inside
+    cap at (-13.437, 0.16168, 73.442): 243 points past its plane came off, 53 moved onto it, 0 interior points left on it moved just inside
+    cap at (-33.548, -49.496, 72.021): 286 points past its plane came off, 59 moved onto it, 0 interior points left on it moved just inside
+    cap at (58.941, -36.731, -160.25): 191 points past its plane came off, 44 moved onto it, 0 interior points left on it moved just inside
+    cap at (12.409, -0.63439, 64.313): 275 points past its plane came off, 53 moved onto it, 0 interior points left on it moved just inside
+    cap at (26.521, -42.075, 71.189): 278 points past its plane came off, 50 moved onto it, 0 interior points left on it moved just inside
+    cap at (22.996, -41.361, -58.33): 144 points past its plane came off, 27 moved onto it, 0 interior points left on it moved just inside
+    7142 triangles past a plane removed, 286 split along one, 1439 dropped for touching the kept side only along an edge or at a point or for lying flat in the plane; 923778 -> 919946 points, 1847588 -> 1839015 triangles; 937 rim edges, the shortest 0.254 of the local edge, the smallest angle between a rim triangle and its plane 79.03 degrees; 548 flat caps flipped before the cut, 0 snaps and 0 rim edge collapses refused as folding a triangle
+  trimmed the offset surface at 14 cap planes, leaving 919946 points and 1839015 triangles
+    cap at (-7.3466, -29.88, 73.222): inner rim 37 points, trimmed rim 53 points (radius 0.30483, wall 0.065, rim edge 0.049131)
+    cap at (6.8046, -35.185, 74.93): inner rim 40 points, trimmed rim 46 points (radius 0.30266, wall 0.065, rim edge 0.045073)
+    cap at (-2.6686, -58.696, 106.68): inner rim 83 points, trimmed rim 105 points (radius 1.1965, wall 0.1, rim edge 0.088978)
+    cap at (-5.6772, -15.672, -232.37): inner rim 110 points, trimmed rim 111 points (radius 19.793, wall 1.7, rim edge 1.0476)
+    cap at (38.754, 25.288, -258.66): inner rim 60 points, trimmed rim 79 points (radius 12.111, wall 1.7, rim edge 1.1322)
+    cap at (0.419, -54.434, 104.62): inner rim 88 points, trimmed rim 104 points (radius 1.2136, wall 0.1, rim edge 0.086109)
+    cap at (-35.523, -36.568, -54.893): inner rim 21 points, trimmed rim 36 points (radius 1.4056, wall 0.6, rim edge 0.4014)
+    cap at (-60.326, 0.90499, -157.24): inner rim 37 points, trimmed rim 41 points (radius 4.2906, wall 0.93, rim edge 0.68079)
+    cap at (-13.437, 0.16168, 73.442): inner rim 45 points, trimmed rim 62 points (radius 1.0912, wall 0.18, rim edge 0.14571)
+    cap at (-33.548, -49.496, 72.021): inner rim 51 points, trimmed rim 70 points (radius 1.5069, wall 0.25, rim edge 0.17863)
+    cap at (58.941, -36.731, -160.25): inner rim 35 points, trimmed rim 47 points (radius 4.3264, wall 0.93, rim edge 0.71713)
+    cap at (12.409, -0.63439, 64.313): inner rim 51 points, trimmed rim 72 points (radius 1.0331, wall 0.2, rim edge 0.11978)
+    cap at (26.521, -42.075, 71.189): inner rim 47 points, trimmed rim 69 points (radius 1.3523, wall 0.25, rim edge 0.16963)
+    cap at (22.996, -41.361, -58.33): inner rim 23 points, trimmed rim 42 points (radius 1.5338, wall 0.6, rim edge 0.40469)
+Surface triangle quality (outer wall offset), aspect ratio (1.0 is an equilateral triangle):
+  Number of triangles: 1839015
+  Min / Avg / Max: 1.000 / 1.628 / 101.460
+  Aspect ratio > 10: 155, > 30: 25, > 100: 1
+  aspect ratio 101.460 at (-1.8901, -48.894, 97.5531), edges 0.0579797 0.000566464 0.058249
+  aspect ratio 79.886 at (-1.88701, -48.8931, 97.5467), edges 0.0516984 0.000566464 0.0516192
+  aspect ratio 72.101 at (23.5318, -16.4771, -139.889), edges 0.42044 0.274271 0.146302
+  aspect ratio 70.676 at (56.2696, -31.2422, -163.124), edges 0.93032 0.598918 0.331707
+  aspect ratio 70.419 at (20.821, -49.3786, -153.538), edges 0.548226 0.309363 0.857308
+Offset wall thickness [solid wall, offset]:
+  offset surface to inner surface, over 919946 of its points: below 90%/50%/25% of the requested thickness at 0/0/0, worst 0.918
+    this is the construction, not the shape: every outer point was put a wall from the interface, so a shortfall is the construction giving it back - a vertex normal leaning against its facets reads a percent or two short, and a point left inside a fold reads far shorter
+  inner surface to offset surface, over 605594 of its points: below 90%/50%/25% at 0/0/0, worst 0.911, thickest 3.17x requested
+    this is the wall over the interface. Above one at a junction is the crease filling it, which is intended; below one is wall that is missing
+    283 points carry more than twice the wall asked for, in 8 regions (separated by 8.012), thickest 8 shown:
+      [1] ratio 3.17 (requested 0.1) at (-2.2072, -48.179, 95.27), 193 points
+      [2] ratio 3.02 (requested 0.25) at (5.2668, -21.188, 21.466), 15 points
+      [3] ratio 3.01 (requested 0.1841) at (-9.0758, -34.763, 65.63), 29 points
+      [4] ratio 2.86 (requested 0.6) at (-38.066, -28.204, -95.507), 11 points
+      [5] ratio 2.76 (requested 0.85) at (-31.787, -36.155, -149.35), 11 points
+      [6] ratio 2.47 (requested 0.6) at (-23.966, -32.357, -82.303), 14 points
+      [7] ratio 2.31 (requested 0.069993) at (-4.2313, -30.142, 71.635), 7 points
+      [8] ratio 2.24 (requested 0.6) at (26.055, -37.105, -76.384), 3 points
+      a region at a branch crotch is the crease and is expected; a region on the plain side of a vessel means the wall has reached another vessel passing close by, and the local wall thickness on those faces has to come below half the gap
+    every interface point carries at least 90% of its requested wall
+  wrote wall_offset_diagnostics.vtp in /work
+  the untrimmed offset surface had 1 faults; after the trim at the caps it has 1 (edges on more than two triangles 0, wound against each other 0, triangles passing through another 0, folded onto each other 1)
+  the smallest angle between two triangles on an edge of the trimmed outer wall offset surface is 0.0198 degrees (the mesher refuses under 0.1)
+The trimmed outer wall offset surface has 1 faults the volume mesher will refuse: 0 edges on more than two triangles, 0 wound against each other, 0 triangles passing through another, the first at (0, 0, 0), 1 edges whose two triangles lie on each other, the first at (-10.019, -35.654, 65.567); see wall_outer_offset.vtp
+  0 pairs of triangles of the wall_outer surface cross and 1 lie on each other across an edge within 0.1 degree; the first 0 and 1:
+    1: triangles 762598 and 762604 lie on each other across their edge of 0.168 at (-10.019, -35.654, 65.567), 0.0198 degrees apart; centroids 0.0353 apart; edges 0.133 0.168 0.0471 and 0.0935 0.153 0.168
+       the nearest interface triangle is 0.229 away, on face 18, thickness 0.18, edges about 0.172
+  wrote wall_outer_crossings.vtp in /work
+  wrote wall_outer_crossings.vtp: the 2 crossing or folded triangles of the pairs above and two rings around them, 50 triangles in all
+  wrote wall_outer_crossings_interface.vtp in /work
+  wrote wall_outer_crossings_interface.vtp: the 2037 interface triangles within reach of the crossings, with their thickness and normals
+Problem with vessel wall meshing
