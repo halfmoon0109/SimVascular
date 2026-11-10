@@ -3302,6 +3302,12 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     };
     const int ringMax = 64;
     ll ringU[64], ringV[64], shared[2];
+    // How far off the zero level a collapse's triangles may lie, out of the
+    // wall and into it, and how long its edges may be, when that is more
+    // than the tolerance and the local size allow: zero but for the repair
+    // of a fold, which sets them to what the triangles around the fold
+    // already are (see the folds below).
+    double fieldAllowanceOut = 0.0, fieldAllowanceIn = 0.0, lengthAllowance = 0.0;
     auto tryCollapse = [&](ll u, ll v) -> bool
     {
       // u goes onto v; a point on a valley line goes only onto another on it
@@ -3402,7 +3408,7 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
       {
         ll w = ringU[q];
         double L = Distance(&pts[(size_t)3*w], &pts[(size_t)3*v]);
-        double allowed = growFactor*std::min(target[(size_t)w], target[(size_t)v]);
+        double allowed = std::max(growFactor*std::min(target[(size_t)w], target[(size_t)v]), lengthAllowance);
         if (L > allowed && L > 1.1*Distance(&pts[(size_t)3*w], &pts[(size_t)3*u])) return false;
       }
       for (size_t m = 0; m < incident[(size_t)u].size(); m++)
@@ -3448,7 +3454,8 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
             centre[k] = (pts[(size_t)3*a2 + k] + pts[(size_t)3*b2 + k] + pts[(size_t)3*c2 + k])/3.0;
           }
           double thinnest = std::min(thick[(size_t)a2], std::min(thick[(size_t)b2], thick[(size_t)c2]));
-          if (std::abs(field.Evaluate(centre, fraction)) > options.collapseFieldTolerance*thinnest) return false;
+          const double off = field.Evaluate(centre, fraction);
+          if (std::abs(off) > std::max(options.collapseFieldTolerance*thinnest, off > 0.0 ? fieldAllowanceOut : fieldAllowanceIn)) return false;
         }
       }
       if (guardOn)
@@ -3999,6 +4006,41 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     // the three old triangles to agree with the new one and a folded
     // triangle's direction is either way; here the ring triangle is judged
     // by the triangles across its edges instead, which it must not fold on.
+    // Otherwise an edge from one of the pair's apexes to an end of the
+    // folded edge is collapsed, either way along it, which takes the
+    // triangle on it out of the pair. Measured on the user's model
+    // (2026-11-10, the outer surface over the valley where the R ICA and R
+    // PCA walls merge): a pair 0.02 degree apart on a chord a-b across the
+    // valley, a on one sheet and b on the other, with the apex c of the
+    // one lying inside the other, a hair off its edge b-d - so the flip's
+    // pair has a triangle of no height, c and d are not on one spot, a-b
+    // collapsed either way lifts a sheet's triangles off their sheet, and c
+    // and d are on four triangles each. Taking c onto b leaves the chord's
+    // other triangle with a sound neighbour. Such a collapse stands under
+    // every check a collapse has, two of them loosened to what is there
+    // already: its triangles may lie as far off the level, on the side
+    // they lie on, as the triangles on the pair's four points do, which
+    // chord a valley the cut left (0.03 out of the wall where the wall is
+    // 0.18 and the tolerance a tenth of it), and its edges may be as long
+    // as the longest edge on those triangles (the local size refused every
+    // one of the eight here: 0.098 at the valley, where the interface was
+    // refined, under edges of 0.13 to 0.17). And it has to leave the pair
+    // sound: the pair's other triangle, and the triangle the collapse
+    // brings to lie across its side, may not lie on each other within the
+    // spike angle, nor the other be left with no height (an end of the
+    // folded edge taken onto the apex lying a hair off the other's side
+    // makes it the flip's triangle of no height) - a collapse knows
+    // nothing of the fold, and the pass takes pairs under a degree where
+    // the mesher refuses under a tenth, so a fold only moved could come
+    // out one it refuses where it had taken the pair. The
+    // pair itself came of the valley cut: a corner moved onto the valley
+    // and the chord flipped to it, the new triangle landing back on the
+    // one across its side, the wall of the step between the cut part of
+    // the valley and the part still chorded (CutCreases asks a new
+    // triangle to face out, not to stand off its neighbours). A fin, the
+    // apexes on one spot, is not taken this way: the weld after the pass
+    // (WeldFoldedApexes) closes it by moving an apex a hair, where a
+    // collapse along an edge moves one the edge's length.
     {
       const double unfoldCosine = std::cos(1.0*3.14159265358979323846/180.0);
       const double spikeCosine = std::cos(10.0*3.14159265358979323846/180.0);
@@ -4272,6 +4314,82 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
             if (!done && !exists) done = weldFin(t1, t2, a, b, c, d) || weldFin(t2, t1, a, b, d, c);
             if (!done) done = tryCollapse(a, b) || tryCollapse(b, a);
             if (!done) done = removeSpike(a) || removeSpike(b) || removeSpike(c) || removeSpike(d);
+            // (a fin is left to the weld after the pass, which moves an apex a hair where this moves one an edge)
+            if (!done && Distance(&pts[(size_t)3*c], &pts[(size_t)3*d]) > 0.1*Distance(&pts[(size_t)3*a], &pts[(size_t)3*b]))
+            {
+              const ll corners[4] = {a, b, c, d};
+              for (int i = 0; i < 4; i++)
+              {
+                for (size_t m = 0; m < incident[(size_t)corners[i]].size(); m++)
+                {
+                  ll t = incident[(size_t)corners[i]][m];
+                  if (dead[(size_t)t]) continue;
+                  const ll *T = &tris[(size_t)3*t];
+                  for (int q = 0; q < 3; q++)
+                  {
+                    lengthAllowance = std::max(lengthAllowance, Distance(&pts[(size_t)3*T[q]], &pts[(size_t)3*T[(q+1)%3]]));
+                  }
+                  if (!(options.collapseFieldTolerance > 0.0)) continue;
+                  double centre[3];
+                  for (int k = 0; k < 3; k++)
+                  {
+                    centre[k] = (pts[(size_t)3*T[0] + k] + pts[(size_t)3*T[1] + k] + pts[(size_t)3*T[2] + k])/3.0;
+                  }
+                  const double off = field.Evaluate(centre, fraction);
+                  if (off > 0.0) fieldAllowanceOut = std::max(fieldAllowanceOut, off);
+                  else fieldAllowanceIn = std::max(fieldAllowanceIn, -off);
+                }
+              }
+              // What u going onto v along an edge of the pair's triangle
+              // tDies leaves at the pair: the other triangle, tStays, with
+              // v for u, and the triangle across tDies' third edge - from
+              // its apex p to the folded edge's other end f - which comes
+              // to lie across tStays' side.
+              auto leavesSound = [&](ll u, ll v, ll tDies, ll tStays) -> bool
+              {
+                ll f = -1;
+                bool uOnStays = false;
+                for (int q = 0; q < 3; q++)
+                {
+                  ll w = tris[(size_t)3*tDies + q];
+                  if (w != u && w != v) f = w;
+                  if (tris[(size_t)3*tStays + q] == u) uOnStays = true;
+                }
+                if (f < 0) return false;
+                const ll p = uOnStays ? v : u;
+                ll across = -1;
+                for (size_t m = 0; m < incident[(size_t)p].size(); m++)
+                {
+                  ll t = incident[(size_t)p][m];
+                  if (dead[(size_t)t] || t == tDies) continue;
+                  for (int q = 0; q < 3; q++) if (tris[(size_t)3*t + q] == f) across = t;
+                }
+                if (across < 0) return false;
+                ll S[3], X[3];
+                for (int q = 0; q < 3; q++)
+                {
+                  S[q] = tris[(size_t)3*tStays + q] == u ? v : tris[(size_t)3*tStays + q];
+                  X[q] = tris[(size_t)3*across + q] == u ? v : tris[(size_t)3*across + q];
+                }
+                if (smallestAngleSine(S[0], S[1], S[2]) < 1.0e-3) return false;
+                double nS[3], nX[3];
+                normalOf(S[0], S[1], S[2], nS);
+                normalOf(X[0], X[1], X[2], nX);
+                const double lS = Norm(nS), lX = Norm(nX);
+                return lS > 0.0 && lX > 0.0 && Dot(nS, nX) >= -spikeCosine*lS*lX;
+              };
+              const ll candidates[8][4] = {{c, a, t1, t2}, {c, b, t1, t2}, {d, a, t2, t1}, {d, b, t2, t1},
+                  {a, c, t1, t2}, {b, c, t1, t2}, {a, d, t2, t1}, {b, d, t2, t1}};
+              for (int i = 0; i < 8 && !done; i++)
+              {
+                done = leavesSound(candidates[i][0], candidates[i][1], candidates[i][2], candidates[i][3])
+                    && tryCollapse(candidates[i][0], candidates[i][1]);
+              }
+              fieldAllowanceOut = 0.0;
+              fieldAllowanceIn = 0.0;
+              lengthAllowance = 0.0;
+              if (done) report.numFoldApexesCollapsed++;
+            }
             if (done)
             {
               report.numUnfolded++;
