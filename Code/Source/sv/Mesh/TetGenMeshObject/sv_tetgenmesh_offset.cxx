@@ -2010,24 +2010,12 @@ long long OffsetField::NumEvaluations() const { return data_->numEvaluations; }
 // user's picture of 2026-10-20.
 struct CreaseCut
 {
-  ll numEdges = 0, numInserted = 0, numSnapped = 0, numFlipped = 0, numRefused = 0;
+  ll numEdges = 0, numInserted = 0, numSnapped = 0, numRefused = 0;
   ll numPartial = 0;   // of the inserted, raised toward the chord so that no half turned over
-  ll refusedBy[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};   // why: 0 no sheet in a cone, 1 the ends not each on its sheet, 2 facing sheets, 3 the chord under the level, 4 no level under the chord, 5 a corner or a half would turn over, 6 the flip would, 7 the valley not under the chord, 8 a triangle would pass through another
 };
 static void CutCreases(const OffsetField &field, double fraction, const Options &options,
     std::vector<double> &pts, std::vector<ll> &tris, std::vector<unsigned char> &crease, CreaseCut &report)
 {
-  // with SV_CREASE_DUMP set: every refused edge to <path>_<fraction>.bin for a look (reason, a xyz, b xyz, x xyz)
-  std::vector<double> refusedDump;
-  auto dumpRefusal = [&](int reason, ll a, ll b, const double *x)
-  {
-    if (getenv("SV_CREASE_DUMP") == nullptr) return;
-    refusedDump.push_back((double)reason);
-    for (int k = 0; k < 3; k++) refusedDump.push_back(pts[(size_t)3*a + k]);
-    for (int k = 0; k < 3; k++) refusedDump.push_back(pts[(size_t)3*b + k]);
-    for (int k = 0; k < 3; k++) refusedDump.push_back(x != nullptr ? x[k] : 0.5*(pts[(size_t)3*a + k] + pts[(size_t)3*b + k]));
-  };
-  struct DumpWriter { std::vector<double> &d; double fraction; ~DumpWriter() { if (getenv("SV_CREASE_DUMP") == nullptr || d.empty()) return; char name[1024]; snprintf(name, sizeof(name), "%s_%.3f.bin", getenv("SV_CREASE_DUMP"), fraction); FILE *f = fopen(name, "wb"); if (f) { ll n = (ll)d.size(); fwrite(&n, 8, 1, f); fwrite(d.data(), 8, d.size(), f); fclose(f); } } } dumpWriter{refusedDump, fraction};
   crease.assign(pts.size()/3, 0);
   if (!(options.creaseDegrees > 0.0) || tris.size() < 3) return;
   const double cosCrease = std::cos(options.creaseDegrees*M_PI/180.0);
@@ -2111,12 +2099,12 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
       double termA, termB, ga[3], gb[3], x[3];
       double lo = 0.0, hi = 1.0, gLo, gHi;
       along(lo, x);
-      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; dumpRefusal(0, a, b, x); continue; }
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; continue; }
       gLo = termA - termB;
       along(hi, x);
-      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; dumpRefusal(0, a, b, x); continue; }
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; continue; }
       gHi = termA - termB;
-      if (!(gLo < 0.0 && gHi > 0.0)) { report.numRefused++; report.refusedBy[1]++; dumpRefusal(1, a, b, nullptr); continue; }   // the ends are not on their own sheets after all
+      if (!(gLo < 0.0 && gHi > 0.0)) { report.numRefused++; continue; }   // the ends are not on their own sheets after all
       for (int it = 0; it < 24; it++)
       {
         const double u = 0.5*(lo + hi);
@@ -2126,15 +2114,15 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
       }
       const double s = 0.5*(lo + hi);
       along(s, x);
-      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; report.refusedBy[0]++; dumpRefusal(0, a, b, x); continue; }
+      if (!sheets(x, termA, termB, ga, gb)) { report.numRefused++; continue; }
       // straight down between the sheets to the level: the field is the
       // smaller term and the point is equidistant, so both vanish together
       double d[3] = {-(ga[0] + gb[0]), -(ga[1] + gb[1]), -(ga[2] + gb[2])};
       const double ld = Norm(d);
-      if (!(ld > 0.1)) { report.numRefused++; report.refusedBy[2]++; dumpRefusal(2, a, b, x); continue; }   // the sheets face each other: no valley between them
+      if (!(ld > 0.1)) { report.numRefused++; continue; }   // the sheets face each other: no valley between them
       for (int k = 0; k < 3; k++) d[k] /= ld;
       const double f0 = field.Evaluate(x, fraction);
-      if (!(f0 > 0.0)) { report.numRefused++; report.refusedBy[3]++; dumpRefusal(3, a, b, x); continue; }
+      if (!(f0 > 0.0)) { report.numRefused++; continue; }
       // the level lies under the chord within a few edges even in a sharp valley (the drop is the chord's height over the valley)
       double below = std::min(2.0*f0, 0.25*length), fBelow = 0.0;
       bool bracketed = false;
@@ -2146,7 +2134,7 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
         if (fBelow <= 0.0) { bracketed = true; break; }
         below *= 2.0;
       }
-      if (!bracketed) { report.numRefused++; report.refusedBy[4]++; dumpRefusal(4, a, b, x); continue; }
+      if (!bracketed) { report.numRefused++; continue; }
       double above = 0.0;
       for (int it = 0; it < 24; it++)
       {
@@ -2195,7 +2183,7 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
         const double cosTheta = std::max(-1.0, std::min(1.0, Dot(na, nb)));
         const double halfTheta = 0.5*std::acos(cosTheta);
         const double allowed = std::max(0.6, 1.25*0.5*std::tan(halfTheta) + 0.2)*length;
-        if (Distance(x, mid) > allowed) { report.numRefused++; report.refusedBy[7]++; dumpRefusal(7, a, b, x); continue; }
+        if (Distance(x, mid) > allowed) { report.numRefused++; continue; }
       }
       Cut cut;
       cut.a = a; cut.b = b; cut.s = s;
@@ -2303,7 +2291,7 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
         guard.BeginOperation();
         for (size_t m = 0; m < incident[(size_t)nearest].size(); m++) guard.Leave(incident[(size_t)nearest][m]);
         for (size_t m = 0; m < incident[(size_t)nearest].size() && !crosses; m++) crosses = guard.Crosses(&tris[(size_t)3*incident[(size_t)nearest][m]]);
-        if (crosses) { for (int k = 0; k < 3; k++) pts[(size_t)3*nearest + k] = was[k]; report.refusedBy[8]++; }
+        if (crosses) { for (int k = 0; k < 3; k++) pts[(size_t)3*nearest + k] = was[k]; }
         else
         {
           for (size_t m = 0; m < incident[(size_t)nearest].size(); m++) { guard.Remove(incident[(size_t)nearest][m]); guard.Add(incident[(size_t)nearest][m]); }
@@ -2351,10 +2339,8 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
             ofB.erase(std::remove(ofB.begin(), ofB.end(), t1), ofB.end());
             incident[(size_t)c].push_back(t2);
             incident[(size_t)d].push_back(t1);
-            report.numFlipped++;
             continue;
           }
-          report.refusedBy[6]++;
         }
       }
     }
@@ -2404,7 +2390,7 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
       }
       if (sound) report.numPartial++;
     }
-    if (!sound) { report.numRefused++; report.refusedBy[5]++; dumpRefusal(5, a, b, cut.x); continue; }
+    if (!sound) { report.numRefused++; continue; }
     const ll p = (ll)(pts.size()/3);
     pts.insert(pts.end(), xUse, xUse + 3);
     {
@@ -2419,7 +2405,7 @@ static void CutCreases(const OffsetField &field, double fraction, const Options 
         const ll half1[3] = {T[j], p, T[(j + 2)%3]}, half2[3] = {p, T[(j + 1)%3], T[(j + 2)%3]};
         crosses = guard.Crosses(half1) || guard.Crosses(half2);
       }
-      if (crosses) { pts.resize((size_t)3*p); report.numRefused++; report.refusedBy[8]++; continue; }
+      if (crosses) { pts.resize((size_t)3*p); report.numRefused++; continue; }
     }
     incident.push_back(std::vector<ll>());
     crease.push_back(1);
@@ -3198,7 +3184,6 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     report.numCreasePointsSnapped = cut.numSnapped;
     report.numCreaseCutsRefused = cut.numRefused;
     report.numCreasePointsPartial = cut.numPartial;
-    if (getenv("SV_CREASE_DEBUG") != nullptr) fprintf(stderr, "crease cut at %.3g: %lld edges, %lld split (%lld part of the way), %lld snapped (%lld flipped), %lld refused (no sheet %lld, ends %lld, facing %lld, under %lld, no level %lld, turns %lld, flip turns %lld, not under the chord %lld, through another %lld)\n", fraction, cut.numEdges, cut.numInserted, cut.numPartial, cut.numSnapped, cut.numFlipped, cut.numRefused, cut.refusedBy[0], cut.refusedBy[1], cut.refusedBy[2], cut.refusedBy[3], cut.refusedBy[4], cut.refusedBy[5], cut.refusedBy[6], cut.refusedBy[7], cut.refusedBy[8]);
   }
   if (options.collapseRatio > 0.0)
   {

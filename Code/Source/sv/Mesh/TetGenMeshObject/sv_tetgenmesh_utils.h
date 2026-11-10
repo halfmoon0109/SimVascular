@@ -248,8 +248,10 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_TrimOffsetSurfaceAtCaps(vtkPolyData *surface
  * the thickness (1 is the outer surface, k/N a layer surface inside the
  * wall) in one pass over one distance field and one point cloud, so that
  * they are nested and never cross one another (see
- * svoffset::BuildOffsetSurfaces). Each is written to wall_outer_offset.vtp
- * or wall_layer_k_of_N_offset.vtp with the arrays the trim reads.
+ * svoffset::BuildOffsetSurfaces). One with a fault is written to
+ * wall_outer_offset.vtp or wall_layer_k_of_N_offset.vtp with the arrays the
+ * trim reads; the caller writes the trimmed surface there when the trim
+ * fails or leaves a fault.
  * @param fractions Each in (0, 1], in rising order.
  * @param surfaces Set to one surface per fraction.
  * @param numUnresolved Set per fraction to the faults the volume mesher

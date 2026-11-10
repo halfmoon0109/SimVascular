@@ -3082,14 +3082,6 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
   numLevels = 0;
   if (blMesh == nullptr || refinedWall == nullptr) return SV_ERROR;
   auto faceIds = vtkIntArray::SafeDownCast(blMesh->GetCellData()->GetArray("ModelFaceID"));
-  // The layer generator's cell entity ids: 9999 on the side walls closing the
-  // layers at a cap; the input surface's cells and the inner surface's both
-  // carry 1 (the glue sets the input to 1 so that the remeshing leaves it),
-  // so only the side walls can be told apart by it. A side-wall triangle can
-  // have all three points on the wall's rim (a flat one in the cap plane
-  // where the rim bends sharply), and then its points alone cannot tell it
-  // from a wall triangle.
-  auto entityIds = blMesh->GetCellData()->GetArray("CellEntityIds");
   if (faceIds == nullptr)
   {
     fprintf(stderr,"The boundary layer mesh has no 'ModelFaceID' cell array; the wall faces cannot be refined\n");
@@ -3112,7 +3104,7 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
   mesh.tetrahedronInts.resize(numAttr + 1);   // ... + origin
   mesh.triangleInts.resize(numAttr + 3);      // ... + origin, wall flag, label for the depth
   const size_t originTet = numAttr, originTri = numAttr, wallFlag = numAttr + 1, labelIndex = numAttr + 2;
-  vtkIdType numTets = 0, numTris = 0, numWallTris = 0, numSidewallOnRim = 0;
+  vtkIdType numTets = 0, numTris = 0, numWallTris = 0;
   for (vtkIdType c = 0; c < numCells; c++)
   {
     const int type = blMesh->GetCellType(c);
@@ -3131,15 +3123,7 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
       for (int j = 0; j < 3; j++) mesh.triangles.push_back(pts[j]);
       for (size_t a = 0; a < numAttr; a++) mesh.triangleInts[a].push_back(intArrays[a]->GetValue(c));
       mesh.triangleInts[originTri].push_back((int)c);
-      const bool onWallPoints = pts[0] < numWallPoints && pts[1] < numWallPoints && pts[2] < numWallPoints;
-      // A side-wall triangle with all three points on the wall's rim is not
-      // wall: taken as wall it lies in the cap plane, the offset field wraps
-      // it as if it were, the layer rims bulge into the lumen there and the
-      // cap annulus comes to lie on it (the user's L PMA cap, 2026-11-09:
-      // one such triangle, two folded edges, the shell refused).
-      const bool sidewall = entityIds != nullptr && (int)entityIds->GetTuple1(c) == 9999;
-      const bool wall = onWallPoints && !sidewall;
-      if (onWallPoints && sidewall) numSidewallOnRim++;
+      const bool wall = pts[0] < numWallPoints && pts[1] < numWallPoints && pts[2] < numWallPoints;
       mesh.triangleInts[wallFlag].push_back(wall ? 1 : 0);
       mesh.triangleInts[labelIndex].push_back(wall ? faceIds->GetValue(c) : -1);
       if (wall) numWallTris++;
@@ -3168,8 +3152,8 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
   std::vector<int> depth = svrefine::DepthOfTriangles(mesh, labelIndex, thicknessByFace, defaultThickness, ratio, maxDepth, skip, table);
   fprintf(stdout,"Wall faces refined to the wall thickness (ratio %g: a face's triangles are split in four until their mean edge is under %g times its thickness, at most %d times; only the fluid cells on the split edges, the first boundary layer sublayer, are cut):\n",
       ratio, ratio, maxDepth);
-  fprintf(stdout,"  the boundary layer mesh: %lld tetrahedra, %lld triangles of which %lld on the wall (%lld wall points; %lld side-wall triangles with all three points on the wall's rim left out of the wall)\n",
-      (long long)numTets, (long long)numTris, (long long)numWallTris, (long long)numWallPoints, (long long)numSidewallOnRim);
+  fprintf(stdout,"  the boundary layer mesh: %lld tetrahedra, %lld triangles of which %lld on the wall (%lld wall points)\n",
+      (long long)numTets, (long long)numTris, (long long)numWallTris, (long long)numWallPoints);
   int deepest = 0;
   for (size_t r = 0; r < table.size(); r++)
   {
@@ -5457,7 +5441,7 @@ static void OffsetProgress(const char *stage, void *)
  * @param outer Set to the offset surface, with 'TrimPointKind' (3, an offset
  * point) and 'TrimFoot' (-1: no offset point comes from one inner point) on
  * its points and 'TrimCrossing' on its cells, for the thickness diagnostics
- * that read them; it is also written to wall_outer_offset.vtp.
+ * that read them; it is written to wall_outer_offset.vtp when it has a fault.
  * @param numUnresolved Set to the number of faults that would make the
  * volume mesher refuse the surface: triangles crossing, edges on one
  * triangle (a hole; the surface is closed before the trim at the caps) or
@@ -5769,8 +5753,15 @@ int TGenUtils_BuildContouredOffsetSurfaces(vtkPolyData *surface, vtkDoubleArray 
     surfaces[f] = vtkSmartPointer<vtkPolyData>::New();
     OffsetSurfaceToPolyData(offsets[f], crossing, surfaces[f]);
     std::string name = (fractions[f] == 1.0) ? std::string("outer") : std::string("layer_") + std::to_string(f + 1) + "_of_" + std::to_string(numLevels);
-    std::string offsetFile = std::string("wall_") + name + "_offset.vtp";
-    TGenUtils_WriteVTP(&offsetFile[0], surfaces[f]);
+    // The surface goes to a file when it has a fault to look at (it was
+    // written at every run, tens of megabytes a level). A trim at the caps
+    // that fails, or that leaves a fault, is the caller's to write: it puts
+    // the surface as trimmed in the same file.
+    if (numUnresolved[f] > 0)
+    {
+      std::string offsetFile = std::string("wall_") + name + "_offset.vtp";
+      TGenUtils_WriteVTP(&offsetFile[0], surfaces[f]);
+    }
     if (numLevels > 1)
     {
       fprintf(stdout,"  surface %zu of %zu, at %.3g of the thickness (%s):\n", f + 1, numLevels, fractions[f], name.c_str());

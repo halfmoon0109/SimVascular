@@ -2015,8 +2015,6 @@ int VMTKUtils_ResetOriginalRegions(vtkPolyData *newgeom, vtkPolyData *originalge
   originalgeom->BuildLinks();
   originalCopy->DeepCopy(originalgeom);
 
-  VtkUtils_write_vtp(originalgeom, "VMTKUtils_ResetOriginalRegions_originalgeom.vtp");
-
   if (VtkUtils_PDCheckArrayName(originalCopy,1, regionName) != SV_OK)
   {
     fprintf(stderr,"3: Array name %s does not exist. Regions must be identified \

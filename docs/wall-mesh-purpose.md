@@ -65,6 +65,10 @@ SimVascular의 TetGen 메셔(`Code/Source/sv/Mesh/TetGenMeshObject/`)에 이 벽
 
 **코드**: 코어는 VTK·TetGen 없이 표준 라이브러리만 쓴다 — `sv_tetgenmesh_offset.{h,cxx}`, `sv_tetgenmesh_refine.{h,cxx}`, `sv_tetgenmesh_envelope.{h,cxx}`(지금은 교차 판정 — 가드·레벨 중첩 복구·계수 — 과 테스트에만). glue는 `sv_tetgenmesh_utils.cxx`·`sv_TetGenMeshObject.cxx`·`sv_mmg_mesh_utils.cxx`로, VTK 코드라 웹 세션에서는 빌드할 수 없다(정적 확인만). 테스트는 `Testing/test_{offset,hybrid,fill,refine,envelope}.cxx`(VTK 없이 빌드; 제품 빌드에는 들어가지 않는다).
 
+**진단 파일**(2026-11-10 정리 뒤, 실행 디렉터리에 쓴다):
+- 매 실행: `wall_offset_diagnostics.vtp`(경계면과 두께 — 웹 세션이 GUI 실행을 그대로 재현하는 입력이라 `scripts/build.ps1`이 `logs/`로 복사한다), `wall_fill_worst_shell.vtp`(가장 납작한 사면체 둘레의 셸, `logs/`로 복사), `wall_fill_poor.vtu`(10° 미만 사면체).
+- 결함이 있을 때만: `wall_outer_offset.vtp`·`wall_layer_k_of_N_offset.vtp`(결함이 난 오프셋 면; 트림이 실패했거나 트림 뒤에 걸리면 트림된 면이 같은 이름으로), `wall_junction_shell.vtp`(셸 결함 또는 메셔 거부), `wall_*_crossings*.vtp`(교차·접힘 자리와 그 밑 경계면), `wall_offset_trimmed.vtp`(트림 실패).
+
 ## 6. 현재 상태와 열린 문제 (2026-11-10 기준)
 
 **지금 상태**: 조정 전 설정으로 끝까지 간 기준 실행은 10/30 15:57이다(벽 13,156,331 사면체, 최소 이면각 0.512°, 1° 미만 4, 5° 미만 127, 전체 격자 POOR 1.14%; 11/09 08:57 로그의 첫 실행도 옛 Local Size로 같은 수치). 유체 쪽 조정(아래 1번)을 넣은 실행은 네 번 모두 완주하지 못했다. 멈춘 원인 가운데 둘은 고쳤다: 캡 평면의 귀(11/10 GUI 로그로 확인)와 바깥 오프셋 면의 접힌 변(드라이버로만 확인; GUI는 다음 실행). 11/06의 PMA 값 미적용은 원인을 찾지 못했고 재발하지 않았다. 11/09 18:10의 실패는 직전 수정의 결함이어서 바로 고쳤다. 다음 GUI 실행이 첫 완주 측정이다. 경과는 `wall-mesh-done.md` 6절 마흔세 번째부터.
@@ -149,6 +153,7 @@ SimVascular의 TetGen 메셔(`Code/Source/sv/Mesh/TetGenMeshObject/`)에 이 벽
 
 - 오프셋 면 1,316 s + 접합 셸 1,289 s(1차 시도 실패 뒤 2차) + 채움(10/30).
 - 셸 1차 시도는 늘 고리 하나에서 사슬을 못 찾아 실패하고 넓힌 뒤 성공한다. 처음부터 넓히면 약 20분을 줄일 수 있다. 미착수.
+- 결함 검사는 다 합쳐 1분이 안 돼 줄일 대상이 아니다(11/10 실측: 교차 검사가 면 하나에 약 3초, 세 면을 합쳐 17초).
 
 #### 8. 작은 것
 

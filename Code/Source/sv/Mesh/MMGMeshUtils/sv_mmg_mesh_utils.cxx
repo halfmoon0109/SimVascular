@@ -43,6 +43,7 @@
 #include "sv_mmg_mesh_utils.h"
 #include <algorithm>
 #include <map>
+#include <vector>
 #include "sv_polydatasolid_utils.h"
 #include "sv_vtk_utils.h"
 
@@ -410,8 +411,10 @@ int MMGUtils_SurfaceRemeshing(vtkPolyData *surface, double hmin, double hmax, do
     // taken for wall, while its face id is the cap's: a flat ear on the
     // wall surface in the cap plane, which the solid's offset field wrapped
     // and whose cap annulus then lay on it (the user's L PMA cap,
-    // 2026-11-09). The nearest-cell pass stays for a surface without face
-    // ids.
+    // 2026-11-09; on the run of 2026-11-10 the two answers differed for
+    // that one triangle of 822,028). The nearest-cell pass stays for a
+    // surface without face ids, and for a ref the original has no face for
+    // (a refinement region's, offset past the face ids).
     auto origFaceIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("ModelFaceID"));
     auto origWallIds = vtkIntArray::SafeDownCast(surface->GetCellData()->GetArray("WallID"));
     auto newFaceIds = vtkIntArray::SafeDownCast(pd->GetCellData()->GetArray("ModelFaceID"));
@@ -423,45 +426,28 @@ int MMGUtils_SurfaceRemeshing(vtkPolyData *surface, double hmin, double hmax, do
         int &w = wallOfFace[origFaceIds->GetValue(c)];
         w = std::max(w, origWallIds->GetValue(c));
       }
-      // the nearest-cell answer alongside, to count where the two differ
-      vtkIdType numDiffer = 0, numCapEars = 0;
-      if (MMGUtils_PassCellArray(pd,surface,"WallID","WallID") == SV_OK)
+      auto byFace = vtkSmartPointer<vtkIntArray>::New();
+      byFace->SetName("WallID");
+      byFace->SetNumberOfComponents(1);
+      byFace->SetNumberOfTuples(pd->GetNumberOfCells());
+      std::vector<vtkIdType> unknown;
+      for (vtkIdType c = 0; c < pd->GetNumberOfCells(); c++)
+      {
+        std::map<int, int>::const_iterator it = wallOfFace.find(newFaceIds->GetValue(c));
+        byFace->SetValue(c, it != wallOfFace.end() ? it->second : 0);
+        if (it == wallOfFace.end()) unknown.push_back(c);
+      }
+      if (!unknown.empty() && MMGUtils_PassCellArray(pd,surface,"WallID","WallID") == SV_OK)
       {
         auto passed = vtkIntArray::SafeDownCast(pd->GetCellData()->GetArray("WallID"));
-        auto byFace = vtkSmartPointer<vtkIntArray>::New();
-        byFace->SetName("WallID");
-        byFace->SetNumberOfComponents(1);
-        byFace->SetNumberOfTuples(pd->GetNumberOfCells());
-        vtkIdType numUnknown = 0;
-        for (vtkIdType c = 0; c < pd->GetNumberOfCells(); c++)
+        if (passed != nullptr)
         {
-          // a ref the original has no face for (a refinement region's, offset
-          // past the face ids) keeps the nearest cell's answer
-          std::map<int, int>::const_iterator it = wallOfFace.find(newFaceIds->GetValue(c));
-          const int w = it != wallOfFace.end() ? it->second : (passed != nullptr ? passed->GetValue(c) : 0);
-          if (it == wallOfFace.end()) numUnknown++;
-          byFace->SetValue(c, w);
-          if (passed != nullptr && passed->GetValue(c) != w) { numDiffer++; if (passed->GetValue(c) == 1 && w == 0) numCapEars++; }
+          for (size_t i = 0; i < unknown.size(); i++) byFace->SetValue(unknown[i], passed->GetValue(unknown[i]));
         }
-        if (numUnknown > 0) fprintf(stdout,"  %lld remeshed triangles carry a face id the original surface has not (refinement regions); the nearest original cell decides those\n", (long long)numUnknown);
-        pd->GetCellData()->RemoveArray("WallID");
-        pd->GetCellData()->AddArray(byFace);
+        fprintf(stdout,"  %lld remeshed triangles carry a face id the original surface has not (refinement regions); the nearest original cell decides whether those are wall\n", (long long)unknown.size());
       }
-      else
-      {
-        auto byFace = vtkSmartPointer<vtkIntArray>::New();
-        byFace->SetName("WallID");
-        byFace->SetNumberOfComponents(1);
-        byFace->SetNumberOfTuples(pd->GetNumberOfCells());
-        for (vtkIdType c = 0; c < pd->GetNumberOfCells(); c++)
-        {
-          std::map<int, int>::const_iterator it = wallOfFace.find(newFaceIds->GetValue(c));
-          byFace->SetValue(c, it != wallOfFace.end() ? it->second : 0);
-        }
-        pd->GetCellData()->AddArray(byFace);
-      }
-      fprintf(stdout,"  wall triangles of the remeshed surface decided by their face id: %lld of %lld differ from the nearest original cell's answer (%lld of them cap triangles that the nearest cell called wall)\n",
-          (long long)numDiffer, (long long)pd->GetNumberOfCells(), (long long)numCapEars);
+      pd->GetCellData()->RemoveArray("WallID");
+      pd->GetCellData()->AddArray(byFace);
     }
     else if (MMGUtils_PassCellArray(pd,surface,"WallID","WallID") != SV_OK)
     {

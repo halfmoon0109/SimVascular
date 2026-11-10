@@ -44,7 +44,6 @@
 #include "vtkGeometryFilter.h"
 #include "vtkCleanPolyData.h"
 #include "vtkSmartPointer.h"
-#include "vtkIdList.h"
 #include "vtkPoints.h"
 #include "vtkUnstructuredGrid.h"
 #include "vtkPolyData.h"
@@ -948,10 +947,6 @@ int cvTetGenMeshObject::SetMeshOptions(char *flags,int numValues,double *values)
     if (TGenUtils_SetLocalMeshSize(polydatasolid_,values[0],values[1]) != SV_OK)
       return SV_ERROR;
     meshoptions_.secondarrayfunction = 1;
-    // Echoed so that the log shows what reached the mesher for each face
-    // (the user's run of 2026-11-06: two faces set to 0.065 came out at
-    // edges of 0.37, and nothing in the log said what size they had).
-    fprintf(stdout,"  local edge size: face %d = %g\n", (int)values[0], values[1]);
   }
   else if(!strncmp(flags,"SurfaceMeshFlag",15)) {
 #ifdef SV_USE_VMTK
@@ -2037,38 +2032,6 @@ int cvTetGenMeshObject::GenerateSurfaceRemesh()
 #endif
 
   TGenUtils_ReportSurfaceTriangleQuality(polydatasolid_, "after surface remesh");
-  // Ears: a triangle with all three points on the open boundary (a cap rim)
-  // lies in the cap plane; the layers extrude nothing from it and the solid
-  // wall's offset wraps it as wall. None should be left after the remesh.
-  {
-    polydatasolid_->BuildLinks();
-    std::set<vtkIdType> rimPoints;
-    auto neighbours = vtkSmartPointer<vtkIdList>::New();
-    for (vtkIdType cellId = 0; cellId < polydatasolid_->GetNumberOfCells(); cellId++)
-    {
-      vtkIdType npts;
-      const vtkIdType *pts;
-      polydatasolid_->GetCellPoints(cellId, npts, pts);
-      for (vtkIdType j = 0; j < npts; j++)
-      {
-        polydatasolid_->GetCellEdgeNeighbors(cellId, pts[j], pts[(j + 1) % npts], neighbours);
-        if (neighbours->GetNumberOfIds() == 0) { rimPoints.insert(pts[j]); rimPoints.insert(pts[(j + 1) % npts]); }
-      }
-    }
-    long long numEars = 0;
-    double firstAt[3] = {0.0, 0.0, 0.0};
-    for (vtkIdType cellId = 0; cellId < polydatasolid_->GetNumberOfCells(); cellId++)
-    {
-      vtkIdType npts;
-      const vtkIdType *pts;
-      polydatasolid_->GetCellPoints(cellId, npts, pts);
-      if (npts != 3 || !rimPoints.count(pts[0]) || !rimPoints.count(pts[1]) || !rimPoints.count(pts[2])) continue;
-      if (numEars == 0) for (int k = 0; k < 3; k++) firstAt[k] = (polydatasolid_->GetPoint(pts[0])[k] + polydatasolid_->GetPoint(pts[1])[k] + polydatasolid_->GetPoint(pts[2])[k])/3.0;
-      numEars++;
-    }
-    fprintf(stdout,"  triangles of the remeshed surface with all three points on a cap rim (ears in the cap plane): %lld%s\n", numEars, numEars > 0 ? " - the first at" : "");
-    if (numEars > 0) fprintf(stdout,"    (%g, %g, %g)\n", firstAt[0], firstAt[1], firstAt[2]);
-  }
 
   int meshInfo[3];
   if (TGenUtils_CheckSurfaceMesh(polydatasolid_, meshInfo) != SV_OK)
@@ -2781,7 +2744,10 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // Diagnostic: report how far the thickness passes (curvature clamp,
   // smoothing, fold prevention) reduced the wall below the requested value.
   // A wall much thinner than requested is the thin part of a junction
-  // depression, so this locates the thinning from the log alone.
+  // depression, so this locates the thinning from the log alone. None of
+  // those passes runs for the shell fill, whose thickness is as requested
+  // here and whose wall is measured after its offset is built.
+  if (extrudeWedges)
   {
     int numBelow90 = 0, numBelow50 = 0, numBelow25 = 0;
     std::vector<std::pair<double,vtkIdType> > thinPts;
@@ -2868,7 +2834,9 @@ int cvTetGenMeshObject::GenerateWallMesh(vtkPolyData* wallSurface, std::string m
   // a field that can be viewed, which is the only way to answer whether every
   // junction is affected or only the few the log has room to list. The write
   // is a polydata because the surface is one; it happens before the arrays are
-  // stripped for the extrusion.
+  // stripped for the extrusion. The shell fill writes its own
+  // (wall_offset_diagnostics.vtp, with the thickness its wall was built from).
+  if (extrudeWedges)
   {
     char wallDiagnosticsFile[] = "wall_diagnostics.vtp";
     TGenUtils_WriteVTP(wallDiagnosticsFile, surface);
@@ -3039,6 +3007,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, offsetOuter, thicknessArray, maxThickness, caps) != SV_OK)
     {
       fprintf(stderr,"Problem trimming the outer wall offset surface at the cap planes\n");
+      // the surface as the trim left it, for a look
+      char outerFile[] = "wall_outer_offset.vtp";
+      TGenUtils_WriteVTP(outerFile, offsetOuter);
       return SV_ERROR;
     }
   }
@@ -3111,6 +3082,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         // proportions, so the cause is still open.
         TGenUtils_DescribeSurfaceCrossings(offsetOuter, surface, thicknessArray, "wall_outer", 12);
       }
+      // the surface at fault, as trimmed, in the file the message names
+      char outerFile[] = "wall_outer_offset.vtp";
+      TGenUtils_WriteVTP(outerFile, offsetOuter);
       return SV_ERROR;
     }
   }
@@ -3146,6 +3120,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
     if (TGenUtils_TrimOffsetSurfaceAtCaps(surface, level, scaled, maxScaled, capsAtLevel) != SV_OK)
     {
       fprintf(stderr,"Problem trimming the wall layer surface %d of %d at the cap planes\n", k, numLayers);
+      char levelFile[64];
+      snprintf(levelFile, sizeof(levelFile), "wall_layer_%d_of_%d_offset.vtp", k, numLayers);
+      TGenUtils_WriteVTP(levelFile, level);
       return SV_ERROR;
     }
     {
@@ -3174,6 +3151,9 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
           snprintf(layerLabel, sizeof(layerLabel), "wall_layer_%d_of_%d", k, numLayers);
           TGenUtils_DescribeSurfaceCrossings(level, surface, thicknessArray, layerLabel, 12);
         }
+        char levelFile[64];
+        snprintf(levelFile, sizeof(levelFile), "wall_layer_%d_of_%d_offset.vtp", k, numLayers);
+        TGenUtils_WriteVTP(levelFile, level);
         return SV_ERROR;
       }
     }
@@ -3361,10 +3341,10 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         }
         fprintf(stdout,"  the junction shell has %lld edges on three facets (the prism walls' rings at the layers), %lld wound against each other, %lld triangles passing through another, %lld edges whose two triangles lie on each other (the smallest angle between two triangles on an edge is %.3g degrees)\n",
             numNonManifold, numMiswound, numCrossing, numFolded, smallestFoldDegrees);
-        char junctionShellFile[] = "wall_junction_shell.vtp";
-        TGenUtils_WriteVTP(junctionShellFile, hybridWall.shellPolyData);
         if (numMiswound > 0 || numCrossing > 0 || numFolded > 0)
         {
+          char junctionShellFile[] = "wall_junction_shell.vtp";
+          TGenUtils_WriteVTP(junctionShellFile, hybridWall.shellPolyData);
           fprintf(stdout,"  the junction shell has faults the mesher would refuse (the first crossing at (%.5g, %.5g, %.5g), the first fold at (%.5g, %.5g, %.5g); see wall_junction_shell.vtp); the wall falls back to the whole shell\n",
               firstCrossingAt[0], firstCrossingAt[1], firstCrossingAt[2], firstFoldAt[0], firstFoldAt[1], firstFoldAt[2]);
           if (numCrossing + numFolded > 0)
@@ -3555,8 +3535,8 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
  given is the inner surface, the outer wall envelope, and the annulus closing the two at each vessel\
  end; TetGen prints the coordinates of the intersection above, so look them up to see which it is in.\
  The envelope was checked against itself for crossings, holes and edges on the wrong number of\
- triangles before this, so an intersection on it is one that check missed - look at the envelope\
- log and at wall_outer_trimmed.vtp and wall_outer_dropped.vtp there. An intersection between the\
+ triangles before this, so an intersection on it is one that check missed - look at the shell\
+ check in the log and at wall_offset_diagnostics.vtp there. An intersection between the\
  envelope and the inner surface is a piece kept inside another vessel, which its winding number\
  should have dropped - the envelope log's winding counts say what the rays saw. Otherwise the inner\
  surface is self-intersecting and the wall has inherited it - see the interface triangle quality report\n", r);
@@ -3586,6 +3566,11 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       if (!hybridActive)
       {
         return SV_ERROR;
+      }
+      if (hybridWall.shellPolyData != nullptr)
+      {
+        char junctionShellFile[] = "wall_junction_shell.vtp";
+        TGenUtils_WriteVTP(junctionShellFile, hybridWall.shellPolyData);
       }
       fprintf(stdout,"  the mesher refused the junction zones' shell (see wall_junction_shell.vtp); the wall falls back to the whole shell\n");
       hybridActive = false;
