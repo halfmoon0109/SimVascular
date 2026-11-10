@@ -2193,14 +2193,19 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
   std::cout << "[GenerateBoundaryLayerMesh] ========== cvTetGenMeshObject::GenerateBoundaryLayerMesh ==========" << std::endl;
 
 #ifdef SV_USE_VMTK
+  // Both are made again below. Until then they are null, so that a return
+  // on an error in between does not leave them pointing at what was deleted
+  // (the destructor and the next call would delete them once more).
   if (boundarylayermesh_ != nullptr)
   {
     boundarylayermesh_->Delete();
+    boundarylayermesh_ = nullptr;
   }
 
   if (innerblmesh_ != nullptr)
   {
     innerblmesh_->Delete();
+    innerblmesh_ = nullptr;
   }
 
   std::string markerListName;

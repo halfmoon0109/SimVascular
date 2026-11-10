@@ -160,7 +160,6 @@ SimVascular의 TetGen 메셔(`Code/Source/sv/Mesh/TetGenMeshObject/`)에 이 벽
 - 골짜기 자르기 거부 42·96·133(레벨 1·2·3; 11/10 17:06).
 - 세분 중점의 투영 거부 716(11/10 17:06; 712는 옮기면 경계층 사면체가 접힐 자리, 4는 변의 1/4보다 멀리 떨어진 자리).
 - 드라이버의 바깥면은 GUI와 20점 다르다(11/10: 923,798 대 923,778; 층 1·2는 같다). 원인은 보지 않았다.
-- `GenerateBoundaryLayerMesh`가 처음에 `boundarylayermesh_`·`innerblmesh_`를 `Delete()`하고 nullptr로 두지 않는다. 다시 할당하기 전의 오류 반환 둘에서 멤버가 매달려 소멸자가 한 번 더 지운다(11/10 검토에서 발견; 실제로 그 경로를 탄 적은 없다).
 - 부르는 곳이 없는 옛 경로의 코드가 glue에 남아 있다(`TGenUtils_BuildTrimmedExtrudedOuterSurface`와 그것만 쓰는 envelope 바깥면 생성). 지우는 것은 리뷰를 거친 뒤에.
 
 ## 7. 각 에이전트가 할 일
