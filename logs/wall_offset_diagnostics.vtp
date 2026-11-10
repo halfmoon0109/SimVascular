@@ -3,36 +3,16 @@
   <PolyData>
     <Piece NumberOfPoints="605594"               NumberOfVerts="0"                    NumberOfLines="0"                    NumberOfStrips="0"                    NumberOfPolys="1210500"             >
       <PointData Normals="Normals">
-        <DataArray type="Float32" Name="Normals" NumberOfComponents="3" format="appended" RangeMin="0.99999983834"        RangeMax="1.0000001663"         offset="0"                   >
-          <InformationKey name="L2_NORM_RANGE" location="vtkDataArray" length="2">
-            <Value index="0">
-              0.99999983834
-            </Value>
-            <Value index="1">
-              1.0000001663
-            </Value>
-          </InformationKey>
-        </DataArray>
-        <DataArray type="Float64" Name="MeshSizingFunction" format="appended" RangeMin="0.035236336537"       RangeMax="1.8307758596"         offset="8970380"             >
-        </DataArray>
+        <DataArray type="Float32" Name="Normals" NumberOfComponents="3" format="appended" RangeMin="0.99999983834"        RangeMax="1.0000001663"         offset="0"                   />
+        <DataArray type="Float64" Name="MeshSizingFunction" format="appended" RangeMin="0.035236336537"       RangeMax="1.8307758596"         offset="8970380"             />
         <DataArray type="Float64" Name="OffsetThicknessRatio" format="appended" RangeMin="0.91092341846"        RangeMax="3.1716362302"         offset="14981300"            />
         <DataArray type="Float64" Name="WallThickness" format="appended" RangeMin="0.065"                RangeMax="1.7"                  offset="20660060"            />
       </PointData>
       <CellData>
-        <DataArray type="Int32" Name="ModelFaceID" format="appended" RangeMin="3"                    RangeMax="36"                   offset="20872016"            >
-        </DataArray>
+        <DataArray type="Int32" Name="ModelFaceID" format="appended" RangeMin="3"                    RangeMax="36"                   offset="20872016"            />
       </CellData>
       <Points>
-        <DataArray type="Float64" Name="Points" NumberOfComponents="3" format="appended" RangeMin="9.8938573321"         RangeMax="266.96463377"         offset="21185740"            >
-          <InformationKey name="L2_NORM_RANGE" location="vtkDataArray" length="2">
-            <Value index="0">
-              9.8938573321
-            </Value>
-            <Value index="1">
-              266.96463377
-            </Value>
-          </InformationKey>
-        </DataArray>
+        <DataArray type="Float64" Name="Points" NumberOfComponents="3" format="appended" RangeMin="9.8938573321"         RangeMax="266.96463377"         offset="21185740"            />
       </Points>
       <Verts>
         <DataArray type="Int64" Name="connectivity" format="appended" RangeMin=""                     RangeMax=""                     offset="34415076"            />
