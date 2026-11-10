@@ -2471,6 +2471,93 @@ int TGenUtils_SmoothWarpVectorsInConcaveRegions(vtkPolyData *surface, const char
   return SV_OK;
 }
 
+// ----------------------------------
+// TGenUtils_RaiseNormalsOffTriangles
+// ----------------------------------
+// The directions a layer is extruded along, at the points where the plain
+// mean of the triangle normals lies in one of the triangles (a sharp ridge
+// between two sheets carrying unequal numbers of triangles at the point):
+// see svoffset::RaiseNormalsOffTriangles, which does the work on plain
+// arrays so that it is tested without VTK.
+int TGenUtils_RaiseNormalsOffTriangles(vtkPolyData *surface, const char *normalsArrayName, double maxDegrees)
+{
+  if (surface == nullptr || normalsArrayName == nullptr)
+  {
+    fprintf(stderr,"Cannot raise the point normals without a surface and an array name\n");
+    return SV_ERROR;
+  }
+  vtkIdType numPts = surface->GetNumberOfPoints();
+  auto normalArray = surface->GetPointData()->GetArray(normalsArrayName);
+  if (normalArray == nullptr || normalArray->GetNumberOfComponents() != 3 ||
+      normalArray->GetNumberOfTuples() != numPts)
+  {
+    fprintf(stderr,"The surface must have a 3-component '%s' point array to raise the point normals\n",
+        normalsArrayName);
+    return SV_ERROR;
+  }
+  std::vector<double> points((size_t)3*numPts), normals((size_t)3*numPts);
+  for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+  {
+    surface->GetPoint(ptId, &points[(size_t)3*ptId]);
+    normalArray->GetTuple(ptId, &normals[(size_t)3*ptId]);
+  }
+  // the triangles, and the points on a boundary edge (an edge of one
+  // triangle: a cap rim, whose normals were set to lie in the cap's plane)
+  surface->BuildLinks();
+  std::vector<long long> triangles;
+  triangles.reserve((size_t)3*surface->GetNumberOfCells());
+  std::map<std::pair<vtkIdType, vtkIdType>, int> edgeUse;
+  for (vtkIdType cellId = 0; cellId < surface->GetNumberOfCells(); cellId++)
+  {
+    vtkIdType npts;
+    const vtkIdType *pts;
+    surface->GetCellPoints(cellId, npts, pts);
+    if (npts != 3)
+    {
+      continue;
+    }
+    for (int j = 0; j < 3; j++)
+    {
+      triangles.push_back((long long)pts[j]);
+      const vtkIdType a = pts[j], b = pts[(j + 1)%3];
+      edgeUse[std::make_pair(std::min(a, b), std::max(a, b))]++;
+    }
+  }
+  std::vector<unsigned char> skip((size_t)numPts, 0);
+  long long numRim = 0;
+  for (std::map<std::pair<vtkIdType, vtkIdType>, int>::const_iterator it = edgeUse.begin(); it != edgeUse.end(); ++it)
+  {
+    if (it->second != 1)
+    {
+      continue;
+    }
+    if (!skip[(size_t)it->first.first]) { skip[(size_t)it->first.first] = 1; numRim++; }
+    if (!skip[(size_t)it->first.second]) { skip[(size_t)it->first.second] = 1; numRim++; }
+  }
+  svoffset::NormalReport report;
+  const long long numRaised = svoffset::RaiseNormalsOffTriangles(points, triangles, normals, maxDegrees, report, &skip);
+  if (numRaised > 0)
+  {
+    for (vtkIdType ptId = 0; ptId < numPts; ptId++)
+    {
+      normalArray->SetTuple(ptId, &normals[(size_t)3*ptId]);
+    }
+    normalArray->Modified();
+  }
+  // the height the worst normal left a layer on its triangle, as a part of
+  // the layer's own: not positive means the cell there was turned over
+  const double worstHeight = std::cos(report.worstBeforeDegrees*3.14159265358979323846/180.0);
+  fprintf(stdout,"Boundary layer extrusion directions: %lld of %lld point normals stood more than %g degrees off a triangle on their point (%lld rim points keep theirs, in the cap planes); %lld of them were turned to the direction standing best off all the triangles there, %lld still stand over it after (a ridge sharper than that), %lld of those within 5 degrees of a triangle's plane (triangles facing against each other: left as they were); the largest angle was %.4g degrees at (%.5g, %.5g, %.5g), which leaves a layer %.3g of its height on that triangle%s, and is now %.4g degrees; the most turned normal turned %.3g degrees\n",
+      report.numOverLimit, (long long)numPts, maxDegrees, numRim, numRaised, report.numStillOver, report.numLeftInPlane,
+      report.worstBeforeDegrees, report.worstAt[0], report.worstAt[1], report.worstAt[2],
+      worstHeight, worstHeight > 0.0 ? "" : " (not positive: the layer cell there is turned over)", report.worstAfterDegrees, report.largestTurnDegrees);
+  if (report.numZeroLength > 0)
+  {
+    fprintf(stdout,"  %lld point normals have no length and were left alone\n", report.numZeroLength);
+  }
+  return SV_OK;
+}
+
 // --------------------------------------------
 // TGenUtils_ClampThicknessToConcaveCurvature
 // --------------------------------------------

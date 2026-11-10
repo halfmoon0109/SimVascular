@@ -147,6 +147,20 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_SmoothWarpVectorsInConcaveRegions(vtkPolyDat
     int iterations,
     double maxRelaxation);
 
+/**
+ * @brief Turns the point normals of the surface that lie nearly in the plane
+ * of a triangle on their point (more than maxDegrees off its normal) to the
+ * direction standing best off all the triangles there, so that a layer
+ * extruded along them keeps its height on every triangle (see
+ * svoffset::RaiseNormalsOffTriangles). The points on a boundary edge keep
+ * their normals: a cap rim's lie in the cap's plane.
+ * @param surface Triangles with a 3-component point array of the given name.
+ * @return SV_OK, having reported what was turned.
+ */
+SV_EXPORT_TETGEN_MESH int TGenUtils_RaiseNormalsOffTriangles(vtkPolyData *surface,
+    const char *normalsArrayName,
+    double maxDegrees);
+
 SV_EXPORT_TETGEN_MESH int TGenUtils_ClampThicknessToConcaveCurvature(vtkPolyData *surface,
     vtkDoubleArray *array,
     double factor);

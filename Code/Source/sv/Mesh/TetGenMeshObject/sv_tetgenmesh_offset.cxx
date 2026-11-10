@@ -6337,6 +6337,153 @@ long long WeldFoldedApexes(std::vector<double> &points, std::vector<long long> &
   return numWelded;
 }
 
+//--------------------------
+// RaiseNormalsOffTriangles
+//--------------------------
+long long RaiseNormalsOffTriangles(const std::vector<double> &points, const std::vector<long long> &triangles,
+    std::vector<double> &normals, double maxDegrees, NormalReport &report,
+    const std::vector<unsigned char> *skip)
+{
+  report = NormalReport();
+  const ll np = (ll)(points.size()/3), nt = (ll)(triangles.size()/3);
+  if (np == 0 || nt == 0 || normals.size() != points.size()) return 0;
+  const double pi = 3.14159265358979323846;
+  // A direction within this of a triangle's plane gives its cell no height
+  // worth turning the others for: where the best direction is no better,
+  // the triangles on the point face against each other (one folded back on
+  // its neighbours, or wound the other way), and the normal that stood off
+  // the rest is kept.
+  const double floorCosine = std::cos(85.0*pi/180.0);
+  // A triangle with less than this part of the area of the largest on the
+  // point is a needle: its normal is decided by the last digits of its
+  // corners, its cell has no volume whichever way the layer goes, and its
+  // one vote would turn the normal off the sound triangles.
+  const double needleRatio = 1.0e-3;
+  // the triangles' unit normals and areas, and the triangles on each point
+  std::vector<double> faceNormal((size_t)3*nt, 0.0), area((size_t)nt, 0.0);
+  std::vector<std::vector<ll> > incident((size_t)np);
+  double agreement = 0.0;
+  for (ll t = 0; t < nt; t++)
+  {
+    const ll *T = &triangles[(size_t)3*t];
+    if (T[0] < 0 || T[1] < 0 || T[2] < 0 || T[0] >= np || T[1] >= np || T[2] >= np) continue;
+    double e1[3], e2[3], n[3];
+    Sub(&points[(size_t)3*T[1]], &points[(size_t)3*T[0]], e1);
+    Sub(&points[(size_t)3*T[2]], &points[(size_t)3*T[0]], e2);
+    Cross(e1, e2, n);
+    const double l = Norm(n);
+    if (!(l > 0.0)) continue;
+    for (int k = 0; k < 3; k++) faceNormal[(size_t)3*t + k] = n[k]/l;
+    area[(size_t)t] = 0.5*l;
+    for (int j = 0; j < 3; j++)
+    {
+      incident[(size_t)T[j]].push_back(t);
+      const double *m = &normals[(size_t)3*T[j]];
+      const double lm = Norm(m);
+      if (lm > 0.0) agreement += l*Dot(&faceNormal[(size_t)3*t], m)/lm;
+    }
+  }
+  // the windings against the point normals, as a whole (by area, so that
+  // needles do not decide it)
+  if (agreement < 0.0)
+  {
+    for (size_t i = 0; i < faceNormal.size(); i++) faceNormal[i] = -faceNormal[i];
+  }
+  const double limit = std::cos(maxDegrees*pi/180.0);
+  double worstBefore = 1.0, worstAfter = 1.0;
+  std::vector<ll> on;
+  for (ll v = 0; v < np; v++)
+  {
+    if (skip != nullptr && (size_t)v < skip->size() && (*skip)[(size_t)v]) continue;
+    const std::vector<ll> &all = incident[(size_t)v];
+    if (all.empty()) continue;
+    double largest = 0.0;
+    for (size_t i = 0; i < all.size(); i++) largest = std::max(largest, area[(size_t)all[i]]);
+    on.clear();
+    for (size_t i = 0; i < all.size(); i++)
+    {
+      if (area[(size_t)all[i]] >= needleRatio*largest) on.push_back(all[i]);
+    }
+    double n[3] = {normals[(size_t)3*v], normals[(size_t)3*v + 1], normals[(size_t)3*v + 2]};
+    const double ln = Norm(n);
+    if (!(ln > 0.0))
+    {
+      report.numZeroLength++;
+      continue;
+    }
+    for (int k = 0; k < 3; k++) n[k] /= ln;
+    auto smallestCosine = [&](const double d[3])
+    {
+      double smallest = 1.0;
+      for (size_t i = 0; i < on.size(); i++) smallest = std::min(smallest, Dot(d, &faceNormal[(size_t)3*on[i]]));
+      return smallest;
+    };
+    const double had = smallestCosine(n);
+    if (had < worstBefore)
+    {
+      worstBefore = had;
+      for (int k = 0; k < 3; k++) report.worstAt[k] = points[(size_t)3*v + k];
+    }
+    if (!(had < limit))
+    {
+      worstAfter = std::min(worstAfter, had);
+      continue;
+    }
+    report.numOverLimit++;
+    // The direction with the largest smallest cosine is the normal of one
+    // triangle, the bisector of two, or the direction at one angle from
+    // three: every one of those is tried.
+    double best[3] = {n[0], n[1], n[2]}, bestCosine = had;
+    auto consider = [&](const double d[3])
+    {
+      const double l = Norm(d);
+      if (!(l > 0.0)) return;
+      const double u[3] = {d[0]/l, d[1]/l, d[2]/l};
+      const double c = smallestCosine(u);
+      if (c > bestCosine)
+      {
+        bestCosine = c;
+        for (int k = 0; k < 3; k++) best[k] = u[k];
+      }
+    };
+    for (size_t i = 0; i < on.size(); i++)
+    {
+      const double *a = &faceNormal[(size_t)3*on[i]];
+      consider(a);
+      for (size_t j = i + 1; j < on.size(); j++)
+      {
+        const double *b = &faceNormal[(size_t)3*on[j]];
+        const double sum[3] = {a[0] + b[0], a[1] + b[1], a[2] + b[2]};
+        consider(sum);
+        for (size_t m = j + 1; m < on.size(); m++)
+        {
+          const double *c = &faceNormal[(size_t)3*on[m]];
+          double ab[3], ac[3], d[3];
+          Sub(a, b, ab);
+          Sub(a, c, ac);
+          Cross(ab, ac, d);
+          consider(d);
+          const double back[3] = {-d[0], -d[1], -d[2]};
+          consider(back);
+        }
+      }
+    }
+    const bool take = bestCosine > had + 1.0e-9 && bestCosine > floorCosine;
+    const double now = take ? bestCosine : had;
+    worstAfter = std::min(worstAfter, now);
+    if (now < limit) report.numStillOver++;
+    if (!(now > floorCosine)) report.numLeftInPlane++;
+    if (!take) continue;
+    const double turn = std::acos(std::max(-1.0, std::min(1.0, Dot(best, n))))*180.0/pi;
+    report.largestTurnDegrees = std::max(report.largestTurnDegrees, turn);
+    for (int k = 0; k < 3; k++) normals[(size_t)3*v + k] = best[k]*ln;
+    report.numRaised++;
+  }
+  report.worstBeforeDegrees = std::acos(std::max(-1.0, std::min(1.0, worstBefore)))*180.0/pi;
+  report.worstAfterDegrees = std::acos(std::max(-1.0, std::min(1.0, worstAfter)))*180.0/pi;
+  return report.numRaised;
+}
+
 //---------------
 // StitchAnnulus
 //---------------

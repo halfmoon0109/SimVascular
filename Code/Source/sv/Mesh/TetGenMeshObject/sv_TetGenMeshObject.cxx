@@ -2252,9 +2252,29 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
   // Set cap boundary normals.
   SetCapBoundaryNormals(originalsurfpd);
 
+  // The boundary layer is extruded along the point normals, and a point
+  // normal is the plain mean of the normals of the triangles on the point:
+  // on a sharp ridge it leans to the sheet with more triangles there and
+  // lies in the other sheet, whose layer cells then have no height
+  // (measured 2026-11-10 on the user's model: the ridge of the septum where
+  // the two vertebral arteries join, a normal 92.3, 90.7 and 89.9 degrees
+  // off three triangles on its point, two layer cells turned over there,
+  // and one the worst element of the whole mesh, aspect ratio 5502 against
+  // 263 for the next). Such normals are turned to the direction standing
+  // best off all the triangles on their point, in the layer's own copy of
+  // the surface: the surface the solid wall is built from keeps the normals
+  // it had.
+  auto layersurfpd = vtkSmartPointer<vtkPolyData>::New();
+  layersurfpd->DeepCopy(originalsurfpd);
+  if (TGenUtils_RaiseNormalsOffTriangles(layersurfpd, "Normals", 60.0) != SV_OK)
+  {
+    fprintf(stderr,"Problem raising the boundary layer extrusion directions off their triangles\n");
+    return SV_ERROR;
+  }
+
   // Convert the surface to an vtkUnstructuredGrid.
   auto converter = vtkSmartPointer<vtkvmtkPolyDataToUnstructuredGridFilter>::New();
-  converter->SetInputData(originalsurfpd);
+  converter->SetInputData(layersurfpd);
   converter->Update();
 
   // Copy the vtkUnstructuredGrid.
@@ -2316,16 +2336,18 @@ int cvTetGenMeshObject::GenerateBoundaryLayerMesh()
       blThicknessArray->SetValue(ptId, thickness);
     }
 
-    if (TGenUtils_ReportConcaveCurvatureVsThickness(originalsurfpd, blThicknessArray, 1,
+    // measured along the directions the layer is extruded along: the copy
+    // whose ridge normals were turned above (same points, same order)
+    if (TGenUtils_ReportConcaveCurvatureVsThickness(layersurfpd, blThicknessArray, 1,
           "fluid boundary layer, inward") != SV_OK)
     {
       fprintf(stderr,"Problem reporting the fluid boundary layer concave curvature\n");
       return SV_ERROR;
     }
 
-    originalsurfpd->GetPointData()->RemoveArray("ThicknessOverRadius");
-    originalsurfpd->GetPointData()->RemoveArray("ConcaveRadiusTypical");
-    originalsurfpd->GetPointData()->RemoveArray("ConcaveRadiusSmallest");
+    layersurfpd->GetPointData()->RemoveArray("ThicknessOverRadius");
+    layersurfpd->GetPointData()->RemoveArray("ConcaveRadiusTypical");
+    layersurfpd->GetPointData()->RemoveArray("ConcaveRadiusSmallest");
   }
 
   if (VMTKUtils_BoundaryLayerMesh(boundarylayermesh_, innerSurface, meshoptions_.maxedgesize, meshoptions_.blthicknessfactor,

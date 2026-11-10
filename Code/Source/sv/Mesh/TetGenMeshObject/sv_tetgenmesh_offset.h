@@ -1119,6 +1119,65 @@ long long ListFoldedEdges(const std::vector<double> &points, const std::vector<l
 long long WeldFoldedApexes(std::vector<double> &points, std::vector<long long> &triangles,
     double maxDegrees, double maxApexFraction, long long *numRefused = nullptr);
 
+/// What RaiseNormalsOffTriangles did.
+struct NormalReport
+{
+  long long numOverLimit = 0;       // point normals standing more than the limit off a triangle on their point, before
+  long long numRaised = 0;          // of them, replaced
+  long long numStillOver = 0;       // of them, still over the limit after (a ridge sharper than the limit allows, or a normal kept)
+  long long numLeftInPlane = 0;     // of them, left within 5 degrees of a triangle's plane: no direction stands off all the triangles there
+  long long numZeroLength = 0;      // point normals of no length, left alone
+  double worstBeforeDegrees = 0.0;  // the largest angle between a point normal and the normal of a triangle on the point, before
+  double worstAfterDegrees = 0.0;   // and after, over the same points
+  double worstAt[3] = {0.0, 0.0, 0.0};   // where the worst before was
+  double largestTurnDegrees = 0.0;  // how far the most turned normal was turned
+};
+
+/**
+ * @brief Turns the point normals that lie nearly in the plane of a triangle
+ * on their point to the direction standing best off all the triangles there.
+ *
+ * A layer extruded from the surface along its point normals has, on every
+ * triangle, the height the normal's cosine to that triangle leaves it. A
+ * point normal is the plain mean of the normals of the triangles on the
+ * point, so on a sharp ridge between two sheets it leans to the sheet with
+ * more triangles there, and the cells on the other sheet lose their height.
+ * Measured on the user's model (2026-11-10, the fluid boundary layer on the
+ * ridge of the septum where the two vertebral arteries join, the sheets
+ * turned 128 degrees): a point on five triangles of one sheet and three of
+ * the other, its normal 92.3, 90.7 and 89.9 degrees off the three, two of
+ * the layer cells on them turned over, and one the worst element of the
+ * whole mesh, aspect ratio 5502 where the next was 263.
+ *
+ * Where the angle to some triangle on the point exceeds maxDegrees, the
+ * normal is turned to the direction whose smallest cosine to the normals of
+ * the triangles on the point is the largest (on a ridge of two sheets,
+ * their bisector), its length kept, when that is better than what it had.
+ * Other normals are not touched. Two things are left out of it. A triangle
+ * of under a thousandth of the area of the largest on the point has no say:
+ * its normal is noise and its cell has no volume either way. And a point
+ * whose best direction still lies within 5 degrees of a triangle's plane
+ * keeps its normal: its triangles face against each other (one folded back
+ * on the rest), and the best direction would lie in the planes of all of
+ * them where the old one stood off all but one.
+ *
+ * Triangle normals are taken to face the way the point normals do on the
+ * whole (the windings are turned over together when they do not).
+ *
+ * The gain is on the side the normals spread to (the layer going into the
+ * lumen at a ridge of wall standing into it). On the side they close to, a
+ * layer thicker than the first row's distance from the ridge times the
+ * cotangent of half the angle between the sheets folds whichever way it is
+ * extruded.
+ * @param normals Three per point, read and updated; need not be unit.
+ * @param skip If given, one flag per point: points whose normal is fixed
+ * for another reason (a rim point's lies in its cap's plane).
+ * @return The number of normals replaced.
+ */
+long long RaiseNormalsOffTriangles(const std::vector<double> &points, const std::vector<long long> &triangles,
+    std::vector<double> &normals, double maxDegrees, NormalReport &report,
+    const std::vector<unsigned char> *skip = nullptr);
+
 /**
  * @brief Triangulates the ring between two rims round one vessel end, the
  * wall's end face between two of its surfaces (interface, layers, outer).

@@ -1154,6 +1154,198 @@ static void TestSplitSliver()
   Check(onABC == 1 && onABD == 1, "each facet is still the face of one tetrahedron");
 }
 
+// 8. Point normals at a ridge: two sheets meet along a ridge with their
+// normals 128 degrees apart, and the ridge point carries three triangles of
+// one sheet and five of the other, as the point on the septum between the
+// user's two vertebral arteries did (2026-11-10). The plain mean of the
+// eight triangle normals lies in the first sheet (91 degrees off its
+// normal), so a layer extruded along it has no height on that sheet; the
+// direction standing best off all eight is the bisector, 64 degrees off
+// both. Normals that stand well off their triangles are not touched, a
+// skipped point is not touched, and the windings may run either way.
+static void TestRidgeNormals()
+{
+  printf("test 8: a point normal lying in one sheet at a ridge is turned to stand off both sheets\n");
+  const double beta = 64.0*M_PI/180.0, cb = std::cos(beta), sb = std::sin(beta);
+  // O the ridge point, P1 and P2 its neighbours on the ridge, A1 A2 on the left sheet, B1..B4 on the right
+  std::vector<double> pts = {0,0,0,  0,-1,0,  0,1,0,  -cb,-0.5,-sb,  -cb,0.5,-sb,  cb,-0.75,-sb,  cb,-0.25,-sb,  cb,0.25,-sb,  cb,0.75,-sb};
+  const ll O = 0, P1 = 1, P2 = 2, A1 = 3, A2 = 4, B1 = 5, B2 = 6, B3 = 7, B4 = 8;
+  std::vector<ll> tris = {O,P2,A2,  O,A2,A1,  O,A1,P1,  O,P1,B1,  O,B1,B2,  O,B2,B3,  O,B3,B4,  O,B4,P2};
+  const double n1[3] = {-sb, 0.0, cb}, n2[3] = {sb, 0.0, cb};
+  // the plain mean at O, of length two; the ridge neighbours carry the bisector, the others their sheet's normal
+  double mean[3] = {3.0*n1[0] + 5.0*n2[0], 0.0, 3.0*n1[2] + 5.0*n2[2]};
+  const double lm = std::sqrt(mean[0]*mean[0] + mean[2]*mean[2]);
+  std::vector<double> normals = {2.0*mean[0]/lm, 0.0, 2.0*mean[2]/lm,  0,0,1,  0,0,1,
+      n1[0],n1[1],n1[2],  n1[0],n1[1],n1[2],  n2[0],n2[1],n2[2],  n2[0],n2[1],n2[2],  n2[0],n2[1],n2[2],  n2[0],n2[1],n2[2]};
+  const std::vector<double> given = normals;
+  svoffset::NormalReport report;
+  const long long raised = svoffset::RaiseNormalsOffTriangles(pts, tris, normals, 70.0, report);
+  printf("  %lld raised; the worst angle to a triangle on a point %.2f -> %.2f degrees; the normal turned by %.2f degrees to (%.4f, %.4f, %.4f)\n",
+      raised, report.worstBeforeDegrees, report.worstAfterDegrees, report.largestTurnDegrees, normals[0], normals[1], normals[2]);
+  Check(raised == 1 && report.numRaised == 1, "the one normal lying in a sheet is raised");
+  Check(report.numOverLimit == 1 && report.numStillOver == 0 && report.numLeftInPlane == 0 && report.numZeroLength == 0,
+      "it is the one point over the limit, and none is over it after");
+  Check(std::abs(report.largestTurnDegrees - std::atan(0.25*sb/cb)*180.0/M_PI) < 1.0e-6 &&
+      report.worstAt[0] == 0.0 && report.worstAt[1] == 0.0 && report.worstAt[2] == 0.0,
+      "the report names the ridge point and the 27 degrees its normal turned");
+  Check(report.worstBeforeDegrees > 90.0 && std::abs(report.worstAfterDegrees - 64.0) < 1.0e-6, "from past 90 degrees off the left sheet to the bisector's 64 off both");
+  Check(std::abs(normals[0]) < 1.0e-9 && std::abs(normals[1]) < 1.0e-9 && std::abs(normals[2] - 2.0) < 1.0e-9, "the new normal is the bisector, of the length the old one had");
+  bool othersKept = true;
+  for (size_t i = 3; i < normals.size(); i++) if (normals[i] != given[i]) othersKept = false;
+  Check(othersKept, "no other normal is touched");
+  // the same with the windings turned over: the triangles are read the way the normals face
+  std::vector<ll> turned = tris;
+  for (size_t t = 0; t + 2 < turned.size(); t += 3) std::swap(turned[t + 1], turned[t + 2]);
+  std::vector<double> again = given;
+  svoffset::NormalReport reportTurned;
+  const long long raisedTurned = svoffset::RaiseNormalsOffTriangles(pts, turned, again, 70.0, reportTurned);
+  Check(raisedTurned == 1 && std::abs(again[2] - 2.0) < 1.0e-9 && std::abs(again[0]) < 1.0e-9, "with every triangle wound the other way the result is the same");
+  // a skipped point keeps its normal
+  std::vector<double> kept = given;
+  std::vector<unsigned char> skip(pts.size()/3, 0);
+  skip[(size_t)O] = 1;
+  svoffset::NormalReport reportSkipped;
+  const long long raisedSkipped = svoffset::RaiseNormalsOffTriangles(pts, tris, kept, 70.0, reportSkipped, &skip);
+  Check(raisedSkipped == 0 && kept == given, "a skipped point keeps the normal it was given");
+  // under the limit nothing moves: the same ridge with the bisector at O already
+  std::vector<double> fine = given;
+  fine[0] = 0.0; fine[1] = 0.0; fine[2] = 1.0;
+  const std::vector<double> fineGiven = fine;
+  svoffset::NormalReport reportFine;
+  const long long raisedFine = svoffset::RaiseNormalsOffTriangles(pts, tris, fine, 70.0, reportFine);
+  Check(raisedFine == 0 && fine == fineGiven && std::abs(reportFine.worstBeforeDegrees - 64.0) < 1.0e-6, "a normal 64 degrees off its triangles is under the limit of 70 and stays");
+  // under the limit and not the best direction either: 4 degrees off the bisector, 68 off one sheet
+  std::vector<double> leaning = given;
+  const double lean = 4.0*M_PI/180.0;
+  leaning[0] = std::sin(lean); leaning[1] = 0.0; leaning[2] = std::cos(lean);
+  const std::vector<double> leaningGiven = leaning;
+  svoffset::NormalReport reportLeaning;
+  const long long raisedLeaning = svoffset::RaiseNormalsOffTriangles(pts, tris, leaning, 70.0, reportLeaning);
+  Check(raisedLeaning == 0 && leaning == leaningGiven && reportLeaning.numOverLimit == 0 &&
+      std::abs(reportLeaning.worstBeforeDegrees - 68.0) < 1.0e-6 && std::abs(reportLeaning.worstAfterDegrees - 68.0) < 1.0e-6,
+      "a normal 68 degrees off a sheet is not at the best direction, but under the limit of 70 it stays");
+  // at a limit of 60 the two ridge neighbours stand over it too, already at the best they can have
+  std::vector<double> sixty = given;
+  svoffset::NormalReport reportSixty;
+  const long long raisedSixty = svoffset::RaiseNormalsOffTriangles(pts, tris, sixty, 60.0, reportSixty);
+  Check(raisedSixty == 1 && reportSixty.numOverLimit == 3 && reportSixty.numStillOver == 3 && reportSixty.numLeftInPlane == 0,
+      "at a limit of 60 three points stand over it, one is raised, and the ridge's 64 degrees leaves all three over it");
+
+  // A corner of three sheets: the corner of the block x, y, z <= 0 at the
+  // origin, with one triangle on x = 0, two on y = 0 and four on z = 0. The
+  // plain mean leans to z (77 degrees off the x sheet); the direction at one
+  // angle from all three is the diagonal, 54.7 degrees off each, and only
+  // the plane through three normals finds it.
+  {
+    std::vector<double> cornerPts = {0,0,0,  -1,0,0,  0,-1,0,  0,0,-1,  -1,0,-1,  -1,-0.4,0,  -1,-1,0,  -0.4,-1,0};
+    const ll C = 0, EX = 1, EY = 2, EZ = 3, DY = 4, F1 = 5, F2 = 6, F3 = 7;
+    std::vector<ll> cornerTris = {C,EY,EZ,  C,EZ,DY,  C,DY,EX,  C,EX,F1,  C,F1,F2,  C,F2,F3,  C,F3,EY};
+    const double s21 = 1.5/std::sqrt(21.0), r2 = std::sqrt(0.5), diagonal = 1.5/std::sqrt(3.0);
+    const std::vector<double> cornerGiven = {1*s21, 2*s21, 4*s21,  0,r2,r2,  r2,0,r2,  r2,r2,0,  0,1,0,  0,0,1,  0,0,1,  0,0,1};
+    for (int pass = 0; pass < 2; pass++)
+    {
+      std::vector<ll> wound = cornerTris;
+      if (pass == 1) for (size_t t = 0; t + 2 < wound.size(); t += 3) std::swap(wound[t + 1], wound[t + 2]);
+      std::vector<double> cornerNormals = cornerGiven;
+      svoffset::NormalReport cornerReport;
+      const long long cornerRaised = svoffset::RaiseNormalsOffTriangles(cornerPts, wound, cornerNormals, 50.0, cornerReport);
+      if (pass == 0)
+      {
+        printf("  the corner of three sheets: %lld raised, %.3f -> %.3f degrees, turned %.2f to (%.4f, %.4f, %.4f)\n", cornerRaised,
+            cornerReport.worstBeforeDegrees, cornerReport.worstAfterDegrees, cornerReport.largestTurnDegrees, cornerNormals[0], cornerNormals[1], cornerNormals[2]);
+      }
+      bool restKept = true;
+      for (size_t i = 3; i < cornerNormals.size(); i++) if (cornerNormals[i] != cornerGiven[i]) restKept = false;
+      Check(cornerRaised == 1 && restKept && std::abs(cornerNormals[0] - diagonal) < 1.0e-9 && std::abs(cornerNormals[1] - diagonal) < 1.0e-9 &&
+          std::abs(cornerNormals[2] - diagonal) < 1.0e-9,
+          pass == 0 ? "at a corner of three sheets the normal becomes the diagonal, of the length it had" : "and the same with every triangle wound the other way");
+      Check(std::abs(cornerReport.worstBeforeDegrees - std::acos(1.0/std::sqrt(21.0))*180.0/M_PI) < 1.0e-6 &&
+          std::abs(cornerReport.worstAfterDegrees - std::acos(1.0/std::sqrt(3.0))*180.0/M_PI) < 1.0e-6 &&
+          cornerReport.numOverLimit == 1 && cornerReport.numStillOver == 1 && cornerReport.largestTurnDegrees > 28.0 && cornerReport.largestTurnDegrees < 28.3,
+          pass == 0 ? "from 77.4 to 54.7 degrees off the worst sheet, still over the limit of 50 and counted so" : "with the same report");
+    }
+  }
+
+  // A triangle that does not fit the others on its point, on a gently
+  // curved cap of six triangles: plain mean normals, the centre looked at.
+  auto meanNormals = [](const std::vector<double> &p, const std::vector<ll> &t)
+  {
+    std::vector<double> n(p.size(), 0.0);
+    for (size_t i = 0; i + 2 < t.size(); i += 3)
+    {
+      const double *a = &p[(size_t)3*t[i]], *b = &p[(size_t)3*t[i + 1]], *c = &p[(size_t)3*t[i + 2]];
+      const double u[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]}, v[3] = {c[0] - a[0], c[1] - a[1], c[2] - a[2]};
+      const double w[3] = {u[1]*v[2] - u[2]*v[1], u[2]*v[0] - u[0]*v[2], u[0]*v[1] - u[1]*v[0]};
+      const double l = std::sqrt(w[0]*w[0] + w[1]*w[1] + w[2]*w[2]);
+      if (!(l > 0.0)) continue;
+      for (int j = 0; j < 3; j++) for (int k = 0; k < 3; k++) n[(size_t)3*t[i + j] + k] += w[k]/l;
+    }
+    for (size_t v = 0; v + 2 < n.size(); v += 3)
+    {
+      const double l = std::sqrt(n[v]*n[v] + n[v + 1]*n[v + 1] + n[v + 2]*n[v + 2]);
+      if (l > 0.0) for (int k = 0; k < 3; k++) n[v + k] /= l;
+    }
+    return n;
+  };
+  const double capRadius = 10.0;
+  auto onCap = [&](double r, double degrees, std::vector<double> &p)
+  {
+    const double a = degrees*M_PI/180.0, x = r*std::cos(a), y = r*std::sin(a);
+    p.push_back(x); p.push_back(y); p.push_back(std::sqrt(capRadius*capRadius - x*x - y*y) - capRadius);
+  };
+  {
+    // one triangle wound against the rest: no direction stands off all six,
+    // and the best there is lies in the planes of five that the mean stood
+    // well off, so the normal is kept and the point is counted as left
+    std::vector<double> capPts = {0, 0, 0};
+    for (int i = 0; i < 6; i++) onCap(1.0, 60.0*i + 7.0*(i%2), capPts);
+    std::vector<ll> capTris;
+    for (ll i = 0; i < 6; i++) { capTris.push_back(0); capTris.push_back(1 + i); capTris.push_back(1 + (i + 1)%6); }
+    std::swap(capTris[1], capTris[2]);
+    std::vector<double> capNormals = meanNormals(capPts, capTris);
+    const std::vector<double> capGiven = capNormals;
+    std::vector<unsigned char> onlyCentre(capPts.size()/3, 1);
+    onlyCentre[0] = 0;
+    svoffset::NormalReport capReport;
+    const long long capRaised = svoffset::RaiseNormalsOffTriangles(capPts, capTris, capNormals, 60.0, capReport, &onlyCentre);
+    printf("  a triangle wound against the five others on its point: %lld raised, %lld left in a plane, worst %.2f -> %.2f degrees\n",
+        capRaised, capReport.numLeftInPlane, capReport.worstBeforeDegrees, capReport.worstAfterDegrees);
+    Check(capRaised == 0 && capNormals == capGiven, "where one triangle faces against the rest the normal that stands off the rest is kept");
+    Check(capReport.numOverLimit == 1 && capReport.numLeftInPlane == 1 && capReport.numStillOver == 1 &&
+        capReport.worstBeforeDegrees > 170.0 && capReport.worstAfterDegrees == capReport.worstBeforeDegrees,
+        "and the point is reported as left in a triangle's plane, its angle as it was");
+  }
+  {
+    // a needle: a point almost on an edge from the centre, the triangle on
+    // that edge with no area and its normal lying in the cap. It has no say:
+    // the centre's normal is under the limit against the sound triangles
+    std::vector<double> capPts = {0, 0, 0};
+    for (int i = 0; i < 6; i++) onCap(1.0, 60.0*i, capPts);
+    capPts.push_back(0.5*capPts[3]); capPts.push_back(-5.0e-7); capPts.push_back(0.5*capPts[5] + 1.0e-7);
+    std::vector<ll> capTris = {0, 1, 7,  0, 7, 2,  1, 2, 7};
+    for (ll i = 1; i < 6; i++) { capTris.push_back(0); capTris.push_back(1 + i); capTris.push_back(1 + (i + 1)%6); }
+    std::vector<double> capNormals = meanNormals(capPts, capTris);
+    const std::vector<double> capGiven = capNormals;
+    std::vector<unsigned char> onlyCentre(capPts.size()/3, 1);
+    onlyCentre[0] = 0;
+    svoffset::NormalReport capReport;
+    const long long capRaised = svoffset::RaiseNormalsOffTriangles(capPts, capTris, capNormals, 60.0, capReport, &onlyCentre);
+    printf("  a needle on the point: %lld raised, %lld over the limit, the worst angle to a sound triangle %.2f degrees\n",
+        capRaised, capReport.numOverLimit, capReport.worstBeforeDegrees);
+    Check(capRaised == 0 && capNormals == capGiven && capReport.numOverLimit == 0 && capReport.worstBeforeDegrees < 20.0,
+        "a needle of no area on the point does not turn its normal off the sound triangles");
+  }
+  {
+    // a point normal of no length is left alone and counted
+    std::vector<double> none = given;
+    none[0] = 0.0; none[1] = 0.0; none[2] = 0.0;
+    const std::vector<double> noneGiven = none;
+    svoffset::NormalReport reportNone;
+    const long long raisedNone = svoffset::RaiseNormalsOffTriangles(pts, tris, none, 70.0, reportNone);
+    Check(raisedNone == 0 && none == noneGiven && reportNone.numZeroLength == 1, "a point normal of no length is left alone and counted");
+  }
+}
+
 int main()
 {
   TestFoldCount();
@@ -1170,6 +1362,7 @@ int main()
   TestLayers();
   TestMicroEdges();
   TestSplitSliver();
+  TestRidgeNormals();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }
