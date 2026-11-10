@@ -503,7 +503,7 @@ void CountEdges(const std::vector<long long> &triangles, long long &numBoundary,
  * @brief What decides where the wall can be prism layers extruded along the
  * interface's normals (the structured zone) and where it must be filled
  * with tetrahedra between the interface and the offset surfaces (the
- * junction zone). See docs/wall-mesh-purpose.md section 8.
+ * junction zone). See docs/wall-mesh-done.md section 8.
  */
 struct ZoneOptions
 {

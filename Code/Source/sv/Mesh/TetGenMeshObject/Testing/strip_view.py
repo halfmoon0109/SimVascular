@@ -14,7 +14,7 @@ The interface file (points, normals, thickness, triangles with faces, as the dri
 the faces by area; pass - without one. The picture is the outer surface (marker 2) within the radius,
 projected on its mean normal: strip triangles blue (two loop corners) or orange (two chain corners),
 the loop's edges red. Convert with a headless browser, e.g. chromium --headless --screenshot=out.png out.svg.
-Stdlib only (no numpy), from a measurement on the user's model of 2026-10-16 (docs/wall-mesh-purpose.md, section 6).
+Stdlib only (no numpy), from a measurement on the user's model of 2026-10-16 (docs/wall-mesh-done.md, section 6).
 """
 import sys, struct, array, math
 def vec(f, code):

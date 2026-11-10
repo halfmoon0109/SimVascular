@@ -99,7 +99,7 @@
 static const double gWallThicknessMaxSlope = 0.5;
 
 // Whether the wall is built as the hybrid of prism layers and mesher-filled
-// junction zones (docs/wall-mesh-purpose.md section 8) where it can be, or
+// junction zones (docs/wall-mesh-done.md section 8) where it can be, or
 // always as one shell for the mesher. The hybrid falls back to the shell on
 // its own wherever it cannot be built, so this is only for comparing the two
 // on the same model.
@@ -3238,7 +3238,7 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
         numDegenerate);
   }
 
-  // The hybrid wall (docs/wall-mesh-purpose.md section 8). The shell above
+  // The hybrid wall (docs/wall-mesh-done.md section 8). The shell above
   // is what the mesher filled until now: a wall N tetrahedra thick between
   // facet surfaces that are not aligned with one another, so that between
   // any two of them lie slivers wherever a triangle of one stands over an

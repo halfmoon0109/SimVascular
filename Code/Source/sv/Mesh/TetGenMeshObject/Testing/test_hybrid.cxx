@@ -30,7 +30,7 @@
  */
 
 // A standalone test of the prism zone classification behind the hybrid wall
-// mesh (docs/wall-mesh-purpose.md section 8): where the wall can be prism
+// mesh (docs/wall-mesh-done.md section 8): where the wall can be prism
 // layers along the normals and where it has to be filled with tetrahedra.
 // No VTK and no TetGen: the field alone decides.
 //

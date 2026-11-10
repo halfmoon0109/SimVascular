@@ -6,7 +6,7 @@ triangles turn by more than 35 degrees are listed by 6-unit cell with their mean
 vessel walls at a branch root makes a chain of them. The picture is the outer surface within the radius,
 viewed along the given direction (or its mean normal), flat-shaded as a headlight would, strips tinted warm;
 convert with a headless browser, e.g. chromium --headless --screenshot=out.png out.svg. Used on 2026-10-20 to
-see the teeth along the valleys (docs/wall-mesh-purpose.md, section 6) before and after the crease cut.
+see the teeth along the valleys (docs/wall-mesh-done.md, section 6) before and after the crease cut.
 
 usage: valley_view.py shell.bin [cx cy cz radius out.svg [vx vy vz]]
 """

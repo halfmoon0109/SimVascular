@@ -267,7 +267,7 @@ SV_EXPORT_TETGEN_MESH int TGenUtils_BuildContouredOuterSurface(vtkPolyData *surf
     vtkPolyData *outer,
     int &numUnresolved);
 
-// The hybrid wall (docs/wall-mesh-purpose.md section 8): wherever the
+// The hybrid wall (docs/wall-mesh-done.md section 8): wherever the
 // interface extrudes cleanly along its normals through the wall, N stacked
 // prisms over each triangle, split into tetrahedra whose faces are aligned
 // with the wall; only the junction zones, where the extrusion is covered,
