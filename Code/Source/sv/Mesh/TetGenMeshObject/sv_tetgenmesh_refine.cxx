@@ -332,6 +332,58 @@ long long RefineTriangles(Mesh &mesh, std::vector<int> &depth, Report &report, s
   return total;
 }
 
+//---------------
+// MoveMidpoints
+//---------------
+long long MoveMidpoints(Mesh &mesh, const std::vector<double> &targets, const std::vector<unsigned char> &wanted,
+    double minVolumeKept, MoveReport &report)
+{
+  report = MoveReport();
+  const ll np = (ll)(mesh.points.size()/3), first = mesh.numOriginalPoints, numAdded = np - first;
+  if (numAdded <= 0 || first < 0 || (ll)wanted.size() != numAdded || (ll)targets.size() != 3*numAdded) return 0;
+  const ll nt = (ll)(mesh.tetrahedra.size()/4);
+  // the tetrahedra on each added point, and every tetrahedron's volume
+  // before any point is moved
+  std::vector<std::vector<ll> > around((size_t)numAdded);
+  std::vector<double> before((size_t)nt);
+  for (ll t = 0; t < nt; t++)
+  {
+    const ll *T = &mesh.tetrahedra[(size_t)4*t];
+    before[(size_t)t] = SignedVolume(mesh.points, T);
+    for (int j = 0; j < 4; j++)
+    {
+      if (T[j] >= first && T[j] < np) around[(size_t)(T[j] - first)].push_back(t);
+    }
+  }
+  for (ll k = 0; k < numAdded; k++)
+  {
+    if (!wanted[(size_t)k]) continue;
+    double *x = &mesh.points[(size_t)3*(first + k)];
+    const double *to = &targets[(size_t)3*k];
+    const double old[3] = {x[0], x[1], x[2]};
+    const double move = Distance(old, to);
+    if (!(move > 0.0)) continue;
+    for (int c = 0; c < 3; c++) x[c] = to[c];
+    bool ok = true;
+    const std::vector<ll> &on = around[(size_t)k];
+    for (size_t m = 0; m < on.size() && ok; m++)
+    {
+      const double after = SignedVolume(mesh.points, &mesh.tetrahedra[(size_t)4*on[m]]);
+      if (!(after > 0.0) || after < minVolumeKept*before[(size_t)on[m]]) ok = false;
+    }
+    if (!ok)
+    {
+      for (int c = 0; c < 3; c++) x[c] = old[c];
+      report.numRefused++;
+      continue;
+    }
+    report.numMoved++;
+    report.sumOfMoves += move;
+    report.longestMove = std::max(report.longestMove, move);
+  }
+  return report.numMoved;
+}
+
 //-----------------
 // CheckConforming
 //-----------------

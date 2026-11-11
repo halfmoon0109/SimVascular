@@ -3291,10 +3291,21 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
   const vtkIdType numNewPoints = (vtkIdType)(mesh.points.size()/3);
   // The midpoints on the wall put back on the model surface. A wall point
   // is an input surface point or a midpoint of two wall points; its move
-  // is refused when it is longer than a quarter of the edge it halves or
-  // when a boundary layer tetrahedron on it would lose more than nine
-  // tenths of its volume (the first sublayer is thin, and a point moved
-  // sideways could fold it).
+  // is refused when it is longer than a quarter of the edge it halves, or
+  // when a boundary layer tetrahedron on it would be left with less than
+  // three quarters of the volume it had before any midpoint moved
+  // (svrefine::MoveMidpoints). The first sublayer is a seventh of the
+  // layer, and a midpoint moved into it, or away from it, tilts the wall
+  // under the tetrahedra on it (about half of the moves refused are on
+  // convex wall, going away from the layer): held against what the move
+  // before had left, with
+  // nine tenths allowed, the moves of two midpoints could leave a
+  // tetrahedron a hundredth of its volume (the user's model, 2026-11-11:
+  // the fluid mesh's worst elements, aspect ratio 340 to 420, kept about a
+  // forty-fifth after two moves each, and 79,167 boundary layer tetrahedra
+  // stood over 10 where 24,628 did before the moves; with three quarters
+  // kept, 53,901 and a worst of 26).
+  const double minVolumeKept = 0.75;
   if (model != nullptr && model->GetNumberOfCells() > 0)
   {
     std::vector<unsigned char> onWall((size_t)numNewPoints, 0);
@@ -3304,19 +3315,6 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
       const long long pa = mesh.parents[(size_t)2*(p - numPoints)], pb = mesh.parents[(size_t)2*(p - numPoints) + 1];
       onWall[(size_t)p] = (onWall[(size_t)pa] && onWall[(size_t)pb]) ? 1 : 0;
     }
-    std::vector<std::vector<long long> > tetsOf((size_t)numNewPoints);
-    for (size_t t = 0; t + 3 < mesh.tetrahedra.size(); t += 4)
-    {
-      for (int j = 0; j < 4; j++) tetsOf[(size_t)mesh.tetrahedra[t + (size_t)j]].push_back((long long)(t/4));
-    }
-    auto volumeOf = [&](long long t)
-    {
-      const long long *q = &mesh.tetrahedra[(size_t)4*t];
-      const double *a = &mesh.points[(size_t)3*q[0]], *b = &mesh.points[(size_t)3*q[1]], *c = &mesh.points[(size_t)3*q[2]], *d = &mesh.points[(size_t)3*q[3]];
-      double u[3], v[3], w[3];
-      for (int k = 0; k < 3; k++) { u[k] = b[k] - a[k]; v[k] = c[k] - a[k]; w[k] = d[k] - a[k]; }
-      return (u[0]*(v[1]*w[2] - v[2]*w[1]) - u[1]*(v[0]*w[2] - v[2]*w[0]) + u[2]*(v[0]*w[1] - v[1]*w[0]))/6.0;
-    };
     // the model's wall faces only: a rim midpoint lies in the cap plane,
     // and against the whole model its closest point would be itself
     vtkSmartPointer<vtkPolyData> wallModel = model;
@@ -3345,12 +3343,16 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
     auto locator = vtkSmartPointer<vtkCellLocator>::New();
     locator->SetDataSet(wallModel);
     locator->BuildLocator();
-    long long numProjected = 0, numRefusedFar = 0, numRefusedFold = 0;
-    double longestMove = 0.0, sumMove = 0.0;
+    // where each wall midpoint is to go: the model's wall under it
+    std::vector<double> targets((size_t)3*(numNewPoints - numPoints));
+    std::vector<unsigned char> wanted((size_t)(numNewPoints - numPoints), 0);
+    long long numRefusedFar = 0;
     for (vtkIdType p = numPoints; p < numNewPoints; p++)
     {
+      const double *x = &mesh.points[(size_t)3*p];
+      double *target = &targets[(size_t)3*(p - numPoints)];
+      for (int k = 0; k < 3; k++) target[k] = x[k];
       if (!onWall[(size_t)p]) continue;
-      double *x = &mesh.points[(size_t)3*p];
       const long long pa = mesh.parents[(size_t)2*(p - numPoints)], pb = mesh.parents[(size_t)2*(p - numPoints) + 1];
       const double edge = std::sqrt(vtkMath::Distance2BetweenPoints(&mesh.points[(size_t)3*pa], &mesh.points[(size_t)3*pb]));
       double closest[3], distance2 = 0.0;
@@ -3361,29 +3363,13 @@ int TGenUtils_RefineWallFacesToThickness(vtkUnstructuredGrid *blMesh, vtkIdType 
       const double move = std::sqrt(distance2);
       if (!(move > 0.0)) continue;
       if (move > 0.25*edge) { numRefusedFar++; continue; }
-      const std::vector<long long> &around = tetsOf[(size_t)p];
-      std::vector<double> before(around.size());
-      for (size_t m = 0; m < around.size(); m++) before[m] = volumeOf(around[m]);
-      double old[3] = {x[0], x[1], x[2]};
-      for (int k = 0; k < 3; k++) x[k] = closest[k];
-      bool ok = true;
-      for (size_t m = 0; m < around.size() && ok; m++)
-      {
-        const double after = volumeOf(around[m]);
-        if (!(after > 0.0) || after < 0.1*before[m]) ok = false;
-      }
-      if (!ok)
-      {
-        for (int k = 0; k < 3; k++) x[k] = old[k];
-        numRefusedFold++;
-        continue;
-      }
-      numProjected++;
-      sumMove += move;
-      longestMove = std::max(longestMove, move);
+      for (int k = 0; k < 3; k++) target[k] = closest[k];
+      wanted[(size_t)(p - numPoints)] = 1;
     }
-    fprintf(stdout,"  %lld wall midpoints moved onto the model's wall faces (mean %.3g, the longest %.3g); %lld left where they were as farther off than a quarter of their edge, %lld as the move would fold a boundary layer tetrahedron\n",
-        numProjected, numProjected > 0 ? sumMove/(double)numProjected : 0.0, longestMove, numRefusedFar, numRefusedFold);
+    svrefine::MoveReport moved;
+    svrefine::MoveMidpoints(mesh, targets, wanted, minVolumeKept, moved);
+    fprintf(stdout,"  %lld wall midpoints moved onto the model's wall faces (mean %.3g, the longest %.3g); %lld left where they were as farther off than a quarter of their edge, %lld as the move would leave a boundary layer tetrahedron on the point under %g of the volume it had before any midpoint moved\n",
+        moved.numMoved, moved.numMoved > 0 ? moved.sumOfMoves/(double)moved.numMoved : 0.0, moved.longestMove, numRefusedFar, moved.numRefused, minVolumeKept);
     // the moves change no cell, and every move kept its tetrahedra positive
   }
   // The refined mesh: the points, the original point data interpolated at

@@ -190,6 +190,42 @@ long long BisectEdges(Mesh &mesh, const std::vector<Edge> &edges, Report &report
 long long RefineTriangles(Mesh &mesh, std::vector<int> &depth, Report &report,
     size_t labelIndex = (size_t)-1, const std::vector<int> &skipLabels = std::vector<int>());
 
+/// What MoveMidpoints did.
+struct MoveReport
+{
+  long long numMoved = 0;
+  long long numRefused = 0;       // a tetrahedron on the point would have kept too little of its volume, or none
+  double longestMove = 0.0;       // over the moves taken
+  double sumOfMoves = 0.0;
+};
+
+/**
+ * @brief Move the points the bisections added to the places given for them
+ * (a wall midpoint to the model's wall under it), a point at a time in the
+ * order they were added.
+ *
+ * A move is refused, and the point left where it is, when a tetrahedron on
+ * the point would be left with less than minVolumeKept of the volume it had
+ * before any of these moves, or with none. The measure is the volume before
+ * all the moves and not before the move in hand: a first-sublayer
+ * tetrahedron cut on two or three of its wall edges leaves pieces with two
+ * midpoints each, and when each move was held against what the one before
+ * had left, two
+ * moves allowed nine tenths each could leave a hundredth (the user's model,
+ * 2026-11-11: the worst elements of the fluid mesh, aspect ratio 340 to
+ * 420, were such tetrahedra, left about a forty-fifth; of 79,167 boundary
+ * layer tetrahedra over an aspect ratio of 10 only 24,628 were so before
+ * the midpoints moved).
+ * @param targets Three coordinates per added point (the points from
+ * numOriginalPoints on), in their order.
+ * @param wanted One flag per added point: non-zero when it is to be moved.
+ * @param minVolumeKept The part of its volume before the moves every
+ * tetrahedron on a moved point keeps, between 0 and 1.
+ * @return The number of points moved.
+ */
+long long MoveMidpoints(Mesh &mesh, const std::vector<double> &targets, const std::vector<unsigned char> &wanted,
+    double minVolumeKept, MoveReport &report);
+
 /**
  * @brief Conformity, for tests and for the caller's check: every face of a
  * tetrahedron is on one or two tetrahedra, every surface triangle is a face

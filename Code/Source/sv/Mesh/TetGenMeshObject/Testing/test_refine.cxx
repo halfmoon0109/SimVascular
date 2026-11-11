@@ -624,6 +624,137 @@ int main()
     Check(dProj > 0.8*dFine, "with the midpoints on the cylinder as well");
     Check(u10Ref == 0 && u10Proj == 0, "no prism tetrahedron under 10 degrees after the refinement");
   }
+  {
+    printf("test 9: the midpoints moved, each move held against the volume before any of them\n");
+    // face 10 refined one level; its midpoints lie on the wall at z = 0 over a first sublayer 0.1 deep
+    svrefine::Mesh refined = BuildLayer(4);
+    std::vector<int> depth(refined.triangles.size()/3, 0);
+    for (size_t t = 0; t < depth.size(); t++) depth[t] = (refined.triangleInts[0][t] == 10) ? 1 : 0;
+    svrefine::Report rep;
+    svrefine::RefineTriangles(refined, depth, rep);
+    const ll first = refined.numOriginalPoints, numAdded = (ll)(refined.points.size()/3) - first, numTets = (ll)(refined.tetrahedra.size()/4);
+    std::vector<double> volumeBefore((size_t)numTets);
+    for (ll t = 0; t < numTets; t++) volumeBefore[(size_t)t] = Volume(refined.points, &refined.tetrahedra[4*t]);
+    auto leastKept = [&](const svrefine::Mesh &m)
+    {
+      double least = 1.0e30;
+      for (ll t = 0; t < numTets; t++) least = std::min(least, Volume(m.points, &m.tetrahedra[4*t])/volumeBefore[(size_t)t]);
+      return least;
+    };
+    auto targetsAt = [&](double dz)
+    {
+      std::vector<double> targets((size_t)3*numAdded);
+      for (ll k = 0; k < numAdded; k++) for (int c = 0; c < 3; c++) targets[(size_t)3*k + c] = refined.points[(size_t)3*(first + k) + c] + (c == 2 ? dz : 0.0);
+      return targets;
+    };
+    const std::vector<unsigned char> all((size_t)numAdded, 1);
+    {
+      // Two moves on one tetrahedron. The midpoint at (0.5, 0.5) goes 0.044 into the layer, which leaves
+      // the tetrahedra it levers on 0.12 of their volume; then the midpoint at (0.5, 0) goes 0.005 away
+      // from the layer, which tilts the wall under one of those and takes five sixths of what was left.
+      // Held against what the move before left, with nine tenths allowed, both pass, and that
+      // tetrahedron ends with a fiftieth of its volume.
+      auto midpointAt = [&](double x, double y) -> ll
+      {
+        for (ll k = 0; k < numAdded; k++)
+        {
+          const double *p = &refined.points[(size_t)3*(first + k)];
+          if (std::abs(p[0] - x) < 1.0e-12 && std::abs(p[1] - y) < 1.0e-12 && p[2] == 0.0) return k;
+        }
+        return -1;
+      };
+      const ll k1 = midpointAt(0.5, 0.5), k2 = midpointAt(0.5, 0.0);
+      Check(k1 >= 0 && k2 > k1, "the midpoints at (0.5, 0.5) and (0.5, 0) are there, in that order");
+      if (k1 >= 0 && k2 > k1)
+      {
+        const ll order[2] = {k1, k2};
+        const double dz[2] = {-0.044, 0.005};
+        std::vector<double> targets = targetsAt(0.0);
+        std::vector<unsigned char> two((size_t)numAdded, 0);
+        for (int i = 0; i < 2; i++) { targets[(size_t)3*order[i] + 2] += dz[i]; two[(size_t)order[i]] = 1; }
+        // the rule as it was
+        svrefine::Mesh old = refined;
+        std::vector<std::vector<ll> > around((size_t)numAdded);
+        for (ll t = 0; t < numTets; t++) for (int j = 0; j < 4; j++) if (old.tetrahedra[4*t + j] >= first) around[(size_t)(old.tetrahedra[4*t + j] - first)].push_back(t);
+        ll movedOld = 0;
+        for (int i = 0; i < 2; i++)
+        {
+          const ll k = order[i];
+          std::vector<double> was(around[(size_t)k].size());
+          for (size_t m = 0; m < was.size(); m++) was[m] = Volume(old.points, &old.tetrahedra[4*around[(size_t)k][m]]);
+          old.points[(size_t)3*(first + k) + 2] += dz[i];
+          bool ok = true;
+          for (size_t m = 0; m < was.size() && ok; m++) { const double after = Volume(old.points, &old.tetrahedra[4*around[(size_t)k][m]]); if (!(after > 0.0) || after < 0.1*was[m]) ok = false; }
+          if (!ok) old.points[(size_t)3*(first + k) + 2] -= dz[i]; else movedOld++;
+        }
+        svrefine::Mesh sameAllowance = refined, quarter = refined;
+        svrefine::MoveReport movedSame, movedQuarter;
+        svrefine::MoveMidpoints(sameAllowance, targets, two, 0.1, movedSame);
+        svrefine::MoveMidpoints(quarter, targets, two, 0.75, movedQuarter);
+        printf("  two moves on one tetrahedron: held against the move before (nine tenths allowed) %lld move and it is left %.4f of its volume; held against the volume before any, nine tenths allowed: %lld move, %lld refused, the least left %.4f; a quarter allowed: %lld move, %lld refused, the least left %.4f\n",
+            movedOld, leastKept(old), movedSame.numMoved, movedSame.numRefused, leastKept(sameAllowance), movedQuarter.numMoved, movedQuarter.numRefused, leastKept(quarter));
+        Check(movedOld == 2 && leastKept(old) < 0.03, "held against the move before, two moves that each pass leave a tetrahedron under three hundredths of its volume");
+        Check(movedSame.numMoved == 1 && movedSame.numRefused == 1 && leastKept(sameAllowance) >= 0.1 - 1.0e-12, "held against the volume before any, with the same allowance, the second is refused and no tetrahedron is left under a tenth");
+        Check(movedQuarter.numMoved + movedQuarter.numRefused == 2 && movedQuarter.numRefused >= 1 && leastKept(quarter) >= 0.75 - 1.0e-12, "and with a quarter allowed none is left under three quarters");
+      }
+    }
+    {
+      // every midpoint the same way into the layer: 0.01 takes a fifth of the tetrahedra it levers on and is
+      // taken, 0.02 would take two fifths and is refused
+      svrefine::Mesh now = refined;
+      svrefine::MoveReport moved;
+      const ll n = svrefine::MoveMidpoints(now, targetsAt(-0.01), all, 0.75, moved);
+      printf("  %lld midpoints each asked 0.01 into a layer 0.1 deep: %lld move, %lld refused, the least left %.3f\n", numAdded, moved.numMoved, moved.numRefused, leastKept(now));
+      Check(n == numAdded && moved.numMoved == numAdded && moved.numRefused == 0 && std::abs(leastKept(now) - 0.8) < 1.0e-9, "moves that take a fifth of a tetrahedron are all taken");
+      Check(std::abs(moved.longestMove - 0.01) < 1.0e-12 && std::abs(moved.sumOfMoves - 0.01*numAdded) < 1.0e-9, "the report carries the moves taken");
+      error.clear();
+      const bool conformingMoved = svrefine::CheckConforming(now, error);
+      Check(conformingMoved, ("the mesh is conforming after the moves" + (error.empty() ? std::string() : ": " + error)).c_str());
+      svrefine::Mesh deeper = refined;
+      svrefine::MoveMidpoints(deeper, targetsAt(-0.02), all, 0.75, moved);
+      Check(moved.numMoved == 0 && moved.numRefused == numAdded && deeper.points == refined.points, "moves that would take two fifths are all refused, and a refused midpoint is exactly where it was");
+    }
+    {
+      // away from the layer every move of this layer is taken: no tetrahedron of it loses a quarter (on a
+      // curved wall such a move can take volume too, from a piece whose layer point is under the far end
+      // of the cut edge)
+      svrefine::Mesh now = refined;
+      svrefine::MoveReport moved;
+      svrefine::MoveMidpoints(now, targetsAt(0.03), all, 0.75, moved);
+      printf("  each asked 0.03 away from the layer: %lld move, %lld refused, the least left %.3f\n", moved.numMoved, moved.numRefused, leastKept(now));
+      Check(moved.numMoved == numAdded && moved.numRefused == 0, "on this flat layer moves away from it are all taken");
+    }
+    {
+      // through the bottom of the first sublayer: every move would turn a tetrahedron over
+      svrefine::Mesh now = refined;
+      svrefine::MoveReport moved;
+      svrefine::MoveMidpoints(now, targetsAt(-0.2), all, 0.0, moved);
+      Check(moved.numMoved == 0 && moved.numRefused == numAdded && now.points == refined.points, "a move that turns a tetrahedron over is refused whatever part is asked to be kept");
+      // onto one of the two points it halves: the tetrahedra on that edge are left no volume at all
+      std::vector<double> onto = targetsAt(0.0);
+      const ll parent = refined.parents[0];
+      for (int c = 0; c < 3; c++) onto[(size_t)c] = refined.points[(size_t)3*parent + c];
+      std::vector<unsigned char> firstOnly((size_t)numAdded, 0);
+      firstOnly[0] = 1;
+      svrefine::Mesh flat = refined;
+      svrefine::MoveMidpoints(flat, onto, firstOnly, 0.0, moved);
+      Check(moved.numMoved == 0 && moved.numRefused == 1 && flat.points == refined.points, "and so is a move that leaves a tetrahedron no volume");
+    }
+    {
+      // only the points asked for are moved, and a target where the point already is counts as nothing
+      svrefine::Mesh now = refined;
+      std::vector<unsigned char> one((size_t)numAdded, 0);
+      one[0] = 1;
+      svrefine::MoveReport moved;
+      svrefine::MoveMidpoints(now, targetsAt(-0.01), one, 0.75, moved);
+      ll numChanged = 0;
+      for (ll k = 0; k < numAdded; k++) if (now.points[(size_t)3*(first + k) + 2] != refined.points[(size_t)3*(first + k) + 2]) numChanged++;
+      Check(moved.numMoved == 1 && moved.numRefused == 0 && numChanged == 1, "only a point asked for is moved");
+      svrefine::Mesh still = refined;
+      svrefine::MoveMidpoints(still, targetsAt(0.0), all, 0.75, moved);
+      Check(moved.numMoved == 0 && moved.numRefused == 0 && still.points == refined.points, "a target where the point already is moves nothing");
+    }
+  }
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }
