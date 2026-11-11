@@ -623,7 +623,9 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
   tetgenio in, out; in.firstnumber = 0; in.numberofpoints = (int)(shell.points.size()/3); in.pointlist = new REAL[shell.points.size()]; for (size_t i = 0; i < shell.points.size(); i++) in.pointlist[i] = shell.points[i];
   in.numberoffacets = (int)(shell.triangles.size()/3); in.facetlist = new tetgenio::facet[in.numberoffacets]; in.facetmarkerlist = new int[in.numberoffacets]();
   for (int i = 0; i < in.numberoffacets; i++) { tetgenio::facet *f = &in.facetlist[i]; f->numberofpolygons = 1; f->polygonlist = new tetgenio::polygon[1]; f->numberofholes = 0; f->holelist = nullptr; tetgenio::polygon *pg = &f->polygonlist[0]; pg->numberofvertices = 3; pg->vertexlist = new int[3]; for (int j = 0; j < 3; j++) pg->vertexlist[j] = (int)shell.triangles[3*i+j]; in.facetmarkerlist[i] = shell.markers[i]; }
-  tetgenbehavior b; b.plc = 1; b.nobisect = 1; b.nojettison = 1; b.quality = 1; b.minratio = 1.414; b.mindihedral = 10.0; b.neighout = 2; b.quiet = 1;
+  // (the bounds loosened for a layered wall as FillWallMeshWithTetGen loosens them; the easing below is under 10 degrees whatever they are)
+  tetgenbehavior b; b.plc = 1; b.nobisect = 1; b.nojettison = 1; b.quality = 1; b.minratio = numLayers > 1 ? 2.0 : 1.414; b.mindihedral = numLayers > 1 ? 5.0 : 10.0; b.neighout = 2; b.quiet = 1;
+  const double easeDegrees = 10.0;
   bool accepted = true;
   try { tetrahedralize(&b, &in, &out); } catch (int r) { printf("  TetGen error %d\n", r); accepted = false; }
   Check(accepted, "TetGen fills the junction zone");
@@ -649,11 +651,11 @@ static void FillHybridWithLevels(const Interface &iface, int numLayers, const st
     double volumeBefore = 0.0; ll turnedBefore = 0;
     for (size_t t = 0; t + 3 < zoneTets.size(); t += 4) { const double v = TetVolume6(pts, &zoneTets[t]); volumeBefore += std::fabs(v); if (v < 0.0) turnedBefore++; }
     SliverReport sliver;
-    ImproveSlivers(pts, zoneTets, fixedPts, facets, b.mindihedral, 5, 0.35, sliver);
+    ImproveSlivers(pts, zoneTets, fixedPts, facets, easeDegrees, 5, 0.35, sliver);
     double volumeAfter = 0.0; ll turnedAfter = 0;
     for (size_t t = 0; t + 3 < zoneTets.size(); t += 4) { const double v = TetVolume6(pts, &zoneTets[t]); volumeAfter += std::fabs(v); if (v < 0.0) turnedAfter++; }
     printf("  slivers eased: %lld flips across a face, %lld around an edge (%lld tetrahedra -> %lld), %lld moves of %lld points, %lld slivers on the facets split by a point added (%lld refused); under %.0f degrees %lld -> %lld, under 1 degree %lld -> %lld, smallest %.3f -> %.3f; volume %.6g -> %.6g, turned %lld -> %lld\n",
-        sliver.numFlips23, sliver.numFlips32, sliver.numTetrahedra, sliver.numTetrahedraAfter, sliver.numMoves, sliver.numPointsMoved, sliver.numSplits, sliver.numSplitsRefused, b.mindihedral, sliver.numUnderBefore, sliver.numUnderAfter, sliver.numUnder1Before, sliver.numUnder1After, sliver.smallestBefore, sliver.smallestAfter, volumeBefore/6, volumeAfter/6, turnedBefore, turnedAfter);
+        sliver.numFlips23, sliver.numFlips32, sliver.numTetrahedra, sliver.numTetrahedraAfter, sliver.numMoves, sliver.numPointsMoved, sliver.numSplits, sliver.numSplitsRefused, easeDegrees, sliver.numUnderBefore, sliver.numUnderAfter, sliver.numUnder1Before, sliver.numUnder1After, sliver.smallestBefore, sliver.smallestAfter, volumeBefore/6, volumeAfter/6, turnedBefore, turnedAfter);
     Check(sliver.numUnderAfter < sliver.numUnderBefore, "easing the slivers leaves fewer of them");
     Check(turnedAfter == 0 && std::fabs(volumeAfter - volumeBefore) < 1.0e-3*volumeBefore, "easing the slivers turns no tetrahedron and keeps the zones' volume to a thousandth");
   }

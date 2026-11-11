@@ -3666,7 +3666,16 @@ int cvTetGenMeshObject::FillWallMeshWithTetGen(vtkPolyData* surface, vtkDoubleAr
       {
         if (!fillFixed[(size_t)i]) numShellFree++;
       }
-      const double sliverDegrees = shellBehavior != nullptr ? shellBehavior->mindihedral : 10.0;
+      // The angle under which a tetrahedron of the fill is eased. For the
+      // junction zones it is 10 degrees whatever bound the mesher was given:
+      // the mesher cannot mend what lies on its facets, and with the bound
+      // loosened to 5 degrees for a layered wall the easing left everything
+      // between 5 and 10 alone (the user's junction shell, 2026-11-11: 16,973
+      // tetrahedra under 10 degrees left by easing under 5, 541 by easing
+      // under 10, nearly all taken by flips around an edge, in the same six
+      // seconds). The whole wall filled by the mesher keeps the mesher's own
+      // bound: its thin layers hold far more of them, and that was not tried.
+      const double sliverDegrees = hybridActive ? 10.0 : (shellBehavior != nullptr ? shellBehavior->mindihedral : 10.0);
       // The facets as the mesher handed them back, on the boundary and
       // inside the fill, which no flip may take away. A flip rewrites the
       // tetrahedra, which a fill with attributes on them cannot have.
