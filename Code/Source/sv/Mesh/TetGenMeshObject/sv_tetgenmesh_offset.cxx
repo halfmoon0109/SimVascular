@@ -8026,16 +8026,16 @@ int RelaxJunctionBands(JunctionShell &out, const OffsetField &field, const std::
   return 0;
 }
 
-//---------------
-// ExudeSlivers
-//---------------
-// See the header. The smallest dihedral angle of a tetrahedron is the
-// smallest angle between the inward normals of two of its faces; its
-// orientation is the sign of its volume, which no move may change.
-static double TetrahedronMinDihedral(const std::vector<double> &pts, const ll *q)
+//--------------------------
+// SmallestDihedralDegrees
+//--------------------------
+// See the header. The dihedral angle at an edge is the angle between the
+// two faces on it, measured inside the tetrahedron: with the faces'
+// normals taken all inward (or all outward) it is 180 degrees less the
+// angle between the two normals, whichever way the corners are ordered.
+double SmallestDihedralDegrees(const double a[3], const double b[3], const double c[3], const double d[3])
 {
-  const double *P[4];
-  for (int m = 0; m < 4; m++) P[m] = &pts[(size_t)3*q[m]];
+  const double *P[4] = {a, b, c, d};
   const int faces[4][3] = {{1, 2, 3}, {0, 3, 2}, {0, 1, 3}, {0, 2, 1}};
   double N[4][3];
   for (int f = 0; f < 4; f++)
@@ -8052,10 +8052,21 @@ static double TetrahedronMinDihedral(const std::vector<double> &pts, const ll *q
   for (int f = 0; f < 4; f++)
     for (int g = f + 1; g < 4; g++)
     {
-      const double c = std::max(-1.0, std::min(1.0, -Dot(N[f], N[g])));
-      tetMin = std::min(tetMin, std::acos(c)*180.0/M_PI);
+      const double cosine = std::max(-1.0, std::min(1.0, -Dot(N[f], N[g])));
+      tetMin = std::min(tetMin, std::acos(cosine)*180.0/M_PI);
     }
   return tetMin;
+}
+
+//---------------
+// ExudeSlivers
+//---------------
+// See the header. The smallest dihedral angle of a tetrahedron is the
+// smallest angle between the inward normals of two of its faces; its
+// orientation is the sign of its volume, which no move may change.
+static double TetrahedronMinDihedral(const std::vector<double> &pts, const ll *q)
+{
+  return SmallestDihedralDegrees(&pts[(size_t)3*q[0]], &pts[(size_t)3*q[1]], &pts[(size_t)3*q[2]], &pts[(size_t)3*q[3]]);
 }
 static double TetrahedronVolume6(const std::vector<double> &pts, const ll *q)
 {

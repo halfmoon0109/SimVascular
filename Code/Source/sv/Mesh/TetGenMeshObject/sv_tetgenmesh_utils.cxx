@@ -1751,10 +1751,12 @@ int TGenUtils_SetLocalMeshSize(vtkPolyData *pd,int regionId,double size)
 /**
  * @brief The quality of the wall's own tetrahedra, before they are appended
  * to the fluid mesh whose report they would otherwise disappear into: the
- * smallest dihedral angle and how many tetrahedra fall under 1, 5 and 10
- * degrees (the layered fill keeps its layer surfaces as facets, so with thin
- * layers many must be flat), the places of the worst, then the aspect ratio
- * report of TGenUtils_ReportMeshQuality.
+ * smallest dihedral angle (svoffset::SmallestDihedralDegrees, the angle the
+ * fill's easing counts; not vtkMeshQuality's "MinAngle", which is another
+ * number) and how many tetrahedra fall under 1, 5 and 10 degrees (the
+ * layered fill keeps its layer surfaces as facets, so with thin layers many
+ * must be flat), the places of the worst, then the aspect ratio report of
+ * TGenUtils_ReportMeshQuality.
  *
  * The wall's points come in bands - the shell's interface points first, then
  * each layer surface's, then the outer surface's, then the points TetGen
@@ -1781,15 +1783,33 @@ int TGenUtils_ReportWallFillQuality(vtkUnstructuredGrid *wall, const std::vector
     fprintf(stderr,"Cannot compute the quality of an empty wall mesh\n");
     return SV_ERROR;
   }
-  auto angleFilter = vtkSmartPointer<vtkMeshQuality>::New();
-  angleFilter->SetInputData(wall);
-  angleFilter->SetTetQualityMeasureToMinAngle();
-  angleFilter->Update();
-  auto angles = vtkDoubleArray::SafeDownCast(angleFilter->GetOutput()->GetCellData()->GetArray("Quality"));
-  if (angles == nullptr)
+  // The smallest dihedral angle of each tetrahedron, by the measure the
+  // fill's easing counts with. vtkMeshQuality's "MinAngle" is not that
+  // angle: it reads two of the six edges as 180 degrees less their dihedral
+  // angle (see svoffset::SmallestDihedralDegrees), and this report read 69
+  // tetrahedra under 5 degrees in the junction zones where the easing had
+  // just counted 86 (the user's run of 2026-11-11).
+  auto angles = vtkSmartPointer<vtkDoubleArray>::New();
+  angles->SetNumberOfTuples(wall->GetNumberOfCells());
+  for (vtkIdType cellId = 0; cellId < wall->GetNumberOfCells(); cellId++)
   {
-    fprintf(stderr,"Could not compute the wall mesh's dihedral angles\n");
-    return SV_ERROR;
+    double angle = 180.0;
+    if (wall->GetCellType(cellId) == VTK_TETRA)
+    {
+      vtkIdType npts;
+      const vtkIdType *pts;
+      wall->GetCellPoints(cellId, npts, pts);
+      if (npts == 4)
+      {
+        double corner[4][3];
+        for (int j = 0; j < 4; j++)
+        {
+          wall->GetPoint(pts[j], corner[j]);
+        }
+        angle = svoffset::SmallestDihedralDegrees(corner[0], corner[1], corner[2], corner[3]);
+      }
+    }
+    angles->SetValue(cellId, angle);
   }
   const int numBands = (int)bandEnds.size();
   auto bandOf = [&](vtkIdType pointId) -> int

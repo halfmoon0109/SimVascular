@@ -1346,6 +1346,85 @@ static void TestRidgeNormals()
   }
 }
 
+// 9. The smallest dihedral angle of a tetrahedron, which the wall's quality
+// report prints. It is checked against the angle found another way (the
+// two corners off an edge projected onto the plane across the edge), for
+// either order of the corners, and against the reading vtkMeshQuality's
+// "MinAngle" gives, which takes 180 degrees less the dihedral angle at the
+// edges 0-2 and 1-3: a wedge whose flat angle lies on the edge 0-2 is a
+// sliver of 2.9 degrees that that reading calls 89.
+static double DihedralAtEdge(const double P[4][3], int i, int j)
+{
+  int k = -1, l = -1;
+  for (int m = 0; m < 4; m++) if (m != i && m != j) { if (k < 0) k = m; else l = m; }
+  double e[3], u[3], v[3];
+  double le = 0.0;
+  for (int c = 0; c < 3; c++) { e[c] = P[j][c] - P[i][c]; le += e[c]*e[c]; }
+  le = std::sqrt(le);
+  double pu = 0.0, pv = 0.0;
+  for (int c = 0; c < 3; c++) { e[c] /= le; u[c] = P[k][c] - P[i][c]; v[c] = P[l][c] - P[i][c]; pu += u[c]*e[c]; pv += v[c]*e[c]; }
+  double uv = 0.0, uu = 0.0, vv = 0.0;
+  for (int c = 0; c < 3; c++) { u[c] -= pu*e[c]; v[c] -= pv*e[c]; uv += u[c]*v[c]; uu += u[c]*u[c]; vv += v[c]*v[c]; }
+  return std::acos(std::max(-1.0, std::min(1.0, uv/std::sqrt(uu*vv))))*180.0/M_PI;
+}
+static void TestSmallestDihedral()
+{
+  printf("test 9: the smallest dihedral angle of a tetrahedron\n");
+  const int E[6][2] = {{0,1},{0,2},{0,3},{1,2},{1,3},{2,3}};
+  auto smallestByEdges = [&](const double P[4][3], double *asVtkReadsIt)
+  {
+    double smallest = 180.0, vtk = 180.0;
+    for (int e = 0; e < 6; e++)
+    {
+      const double angle = DihedralAtEdge(P, E[e][0], E[e][1]);
+      smallest = std::min(smallest, angle);
+      const bool supplement = (E[e][0] == 0 && E[e][1] == 2) || (E[e][0] == 1 && E[e][1] == 3);
+      vtk = std::min(vtk, supplement ? 180.0 - angle : angle);
+    }
+    if (asVtkReadsIt != nullptr) *asVtkReadsIt = vtk;
+    return smallest;
+  };
+  // the regular tetrahedron: acos(1/3)
+  const double R[4][3] = {{1,1,1}, {1,-1,-1}, {-1,1,-1}, {-1,-1,1}};
+  const double regular = svoffset::SmallestDihedralDegrees(R[0], R[1], R[2], R[3]);
+  Check(std::abs(regular - std::acos(1.0/3.0)*180.0/M_PI) < 1.0e-9, "the regular tetrahedron's is acos(1/3), 70.53 degrees");
+  Check(std::abs(svoffset::SmallestDihedralDegrees(R[0], R[2], R[1], R[3]) - regular) < 1.0e-9, "and the same with two corners exchanged");
+  // a wedge: corners 0 and 2 are the ends of an edge the two other corners lie close to each other across
+  const double W[4][3] = {{0,0,0}, {0.5,1.0,0.025}, {1,0,0}, {0.5,1.0,-0.025}};
+  double wedgeAsVtk = 0.0;
+  const double wedgeByEdges = smallestByEdges(W, &wedgeAsVtk);
+  const double wedge = svoffset::SmallestDihedralDegrees(W[0], W[1], W[2], W[3]);
+  printf("  a wedge with its flat angle on the edge 0-2: %.3f degrees (by the edges %.3f; as vtkMeshQuality's MinAngle reads it %.3f)\n", wedge, wedgeByEdges, wedgeAsVtk);
+  Check(std::abs(wedge - wedgeByEdges) < 1.0e-9 && std::abs(wedge - 2.0*std::atan(0.025)*180.0/M_PI) < 1.0e-9, "a wedge of 2.86 degrees on the edge 0-2 is read as that");
+  Check(wedgeAsVtk > 50.0, "which the reading with the supplement at the edges 0-2 and 1-3 calls over 50 degrees");
+  // a tetrahedron with a face of no area
+  const double F[4][3] = {{0,0,0}, {1,0,0}, {2,0,0}, {0,1,1}};
+  Check(svoffset::SmallestDihedralDegrees(F[0], F[1], F[2], F[3]) == 0.0, "a tetrahedron with a face of no area gives 0");
+  // tetrahedra of every shape, in both orientations, against the angle found by the edges
+  unsigned long long state = 88172645463325252ULL;
+  auto next = [&]() { state ^= state << 13; state ^= state >> 7; state ^= state << 17; return (double)(state >> 11)/9007199254740992.0; };
+  double largestDifference = 0.0;
+  int numMissedByVtk = 0, numCalledByVtk = 0, numSlivers = 0;
+  for (int trial = 0; trial < 4000; trial++)
+  {
+    double P[4][3];
+    const double flat = trial%4 == 1 ? std::pow(10.0, -3.0*next()) : 1.0, thin = trial%4 == 2 ? std::pow(10.0, -3.0*next()) : 1.0;
+    for (int m = 0; m < 4; m++) { P[m][0] = 2.0*next() - 1.0; P[m][1] = (2.0*next() - 1.0)*thin; P[m][2] = (2.0*next() - 1.0)*flat*thin; }
+    if (trial%4 == 3) for (int c = 0; c < 3; c++) P[3][c] = P[0][c] + 0.01*(2.0*next() - 1.0);
+    double asVtk = 0.0;
+    const double byEdges = smallestByEdges(P, &asVtk);
+    const double direct = svoffset::SmallestDihedralDegrees(P[0], P[1], P[2], P[3]);
+    const double mirrored = svoffset::SmallestDihedralDegrees(P[1], P[0], P[2], P[3]);
+    largestDifference = std::max(largestDifference, std::max(std::abs(direct - byEdges), std::abs(mirrored - byEdges)));
+    if (byEdges < 10.0) { numSlivers++; if (asVtk >= 10.0) numMissedByVtk++; }
+    else if (asVtk < 10.0) numCalledByVtk++;
+  }
+  printf("  4000 tetrahedra: largest difference from the angle by the edges %.3g degrees; of %d under 10 degrees the other reading misses %d, and calls %d under 10 that are not\n",
+      largestDifference, numSlivers, numMissedByVtk, numCalledByVtk);
+  Check(largestDifference < 1.0e-6, "it is the smallest of the six angles found edge by edge, for either order of the corners");
+  Check(numMissedByVtk > 0 && numCalledByVtk > 0, "and not the reading with the supplement at two edges, which misses some slivers and calls some that are not");
+}
+
 int main()
 {
   TestFoldCount();
@@ -1363,6 +1442,7 @@ int main()
   TestMicroEdges();
   TestSplitSliver();
   TestRidgeNormals();
+  TestSmallestDihedral();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }

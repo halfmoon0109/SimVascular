@@ -955,6 +955,24 @@ int BuildJunctionShell(const Interface &input, const OffsetField &field, const s
  * @return The number of point moves made.
  */
 /**
+ * @brief The smallest of the six dihedral angles of a tetrahedron, in
+ * degrees: the angle inside the tetrahedron between the two faces on an
+ * edge, the smallest over its edges. It does not depend on the order of
+ * the corners; a tetrahedron with a face of no area gives 0.
+ *
+ * This is what the fill's easing counts and what the wall's quality report
+ * prints. vtkMeshQuality's "MinAngle" of a tetrahedron is not this angle:
+ * with the corners in the order 0 1 2 3 it reads the edges 0-2 and 1-3 as
+ * 180 degrees less their dihedral angle (checked against VTK 9.4.2 on
+ * random tetrahedra to 1e-11 of a degree, 2026-11-11), so that a sliver
+ * whose flat angle lies on one of those two edges is missed and a
+ * tetrahedron with an angle near 180 degrees there is called a sliver. On
+ * the junction fill of the user's model it read 68 tetrahedra under 5
+ * degrees where there were 82, and 11,913 under 10 where there were 16,973.
+ */
+double SmallestDihedralDegrees(const double a[3], const double b[3], const double c[3], const double d[3]);
+
+/**
  * @brief What easing a fill's slivers did: the tetrahedra under the
  * threshold and under one degree before and after, the smallest dihedral
  * angle, the flips taken and the points moved.
