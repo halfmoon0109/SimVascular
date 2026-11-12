@@ -732,7 +732,8 @@ static void FillHybrid(const Interface &iface, int numLayers)
   if (BuildOffsetSurfaces(iface, options, fractions, Delaunay, nullptr, surfs, reps, err) != 0) { printf("  FAIL build: %s\n", err.c_str()); numFailed++; return; }
   for (size_t k = 0; k < reps.size(); k++)
     printf("  level %zu valleys: %lld edges chorded one as marched, %lld split at the valley, %lld corners moved onto it, %lld left\n", k + 1, reps[k].numCreaseEdges, reps[k].numCreasePointsInserted, reps[k].numCreasePointsSnapped, reps[k].numCreaseCutsRefused);
-  printf("  levels nested: %lld point moves pulling a level from under the valleys of the one over it\n", reps.back().numLevelPointsPulledIn);
+  printf("  levels nested: %lld point moves pulling a level from under the valleys of the one over it, %lld chords of a lower level cut at its own valley, %lld crossing pairs left\n",
+      reps.back().numLevelPointsPulledIn, reps.back().numLevelChordsCut, reps.back().numLevelPairsLeft);
   for (size_t k = 1; k < surfs.size(); k++)
   {
     std::vector<double> pts(surfs[k-1].points); std::vector<ll> tris(surfs[k-1].triangles);
@@ -887,6 +888,126 @@ static void TestWideningAtRims()
   Check(!notchesFar.empty() && notchesTaken == 0, "the smoothing left the zone away from the widening's front alone");
 }
 
+// 10. The nesting of the levels where the moves are not enough: a valley
+// cut into a level over a chord left in the one under it. The moves that
+// part such a pair are bound to half a layer, and a chord stands over its
+// level in proportion to its length, so on an interface whose edge is
+// several layers long they leave pairs crossing, and the lower level's
+// chord is cut at its own valley instead (the user's model, 2026-11-11:
+// the first level's chords left between sheets 121.3 degrees apart under
+// the second level's valley, the edge four layers long, four crossing
+// pairs in the shell). Two states: a coarse junction of four layers built
+// as it is, where the moves alone left six pairs crossing before there
+// was a cut; and one made on purpose, every level but the outer as
+// marched, chords and all, under the outer level with its valley cut. The
+// branch meets its parent at 90 degrees, so the cut between sheets turned
+// more than 120 degrees is not what this exercises; the user's model is.
+static ll CrossingPairsBetween(const Surface &lower, const Surface &upper, const OffsetField &field)
+{
+  std::vector<double> pts(lower.points); std::vector<ll> tris(lower.triangles);
+  const ll base = (ll)(pts.size()/3), ntLower = (ll)(tris.size()/3);
+  pts.insert(pts.end(), upper.points.begin(), upper.points.end());
+  for (size_t i = 0; i < upper.triangles.size(); i++) tris.push_back(upper.triangles[i] + base);
+  std::vector<svenvelope::CrossingPair> pairs;
+  svenvelope::ListCrossingPairs(pts, tris, (size_t)1 << 20, pairs);
+  ll n = 0;
+  for (size_t q = 0; q < pairs.size(); q++)
+  {
+    ll a = pairs[q].a, b = pairs[q].b;
+    if (a > b) std::swap(a, b);
+    if (!(a < ntLower && b >= ntLower)) continue;
+    // not past a cap: the domes over the collars cross between the levels and come off with the trim
+    double c[3] = {0.0, 0.0, 0.0};
+    for (int j = 0; j < 3; j++) for (int k = 0; k < 3; k++) c[k] += pts[(size_t)3*tris[(size_t)3*a + j] + k]/3.0;
+    double size, thickness; ll rim;
+    field.Local(c, size, thickness, rim);
+    if (rim < 0) n++;
+  }
+  return n;
+}
+// Every level free of crossings with itself, closed, and with a vessel end recorded for each of its points.
+static void CheckNestedLevels(const std::vector<Surface> &levels)
+{
+  bool sound = true, owned = true, closed = true;
+  for (size_t k = 0; k < levels.size(); k++)
+  {
+    std::vector<unsigned char> crossing; double at[3];
+    if (svenvelope::CountCrossingTriangles(levels[k].points, levels[k].triangles, crossing, at) != 0) sound = false;
+    if (levels[k].pointRim.size() != levels[k].points.size()/3) owned = false;
+    std::map<std::pair<ll, ll>, int> use;
+    for (size_t i = 0; i + 2 < levels[k].triangles.size(); i += 3)
+      for (int j = 0; j < 3; j++)
+      {
+        const ll a = levels[k].triangles[i + j], b = levels[k].triangles[i + (j + 1)%3];
+        use[std::make_pair(std::min(a, b), std::max(a, b))]++;
+      }
+    for (std::map<std::pair<ll, ll>, int>::const_iterator it = use.begin(); it != use.end(); ++it) if (it->second != 2) closed = false;
+  }
+  Check(sound, "no level passes through itself after the cut");
+  Check(closed, "every level is still closed, each edge on two triangles");
+  Check(owned, "every point of a level has its vessel end recorded");
+}
+static void TestNestingCut()
+{
+  printf("test 10: levels whose triangles pass through each other where the moves end - the chords of the lower one cut at its valley\n");
+  {
+    printf("  a: a coarse junction of four layers, built as it is\n");
+    Interface iface; MakeJunction(0.3, 0.2, 0.4, 20, 10, iface);
+    const std::vector<double> fractions = {0.25, 0.5, 0.75, 1.0};
+    Options options;
+    std::vector<Surface> levels; std::vector<Report> reports; std::string err;
+    if (BuildOffsetSurfaces(iface, options, fractions, Delaunay, nullptr, levels, reports, err) != 0) { printf("  FAIL build: %s\n", err.c_str()); numFailed++; return; }
+    OffsetField field; Report fieldReport;
+    if (field.Build(iface, fieldReport, err, options.chordTolerance) != 0) { printf("  FAIL field: %s\n", err.c_str()); numFailed++; return; }
+    ll after = 0;
+    for (size_t k = 0; k + 1 < levels.size(); k++) after += CrossingPairsBetween(levels[k], levels[k + 1], field);
+    printf("  the nesting: %lld point moves, %lld chords cut, %lld pairs left; %lld crossing pairs between the levels by a count of the result\n",
+        reports.back().numLevelPointsPulledIn, reports.back().numLevelChordsCut, reports.back().numLevelPairsLeft, after);
+    Check(reports.back().numLevelChordsCut > 0, "the moves, run to their end, leave pairs crossing: a chord of the lower level is cut");
+    Check(reports.back().numLevelPairsLeft == 0 && after == 0, "no pair is left crossing, by the nesting's count and by a count of its result");
+    bool counts = true;
+    for (size_t k = 0; k < levels.size(); k++)
+      if (reports[k].numPoints != (ll)(levels[k].points.size()/3) || reports[k].numTriangles != (ll)(levels[k].triangles.size()/3)) counts = false;
+    Check(counts, "each level's report counts its points and triangles as they are after the nesting");
+    CheckNestedLevels(levels);
+  }
+  {
+    printf("  b: two levels as marched under a level with its valley cut, on a coarse junction of thin layers\n");
+    Interface iface; MakeJunction(0.12, 0.12, 0.3, 20, 8, iface);
+    const std::vector<double> fractions = {1.0/3.0, 2.0/3.0, 1.0};
+    Options options, asMarched; asMarched.creaseDegrees = 0.0;
+    std::vector<Surface> cut, marched; std::vector<Report> cutReports, marchedReports; std::string err;
+    if (BuildOffsetSurfaces(iface, options, fractions, Delaunay, nullptr, cut, cutReports, err) != 0 ||
+        BuildOffsetSurfaces(iface, asMarched, fractions, Delaunay, nullptr, marched, marchedReports, err) != 0) { printf("  FAIL build: %s\n", err.c_str()); numFailed++; return; }
+    OffsetField field; Report fieldReport;
+    if (field.Build(iface, fieldReport, err, options.chordTolerance) != 0) { printf("  FAIL field: %s\n", err.c_str()); numFailed++; return; }
+    std::vector<Surface> levels(marched);
+    levels.back() = cut.back();
+    const ll before = CrossingPairsBetween(levels[1], levels[2], field);
+    const size_t pointsBefore = levels[1].points.size()/3;
+    Report nest;
+    NestOffsetSurfaces(field, options, fractions, levels, nest);
+    ll after = 0;
+    for (size_t k = 0; k + 1 < levels.size(); k++) after += CrossingPairsBetween(levels[k], levels[k + 1], field);
+    const size_t gained = levels[1].points.size()/3 - pointsBefore;
+    printf("  %lld crossing pairs between the second level as marched and the outer level cut; the nesting: %lld point moves, %lld chords cut, %lld pairs left; %lld crossing pairs between the levels after; the second level has %zu points more\n",
+        before, nest.numLevelPointsPulledIn, nest.numLevelChordsCut, nest.numLevelPairsLeft, after, gained);
+    Check(before > 0, "the level as marched passes through the valley cut into the level over it");
+    Check(nest.numLevelChordsCut > 0, "the moves, run to their end, leave pairs crossing: chords of the lower level are cut");
+    Check(nest.numLevelPairsLeft == 0 && after == 0, "no pair is left crossing, by the nesting's count and by a count of its result");
+    CheckNestedLevels(levels);
+    // the points the cut put into the second level lie between the first level and the outer one
+    Check(gained > 0, "the cut put points into the second level");
+    bool between = true;
+    for (size_t v = pointsBefore; v < levels[1].points.size()/3; v++)
+    {
+      const double *p = &levels[1].points[3*v];
+      if (!(field.Evaluate(p, fractions[0]) > 0.0 && field.Evaluate(p, fractions[2]) < 0.0)) between = false;
+    }
+    Check(between, "and they lie over the first level and under the outer one");
+  }
+}
+
 int main()
 {
   {
@@ -1014,6 +1135,7 @@ int main()
     FillHybrid(iface, 1);
   }
   TestWideningAtRims();
+  TestNestingCut();
   printf("%s: %d failed\n", numFailed == 0 ? "PASS" : "FAIL", numFailed);
   return numFailed == 0 ? 0 : 1;
 }

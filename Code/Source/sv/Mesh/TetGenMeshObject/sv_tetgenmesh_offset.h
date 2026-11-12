@@ -199,6 +199,11 @@ struct Options
   // contact zones, which no widening of the junction zone could mend). The
   // points on the valley stay on it through the decimation. Zero or less
   // leaves the contour as marched.
+  // Which chords are cut is decided level by level, by the sheets each
+  // chord's own ends stand on, so a valley can be cut into one level over
+  // a chord left in the one under it; where such a pair crosses and half a
+  // layer of point moves does not part it, the chord left is cut after all
+  // (NestOffsetSurfaces).
   double creaseDegrees = 35.0;
   double creaseChord = 0.1;
   double creaseSnap = 0.5;
@@ -259,6 +264,8 @@ struct Report
   long long numCreaseCutsRefused = 0;    // of them, left as they were: the valley not found under the chord
   long long numCreasePointsPartial = 0;  // of the split, the point raised toward the chord so that no half turned over (2026-10-23)
   long long numLevelPointsPulledIn = 0;  // on the last level's report: point moves of the lower levels pulling their triangles from under a valley cut into the level over them (NestLevels)
+  long long numLevelChordsCut = 0;       // on the last level's report: chords of a lower level cut at its own valley where the moves, run to their end, could not part it from the level over it (NestLevels)
+  long long numLevelPairsLeft = 0;       // on the last level's report: crossing pairs between two levels, away from the vessel ends, that neither the moves nor a cut parted; the shell will have them
   std::vector<double> facingGap;         // per interface point: the distance to the wall facing it (the nearest interface triangle whose normal is within 55 degrees of this point's normal reversed), -1 for none; where it is under the two walls' thicknesses together the solid merges them (2026-10-24)
   std::vector<long long> facingTriangle; // per interface point: that triangle, -1 for none
   long long numUnfolded = 0;             // edges whose two triangles lay on each other within a degree, flipped, collapsed or taken out with the spike point they stand on by the decimation's last pass
@@ -337,6 +344,29 @@ int BuildOffsetSurfaces(const Interface &input, const Options &options,
     const std::vector<double> &fractions, DelaunayFunction delaunay, void *context,
     std::vector<Surface> &surfaces, std::vector<Report> &reports,
     std::string &error, ProgressFunction progress = nullptr);
+
+class OffsetField;
+
+/**
+ * @brief The last step of BuildOffsetSurfaces, on its own for its test:
+ * the levels nested again where the triangles of one pass through those of
+ * the level over it (a valley cut into a level over a chord left in the one
+ * under it). The lower level's points are pulled in and the upper's raised
+ * out, each by half a layer at most; what that leaves has the lower
+ * level's chords cut at the lower level's own valley, between sheets
+ * turned more than 120 degrees too, and a cut is kept only if it leaves
+ * fewer crossing pairs with the levels on either side than it found.
+ * @param field The field the surfaces are levels of.
+ * @param options The options the levels were built with (creaseDegrees
+ * and the other crease settings are what is read; nothing is done when
+ * creaseDegrees is not positive).
+ * @param fractions The fraction of the thickness of each surface, rising.
+ * @param surfaces The levels before their trim at the caps, changed in place.
+ * @param report Its numLevelPointsPulledIn, numLevelChordsCut and
+ * numLevelPairsLeft are set.
+ */
+void NestOffsetSurfaces(const OffsetField &field, const Options &options, const std::vector<double> &fractions,
+    std::vector<Surface> &surfaces, Report &report);
 
 /**
  * @brief The field the surface is the zero level of, for measuring: the
