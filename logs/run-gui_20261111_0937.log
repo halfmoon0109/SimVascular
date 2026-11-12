@@ -920,3 +920,6 @@ Problem with vessel wall meshing
 !5947.342! WARNING: QPainter::end: Painter ended with 2 saved states
 !5947.343! WARNING: QPainter::end: Painter ended with 2 saved states
 !5947.343! WARNING: QPainter::end: Painter ended with 2 saved states
+[5949.495] Closing workbench...
+!5949.996! WARNING: Empty filename passed to function
+[5950.058] closing logfile (/home/sv/.local/share/SimVascular/SimVascularApplication_1346365552482340104/data/9/mitk-0.log)
